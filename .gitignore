@@ -1,0 +1,28 @@
+# Secrets / credentials — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ecdsa
+id_ed25519
+credentials.json
+secrets.*
+.netrc
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Dependency / build artifacts
+node_modules/
+dist/
+build/
+__pycache__/
+*.log

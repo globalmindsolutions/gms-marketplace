@@ -1,0 +1,23 @@
+# Pre-commit hooks for autonomous-coding-skills
+# Install once per clone:  pre-commit install
+# Run on all files:        pre-commit run --all-files
+repos:
+  # Secret scanning — blocks commits containing credentials/keys/tokens
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # General hygiene / footguns
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key          # catches PEM/SSH private keys
+      - id: check-added-large-files      # blocks accidental large blobs
+        args: ["--maxkb=5000"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict         # blocks unresolved conflict markers
+      - id: check-yaml
+      - id: check-json
+      - id: mixed-line-ending

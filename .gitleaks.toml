@@ -1,0 +1,17 @@
+# Gitleaks configuration — extends the built-in default ruleset.
+# https://github.com/gitleaks/gitleaks
+[extend]
+useDefault = true
+
+# Allowlist for known-safe patterns (example/sample files, etc.).
+# Add narrowly-scoped exceptions here rather than disabling rules.
+[allowlist]
+description = "Global allowlist"
+paths = [
+  '''(.*?)(jpg|gif|png|svg|ico|woff|woff2|ttf|eot)$''',
+  '''.*\.lock$''',
+]
+# Example: allow obvious placeholder values in docs/tests.
+regexes = [
+  '''(?i)(example|sample|dummy|placeholder|changeme|your[-_]?(key|token|secret))''',
+]
