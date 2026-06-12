@@ -294,5 +294,3 @@ From then on the product is effectively brownfield: the pipeline maintains
 the architecture docs as changes land, the PRD is amended via `/create-prd`
 re-runs (each amendment a new ticket) when scope grows, and
 `/create-project` is never needed again.
-
-

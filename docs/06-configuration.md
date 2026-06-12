@@ -209,5 +209,3 @@ configured tracker's CLI is installed and authenticated.
   }
 }
 ```
-
-
