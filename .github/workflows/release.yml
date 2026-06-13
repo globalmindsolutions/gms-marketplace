@@ -35,9 +35,15 @@ jobs:
       - name: Read plugin version
         id: version
         run: |
-          VERSION="$(python3 -c 'import json; print(json.load(open("plugins/acs/.claude-plugin/plugin.json"))["version"])')"
+          MANIFEST="plugins/acs/.claude-plugin/plugin.json"
+          VERSION="$(python3 -c "import json; print(json.load(open('${MANIFEST}'))['version'])")"
+          # Prefer the human-readable displayName for the release title; fall back
+          # to name if displayName is absent.
+          TITLE="$(python3 -c "import json; m=json.load(open('${MANIFEST}')); print(m.get('displayName') or m['name'])")"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
           echo "Plugin version: ${VERSION}"
+          echo "Release title: ${TITLE}"
 
       - name: Check whether tag already exists
         id: tag
@@ -89,7 +95,7 @@ jobs:
           TAG="v${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "acs ${TAG}"
+          git tag -a "${TAG}" -m "${{ steps.version.outputs.title }} ${TAG}"
           git push origin "${TAG}"
 
       - name: Create GitHub release
@@ -99,5 +105,5 @@ jobs:
         run: |
           TAG="v${{ steps.version.outputs.version }}"
           gh release create "${TAG}" \
-            --title "acs ${TAG}" \
+            --title "${{ steps.version.outputs.title }} ${TAG}" \
             --notes-file release-notes.md
