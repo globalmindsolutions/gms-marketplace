@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE_SCRIPTS = os.path.join(REPO_ROOT, "plugins", "acs", "hooks", "scripts")
@@ -242,6 +243,51 @@ class Sandbox:
         except (json.JSONDecodeError, TypeError):
             out["ok"] = False
         return out
+
+    def trigger(self, request, allow=("Skill",), timeout=90):
+        """Return the first skill the model picks for a natural-language request.
+
+        Drives `claude -p <request>` with stream-json and only the `Skill` tool
+        allowed, and returns the `skill` of the first `Skill` tool_use (e.g.
+        "acs:create-ticket"), or None if no skill was invoked before the model
+        stopped or `timeout` elapsed. This is the description-trigger test
+        (E1.2): does the right skill fire for a request? The process is killed
+        the instant the first Skill call appears, so each probe costs only the
+        time-to-route — the skill body never executes.
+        """
+        cmd = [
+            "claude", "-p", request,
+            "--output-format", "stream-json", "--verbose",
+            "--permission-mode", "acceptEdits",
+            "--allowedTools", " ".join(allow),
+        ]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, cwd=self.repo)
+        found = None
+        deadline = time.time() + timeout
+        try:
+            for line in proc.stdout:
+                if time.time() > deadline:
+                    break
+                try:
+                    ev = json.loads(line)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if ev.get("type") != "assistant":
+                    continue
+                for block in ev.get("message", {}).get("content", []):
+                    if block.get("type") == "tool_use" and block.get("name") == "Skill":
+                        found = (block.get("input") or {}).get("skill")
+                        break
+                if found:
+                    break
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        return found
 
     # -- artifact assertions ---------------------------------------------- #
 

@@ -67,7 +67,10 @@ thing.
 
 - **E1.1 (done)** — scenario runner + sandbox + artifact assertions. Seeded
   with `install_gate_smoke` (free, G1) and `create_ticket_artifacts` (paid, G1).
-- **E1.2** — description-trigger evals for all 12 skills.
+- **E1.2 (done)** — `skill_triggers` (paid): one natural-language request per
+  skill (never naming it) must route to that skill; all 12 green. The
+  `trigger()` helper captures the first `Skill` call and kills the run, so the
+  body never executes — each probe costs only the time-to-route.
 - **E1.3 (in progress)** — per-goal scenarios. Added `resume_and_verify`
   (paid, G2 + G3): seeds a code-ready pipeline for free, then one fresh
   `claude -p` `code` session — told only the ticket id — must resume from the
