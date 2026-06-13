@@ -13,6 +13,15 @@ GitHub release using that section as the notes.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-13
+
+### Fixed
+
+- Plugin failed to load on install with "Duplicate hooks file detected"
+  because `plugin.json` declared `"hooks": "./hooks/hooks.json"` — a file
+  Claude Code already auto-loads by convention. Removed the redundant
+  manifest key so the plugin loads cleanly on a fresh install (GMS-5).
+
 ## [0.1.0] - 2026-06-12
 
 Initial release.
@@ -53,5 +62,6 @@ Initial release.
   release from the matching changelog section when the plugin manifest
   version changes on `main`.
 
-[Unreleased]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/globalmindsolutions/gms-marketplace/releases/tag/v0.1.0
