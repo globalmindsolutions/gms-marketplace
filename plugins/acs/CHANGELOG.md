@@ -53,5 +53,5 @@ Initial release.
   release from the matching changelog section when the plugin manifest
   version changes on `main`.
 
-[Unreleased]: https://github.com/globalmindsolutions/acs/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/globalmindsolutions/acs/releases/tag/v0.1.0
+[Unreleased]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/globalmindsolutions/gms-marketplace/releases/tag/v0.1.0
