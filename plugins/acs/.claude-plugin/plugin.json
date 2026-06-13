@@ -16,6 +16,5 @@
     "prd",
     "architecture",
     "code-review"
-  ],
-  "hooks": "./hooks/hooks.json"
+  ]
 }
