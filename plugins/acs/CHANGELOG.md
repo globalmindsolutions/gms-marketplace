@@ -13,6 +13,17 @@ GitHub release using that section as the notes.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-13
+
+### Changed
+
+- **Breaking**: marketplace `name` renamed from `gms-plugins` to `gms-marketplace`.
+  Existing consumers must migrate:
+  1. Rename the key in `extraKnownMarketplaces` (managed settings or
+     `~/.claude/settings.json`) from `"gms-plugins"` to `"gms-marketplace"`.
+  2. Re-run `claude plugin install acs@gms-marketplace` (the old
+     `acs@gms-plugins` reference no longer resolves).
+
 ## [0.1.2] - 2026-06-13
 
 ### Fixed
@@ -73,7 +84,8 @@ Initial release.
   release from the matching changelog section when the plugin manifest
   version changes on `main`.
 
-[Unreleased]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/globalmindsolutions/gms-marketplace/releases/tag/v0.1.0
