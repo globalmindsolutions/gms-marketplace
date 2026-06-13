@@ -8,10 +8,12 @@ from . import s01_install_gate_smoke
 from . import s02_create_ticket_artifacts
 from . import s03_resume_and_verify
 from . import s04_skill_triggers
+from . import s05_session_end
 
 SCENARIOS = [
     s01_install_gate_smoke,
     s02_create_ticket_artifacts,
     s03_resume_and_verify,
     s04_skill_triggers,
+    s05_session_end,
 ]

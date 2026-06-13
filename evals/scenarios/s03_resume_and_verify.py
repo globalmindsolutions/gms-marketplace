@@ -1,11 +1,13 @@
-"""s03 — resume-from-state + verifier-clean (paid, G2 + G3).
+"""s03 — resume-from-state + verifier-clean + PR-size (paid, G2 + G3 + G4).
 
 Seeds the pipeline to "ready for /acs:code" deterministically (mint a task,
 mark create-spec done, drop a real spec file) — no `claude` spent yet — then
 runs ONE fresh `claude -p` session that is told *only the ticket id*. The
 session must discover the work from the ticket's specs in the workspace
-(resume from state only, **G2**), implement it via the code TDD cycle, and pass
-the verifier so the create-pr gate opens (verifier-clean, **G3**).
+(resume from state only, **G2**), implement it via the code TDD cycle and pass
+the verifier so the create-pr gate opens (verifier-clean, **G3**), and the
+resulting change must stay under the ~400-line PR-size cap (**G4**, measured as
+the repo diff since the seed — no forge needed).
 
 The G2 evidence is concrete: the prompt never names "/health", so an
 implementation that wires `/health` can only have come from reading the seeded
@@ -19,8 +21,8 @@ from harness import Sandbox, Check
 META = {
     "name": "resume_and_verify",
     "tier": "paid",
-    "goal": "G2+G3",
-    "summary": "fresh code session resumes from workspace specs and verifies clean",
+    "goal": "G2+G3+G4",
+    "summary": "fresh code session resumes from specs, verifies clean, under PR-size cap",
 }
 
 SPEC = """# Spec 01 — GET /health
@@ -95,5 +97,10 @@ def run():
         pr_gate, err = sb.gate("create-pr", tid)
         check.ok("verifier-clean: create-pr gate opened after code",
                  pr_gate == 0, "exit=%s %s" % (pr_gate, err))
+
+        # G4: the change a PR would carry stays under the ~400-line cap
+        lines = sb.changed_lines()
+        check.ok("PR-size under cap (G4): %d <= 400 changed lines" % lines,
+                 lines <= 400, "lines=%d" % lines)
 
     return check
