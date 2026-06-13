@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolutions/acs/plugins/acs/schemas/clarifications.schema.json",
+  "title": "acs clarifications.json",
+  "description": "Per-ticket requirement-clarification ledger at <workspace>/<repo>/<ticket-id>/clarifications.json — the single source of truth for every ambiguity resolved (or assumed) during the pipeline. Append-only via clarify.py; coordinators read it before asking the user anything (re-asking an answered question is a defect).",
+  "type": "object",
+  "required": ["ticket_id", "clarifications"],
+  "properties": {
+    "ticket_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+    "clarifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "skill", "question", "status", "asked_at"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^C-[0-9]+$"},
+          "skill": {
+            "enum": ["create-prd", "create-architecture", "create-project", "create-ticket", "create-design", "create-spec", "code", "create-pr", "merge-pr"]
+          },
+          "question": {"type": "string", "minLength": 1},
+          "answer": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "source": {
+            "description": "user = the user decided; assumption = recorded default pending user confirmation (requires rationale).",
+            "oneOf": [{"enum": ["user", "assumption"]}, {"type": "null"}]
+          },
+          "rationale": {
+            "description": "Why an assumption was needed and why this default; required when source is assumption.",
+            "oneOf": [{"type": "string"}, {"type": "null"}]
+          },
+          "status": {"enum": ["open", "answered", "assumed", "withdrawn"]},
+          "asked_at": {"type": "string", "format": "date-time"},
+          "answered_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  acs-messages.xsd — formal schema for coordinator <-> subagent XML messages.
+
+  Three root elements:
+    * task    — coordinator -> subagent assignment (also /ship -> step-coordinator briefs,
+                phase="coordinate")
+    * result  — subagent -> coordinator outcome
+    * handoff — step-coordinator -> /ship compact handoff (bounded to ~1 KB of text;
+                full detail lives in the workspace state files)
+
+  Validate with:  python3 hooks/scripts/validate_xml.py <file>
+  (uses xmllint - -schema when available, stdlib structural checks otherwise)
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <xs:simpleType name="skillName">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="create-prd"/>
+      <xs:enumeration value="create-architecture"/>
+      <xs:enumeration value="create-project"/>
+      <xs:enumeration value="create-ticket"/>
+      <xs:enumeration value="create-design"/>
+      <xs:enumeration value="create-spec"/>
+      <xs:enumeration value="code"/>
+      <xs:enumeration value="create-pr"/>
+      <xs:enumeration value="merge-pr"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="phaseName">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="plan"/>
+      <xs:enumeration value="execute"/>
+      <xs:enumeration value="verify"/>
+      <xs:enumeration value="coordinate"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ticketId">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Z][A-Z0-9]*-[0-9]+"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="resultStatus">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="completed"/>
+      <xs:enumeration value="failed"/>
+      <xs:enumeration value="needs_input"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="handoffStatus">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="completed"/>
+      <xs:enumeration value="failed"/>
+      <xs:enumeration value="interrupted"/>
+      <xs:enumeration value="handed_off"/>
+      <xs:enumeration value="needs_input"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="severity">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="blocking"/>
+      <xs:enumeration value="info"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="fileList">
+    <xs:sequence>
+      <xs:element name="file" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="constraintList">
+    <xs:sequence>
+      <xs:element name="constraint" minOccurs="0" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:simpleContent>
+            <xs:extension base="xs:string">
+              <xs:attribute name="name" type="xs:string" use="required"/>
+            </xs:extension>
+          </xs:simpleContent>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="findingList">
+    <xs:sequence>
+      <xs:element name="finding" minOccurs="0" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:simpleContent>
+            <xs:extension base="xs:string">
+              <xs:attribute name="severity" type="severity" default="blocking"/>
+              <xs:attribute name="dimension" type="xs:string"/>
+              <xs:attribute name="file" type="xs:string"/>
+            </xs:extension>
+          </xs:simpleContent>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="questionList">
+    <xs:sequence>
+      <xs:element name="question" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="errorList">
+    <xs:sequence>
+      <xs:element name="error" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="task">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="objective" type="xs:string"/>
+        <xs:element name="inputs" type="fileList" minOccurs="0"/>
+        <xs:element name="constraints" type="constraintList" minOccurs="0"/>
+        <xs:element name="context" type="xs:string" minOccurs="0"/>
+      </xs:sequence>
+      <xs:attribute name="skill" type="skillName" use="required"/>
+      <xs:attribute name="phase" type="phaseName" use="required"/>
+      <xs:attribute name="ticket-id" type="ticketId" use="required"/>
+      <xs:attribute name="iteration" type="xs:positiveInteger" default="1"/>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="result">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="outputs" type="fileList" minOccurs="0"/>
+        <xs:element name="findings" type="findingList" minOccurs="0"/>
+        <xs:element name="errors" type="errorList" minOccurs="0"/>
+        <xs:element name="questions" type="questionList" minOccurs="0"/>
+        <xs:element name="metrics" minOccurs="0">
+          <xs:complexType>
+            <xs:attribute name="tokens-input" type="xs:nonNegativeInteger" default="0"/>
+            <xs:attribute name="tokens-output" type="xs:nonNegativeInteger" default="0"/>
+            <xs:attribute name="cost-usd" type="xs:decimal" default="0"/>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="stop-reason" type="xs:string" minOccurs="0"/>
+      </xs:sequence>
+      <xs:attribute name="skill" type="skillName" use="required"/>
+      <xs:attribute name="phase" type="phaseName" use="required"/>
+      <xs:attribute name="ticket-id" type="ticketId" use="required"/>
+      <xs:attribute name="iteration" type="xs:positiveInteger" default="1"/>
+      <xs:attribute name="status" type="resultStatus" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="handoff">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="summary" type="xs:string"/>
+        <xs:element name="artifacts" type="fileList" minOccurs="0"/>
+        <xs:element name="questions" type="questionList" minOccurs="0"/>
+        <xs:element name="next-step" type="xs:string" minOccurs="0"/>
+      </xs:sequence>
+      <xs:attribute name="skill" type="skillName" use="required"/>
+      <xs:attribute name="ticket-id" type="ticketId" use="required"/>
+      <xs:attribute name="status" type="handoffStatus" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolutions/acs/plugins/acs/schemas/pipeline-state.schema.json",
+  "title": "acs pipeline-state.json",
+  "description": "Compact per-ticket step ledger. /ship reads this single file to pick the next step or resume, so its context can be cleared at any step boundary. Maintained by post-hooks and skill-start.",
+  "type": "object",
+  "required": ["ticket_id", "flow", "steps"],
+  "properties": {
+    "ticket_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+    "flow": {
+      "description": "ticket = the six-step workflow pipeline; product = a product-level delivery ticket (PRD / architecture / scaffold).",
+      "enum": ["ticket", "product"]
+    },
+    "steps": {
+      "type": "object",
+      "propertyNames": {
+        "enum": ["create-prd", "create-architecture", "create-project", "create-ticket", "create-design", "create-spec", "code", "create-pr", "merge-pr"]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {"enum": ["in_progress", "completed", "failed", "interrupted", "handed_off"]},
+          "started_at": {"type": "string", "format": "date-time"},
+          "ended_at": {"type": "string", "format": "date-time"},
+          "summary": {
+            "description": "Compact handoff summary for /ship (bounded; full detail lives in the skill state files).",
+            "oneOf": [{"type": "string"}, {"type": "null"}]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "totals": {
+      "description": "Per-ticket roll-up across all skills and runs.",
+      "type": "object",
+      "properties": {
+        "runs": {"type": "integer", "minimum": 0},
+        "working_seconds": {"type": "integer", "minimum": 0},
+        "tokens": {
+          "type": "object",
+          "properties": {
+            "input": {"type": "integer", "minimum": 0},
+            "output": {"type": "integer", "minimum": 0}
+          }
+        },
+        "cost_usd": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

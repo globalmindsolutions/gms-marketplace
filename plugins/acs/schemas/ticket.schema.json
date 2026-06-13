@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolutions/acs/plugins/acs/schemas/ticket.schema.json",
+  "title": "acs ticket.json",
+  "description": "Local source of truth for a ticket; lives at <workspace>/<repo>/<ticket-id>/ticket.json.",
+  "type": "object",
+  "required": ["id", "title", "type", "description", "acceptance_criteria", "priority", "parent", "children", "status", "external", "assignee", "story_points", "needs_design"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+    "title": {"type": "string", "minLength": 1},
+    "type": {"enum": ["epic", "story", "task"]},
+    "description": {"type": "string"},
+    "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
+    "priority": {"enum": ["critical", "high", "medium", "low"]},
+    "parent": {
+      "description": "Parent epic id; links are stored in both directions (the epic lists children).",
+      "oneOf": [{"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"}, {"type": "null"}]
+    },
+    "children": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"}},
+    "status": {"enum": ["open", "in_progress", "in_review", "done"]},
+    "external": {
+      "description": "Local <-> remote tracker mapping used for two-way sync.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["provider", "key"],
+          "properties": {
+            "provider": {"enum": ["github", "jira"]},
+            "key": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "assignee": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+    "story_points": {"oneOf": [{"type": "number", "minimum": 0}, {"type": "null"}]},
+    "needs_design": {
+      "description": "Always true for epics; set for stories/tasks during /create-ticket analysis (user-confirmed).",
+      "type": "boolean"
+    },
+    "docs_only": {
+      "description": "True only when the change touches no executable code or tests (docs, comments, changelog, architecture doc set). Set during /create-ticket analysis, user-confirmed. Relaxes /code's TDD and coverage gates; the test suite still runs once to prove nothing broke. Default false.",
+      "type": "boolean",
+      "default": false
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}

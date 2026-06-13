@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolutions/acs/plugins/acs/schemas/metrics.schema.json",
+  "title": "acs metrics.json",
+  "description": "Per-repo aggregates at <workspace>/<repo>/metrics.json, maintained by post-hooks. Ticket counts are recomputed from tickets-index.json; PR counts and run totals accumulate per event/run.",
+  "type": "object",
+  "properties": {
+    "tickets": {
+      "type": "object",
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "by_status": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "by_type": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+      },
+      "additionalProperties": true
+    },
+    "prs": {
+      "type": "object",
+      "properties": {
+        "created": {"type": "integer", "minimum": 0},
+        "merged": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": true
+    },
+    "totals": {
+      "type": "object",
+      "properties": {
+        "runs": {"type": "integer", "minimum": 0},
+        "working_seconds": {"type": "integer", "minimum": 0},
+        "tokens": {
+          "type": "object",
+          "properties": {
+            "input": {"type": "integer", "minimum": 0},
+            "output": {"type": "integer", "minimum": 0}
+          }
+        },
+        "cost_usd": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": true
+    },
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}

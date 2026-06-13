@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolutions/acs/plugins/acs/schemas/skill-state.schema.json",
+  "title": "acs <skill>-state.json",
+  "description": "Per-skill state file in the ticket partition. The append-only `runs` array is the single source of truth for status: runs[-1].status is the current state; pre-hooks gate on it. Status, stop reason, and timestamps are never mirrored at top level. `skill` and `ticket_id` echo the filename/partition deliberately, so the file stays self-describing after archiving.",
+  "type": "object",
+  "required": ["skill", "ticket_id", "states", "findings", "errors", "runs"],
+  "properties": {
+    "skill": {
+      "enum": ["create-prd", "create-architecture", "create-project", "create-ticket", "create-design", "create-spec", "code", "create-pr", "merge-pr"]
+    },
+    "ticket_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+    "states": {
+      "description": "The skill's current result data, consumed by the next skill (e.g. specs implemented, tests/coverage, verifier_passed, pr reference). Re-runs update it in place.",
+      "type": "object"
+    },
+    "findings": {
+      "description": "Anything worth passing on: review findings, user clarifications, gotchas. Latest run's view (replaced on re-run).",
+      "type": "array"
+    },
+    "errors": {"type": "array"},
+    "runs": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "required": ["started_at", "status"],
+        "properties": {
+          "started_at": {"type": "string", "format": "date-time"},
+          "ended_at": {"oneOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {"type": "integer", "minimum": 0},
+              "output": {"type": "integer", "minimum": 0}
+            },
+            "additionalProperties": false
+          },
+          "cost_usd": {"type": "number", "minimum": 0},
+          "status": {"enum": ["in_progress", "completed", "failed", "interrupted", "handed_off"]},
+          "stop_reason": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "handoff_summary": {
+            "description": "Required when status is handed_off: what is done, in flight, next actions, pending decisions.",
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

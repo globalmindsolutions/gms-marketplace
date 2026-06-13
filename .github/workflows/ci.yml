@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests & validation (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install xmllint (libxml2-utils)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxml2-utils
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Validate all JSON files parse
+        run: |
+          status=0
+          while IFS= read -r -d '' f; do
+            if python3 -m json.tool "$f" > /dev/null; then
+              echo "ok   $f"
+            else
+              echo "::error file=$f::invalid JSON"
+              status=1
+            fi
+          done < <(find .claude-plugin plugins/acs -name '*.json' -not -path '*/__pycache__/*' -print0 | sort -z)
+          exit "$status"
+
+      - name: Validate JSON Schema documents (structural)
+        run: |
+          python3 - <<'EOF'
+          import glob
+          import json
+          import sys
+
+          failed = False
+          paths = sorted(glob.glob("plugins/acs/schemas/*.schema.json"))
+          if not paths:
+              print("FAIL: no *.schema.json files found under plugins/acs/schemas/", file=sys.stderr)
+              sys.exit(1)
+          for path in paths:
+              try:
+                  with open(path, encoding="utf-8") as fh:
+                      doc = json.load(fh)
+              except json.JSONDecodeError as exc:
+                  print(f"FAIL {path}: not valid JSON: {exc}", file=sys.stderr)
+                  failed = True
+                  continue
+              if not isinstance(doc, dict):
+                  print(f"FAIL {path}: top-level value is not an object", file=sys.stderr)
+                  failed = True
+              elif "$schema" not in doc:
+                  print(f'FAIL {path}: missing top-level "$schema" key', file=sys.stderr)
+                  failed = True
+              else:
+                  print(f"ok   {path}")
+          sys.exit(1 if failed else 0)
+          EOF
+
+      - name: Validate XSD (acs-messages.xsd)
+        run: xmllint --noout plugins/acs/schemas/acs-messages.xsd
+
+      - name: Byte-compile hook scripts
+        run: python3 -m py_compile plugins/acs/hooks/scripts/*.py
+
+      - name: Check skill/agent frontmatter (name + description)
+        run: |
+          python3 - <<'EOF'
+          import glob
+          import re
+          import sys
+
+          failed = False
+          paths = sorted(glob.glob("plugins/acs/skills/*/SKILL.md")) \
+                + sorted(glob.glob("plugins/acs/agents/*.md"))
+          if not paths:
+              print("FAIL: no SKILL.md or agent .md files found", file=sys.stderr)
+              sys.exit(1)
+          for path in paths:
+              with open(path, encoding="utf-8") as fh:
+                  text = fh.read()
+              match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
+              if not match:
+                  print(f"FAIL {path}: missing YAML frontmatter block", file=sys.stderr)
+                  failed = True
+                  continue
+              frontmatter = match.group(1)
+              missing = [
+                  key for key in ("name", "description")
+                  if not re.search(rf"^{key}:\s*\S", frontmatter, re.M)
+              ]
+              if missing:
+                  print(f"FAIL {path}: frontmatter missing {', '.join(missing)}", file=sys.stderr)
+                  failed = True
+              else:
+                  print(f"ok   {path}")
+          sys.exit(1 if failed else 0)
+          EOF

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolutions/acs/plugins/acs/schemas/lock.schema.json",
+  "title": "acs .lock",
+  "description": "Ticket-partition lock held by the session working the ticket. Re-entrant for the same checkout id; other sessions are blocked (pre-hooks exit 2). Released by the post-hook or a session handoff. A stale lock from a different checkout is reported for manual removal, never auto-stolen.",
+  "type": "object",
+  "required": ["checkout_id", "created_at"],
+  "properties": {
+    "checkout_id": {"type": "string", "minLength": 1},
+    "checkout_path": {"type": "string"},
+    "pid": {"type": "integer", "minimum": 1},
+    "hostname": {"type": "string"},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}

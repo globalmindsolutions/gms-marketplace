@@ -1,0 +1,1225 @@
+"""acs_lib — shared, stdlib-only library for the acs plugin's hooks and helper scripts.
+
+Python 3.9+, standard library only (no pip installs on consumer machines).
+
+This module implements the deterministic half of the acs workflow:
+  * settings resolution   (~/.acs/settings.json <- <repo>/.acs/settings.json <- settings.local.json)
+  * workspace layout      (<workspace>/<repo>/<ticket-id>/ partitions + repo-level files)
+  * ticket id resolution  (explicit argument -> per-checkout pointer file -> branch name)
+  * state files           (append-only `runs`, last entry = current state)
+  * pipeline ledger       (pipeline-state.json), tickets-index.json, counters.json, metrics.json
+  * locking               (.lock per ticket partition, re-entrant per checkout)
+  * pre-hook gating       (exit 2 = blocked) and post-hook persistence
+
+Hook event binding (resolves the open question in docs/requirements/hooks.md):
+  * pre-<skill>.py  runs via a PreToolUse hook matching the Skill tool (dispatch.py routes
+    by skill name); exit code 2 blocks the skill before it runs.
+  * post-<skill>.py is invoked by the skill's coordinator as its mandatory final step
+    (it needs run data only the coordinator knows: status, findings, tokens, cost).
+    The next skill's pre-hook gates on runs[-1].status, so a skipped post-hook can
+    never unlock the pipeline.
+  * A SessionEnd hook finalizes any run left `in_progress` by this checkout as
+    `interrupted` and releases its lock, so abnormal endings still write state.
+"""
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
+PRODUCT_SKILLS = ["create-prd", "create-architecture", "create-project"]
+WORKFLOW_SKILLS = ["create-ticket", "create-design", "create-spec", "code", "create-pr", "merge-pr"]
+HOOKED_SKILLS = PRODUCT_SKILLS + WORKFLOW_SKILLS
+UNHOOKED_SKILLS = ["init", "ship", "handoff", "update"]
+
+RUN_STATUSES = ["in_progress", "completed", "failed", "interrupted", "handed_off"]
+TICKET_TYPES = ["epic", "story", "task"]
+TICKET_STATUSES = ["open", "in_progress", "in_review", "done"]
+PRIORITIES = ["critical", "high", "medium", "low"]
+
+PRODUCT_TICKET_TITLES = {
+    "create-prd": "Product definition (PRD)",
+    "create-architecture": "Product architecture doc set",
+    "create-project": "Project scaffold",
+}
+
+# Placeholder vocabulary per inline format field (docs/requirements/configuration.md).
+FORMAT_PLACEHOLDERS = {
+    "branch_name": {"ticket_id", "type", "slug", "external_key"},
+    "commit_message": {"ticket_id", "type", "summary", "external_key"},
+    "pr_title": {"ticket_id", "type", "title", "summary", "external_key"},
+    "ticket_title": {"ticket_id", "type", "title", "external_key"},
+}
+
+BUILTIN_TEMPLATES = {"pr-default", "epic-default", "story-default", "task-default"}
+
+DEFAULT_SETTINGS = {
+    "test_coverage_percent": 90,
+    "merge_strategy": "squash",
+    "prd_path": "docs/product",
+    "architecture_path": "docs/architecture",
+    "requirements_path": "docs/requirements",
+    "adr_path": "docs/adr",
+    "tracker": {"provider": "local"},
+    "models": {},
+    "formats": {
+        "branch_name": "{type}/{ticket_id}-{slug}",
+        "commit_message": "{ticket_id} {summary}",
+        "pr_title": "[{ticket_id}] {title}",
+        "pr_description_template": "pr-default",
+        "tickets": {
+            "epic": {"title": "[EPIC] {title}", "description_template": "epic-default"},
+            "story": {"title": "{title}", "description_template": "story-default"},
+            "task": {"title": "{title}", "description_template": "task-default"},
+        },
+    },
+}
+
+TICKET_ID_RE = re.compile(r"\b([A-Z][A-Z0-9]*-\d+)\b")
+
+
+class GateError(Exception):
+    """Raised when a pre-hook gate fails; message is user-facing (stderr, exit 2)."""
+
+
+# ---------------------------------------------------------------------------
+# Small utilities
+# ---------------------------------------------------------------------------
+
+def now_iso():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_iso(value):
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def slugify(text, max_len=40):
+    slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    return slug[:max_len].rstrip("-") or "change"
+
+
+def read_json(path):
+    """Tolerant read: returns None when the file is missing or corrupt (reported, never raises)."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, OSError) as exc:
+        sys.stderr.write("acs: warning: unreadable/corrupt JSON at %s (%s) — treated as absent\n" % (path, exc))
+        return None
+
+
+def write_json(path, data):
+    """Atomic, pretty-printed write (the workspace doubles as a human-readable audit trail)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".acs-tmp-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def deep_merge(base, override):
+    """Recursive per-key merge; override wins on leaves."""
+    out = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _git(args, cwd):
+    try:
+        proc = subprocess.run(
+            ["git"] + args, cwd=cwd, capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip()
+
+
+# ---------------------------------------------------------------------------
+# Repo identity & checkout identity
+# ---------------------------------------------------------------------------
+
+def checkout_root(cwd):
+    """Root of the current checkout/worktree."""
+    return _git(["rev-parse", "--show-toplevel"], cwd)
+
+
+def main_repo_root(cwd):
+    """Root of the *main* repository, even when cwd is inside a linked worktree."""
+    common = _git(["rev-parse", "--git-common-dir"], cwd)
+    if not common:
+        return None
+    if not os.path.isabs(common):
+        common = os.path.join(cwd, common)
+    common = os.path.normpath(common)
+    if os.path.basename(common) == ".git":
+        return os.path.dirname(common)
+    return common  # bare-ish layouts; best effort
+
+
+def repo_partition_id(cwd):
+    """Stable per-repo identifier: derived from the git remote (owner-name), so every
+    worktree of a repo resolves to the same partition; falls back to the main repo
+    directory name when there is no remote."""
+    remote = _git(["config", "--get", "remote.origin.url"], cwd)
+    if remote:
+        path = remote
+        path = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", path)   # scheme
+        path = re.sub(r"^[^/@]+@", "", path)                       # user@
+        path = path.replace(":", "/")
+        path = re.sub(r"\.git/?$", "", path)
+        segments = [s for s in path.split("/") if s]
+        if len(segments) >= 2:
+            raw = "%s-%s" % (segments[-2], segments[-1])
+        elif segments:
+            raw = segments[-1]
+        else:
+            raw = None
+        if raw:
+            return re.sub(r"[^A-Za-z0-9._-]+", "-", raw)
+    root = main_repo_root(cwd) or checkout_root(cwd)
+    if root:
+        return re.sub(r"[^A-Za-z0-9._-]+", "-", os.path.basename(root))
+    return None
+
+
+def checkout_id(cwd):
+    """Stable per-checkout/worktree identifier (one pointer file per parallel session)."""
+    root = checkout_root(cwd) or os.path.abspath(cwd)
+    digest = hashlib.sha1(os.path.abspath(root).encode("utf-8")).hexdigest()[:8]
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", os.path.basename(root))
+    return "%s-%s" % (base, digest)
+
+
+def current_branch(cwd):
+    return _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+def settings_files(cwd):
+    """Candidate settings files, least -> most specific. settings.local.json is
+    machine-specific and gitignored; a linked worktree may not have its own copy,
+    so the main checkout's local settings are also consulted."""
+    candidates = []
+    user = os.path.join(os.path.expanduser("~"), ".acs", "settings.json")
+    candidates.append(user)
+    main_root = main_repo_root(cwd)
+    top = checkout_root(cwd)
+    roots = []
+    for root in (main_root, top):
+        if root and root not in roots:
+            roots.append(root)
+    for root in roots:
+        candidates.append(os.path.join(root, ".acs", "settings.json"))
+    for root in roots:
+        candidates.append(os.path.join(root, ".acs", "settings.local.json"))
+    return candidates
+
+
+def load_settings(cwd):
+    """Per-key merge across scopes: settings.local.json -> project settings.json -> user."""
+    merged = dict(DEFAULT_SETTINGS)
+    found = []
+    for path in settings_files(cwd):
+        data = read_json(path)
+        if isinstance(data, dict):
+            merged = deep_merge(merged, data)
+            found.append(path)
+    return merged, found
+
+
+def validate_settings(settings, cwd, require_workspace=True):
+    """Shared baseline validation used by every pre-hook. Raises GateError."""
+    workspace = settings.get("workspace_path")
+    if require_workspace:
+        if not workspace:
+            raise GateError(
+                "acs is not initialized for this repo: workspace_path is not configured. Run /acs:init first."
+            )
+        workspace = os.path.abspath(os.path.expanduser(str(workspace)))
+        for root in (main_repo_root(cwd), checkout_root(cwd)):
+            if root:
+                try:
+                    if os.path.commonpath([workspace, os.path.abspath(root)]) == os.path.abspath(root):
+                        raise GateError(
+                            "workspace_path (%s) is inside the repository (%s); it must live outside the "
+                            "consumer repo so worktrees and parallel tickets work. Re-run /acs:init." % (workspace, root)
+                        )
+                except ValueError:
+                    pass  # different drives (Windows) — necessarily outside
+    prefix = settings.get("ticket_prefix")
+    if require_workspace:
+        if not prefix or not re.fullmatch(r"[A-Z][A-Z0-9]*", str(prefix)):
+            raise GateError(
+                "ticket_prefix is missing or invalid (must be a non-empty uppercase identifier, e.g. SHOP). "
+                "Run /acs:init."
+            )
+    coverage = settings.get("test_coverage_percent", 90)
+    if not isinstance(coverage, (int, float)) or not (0 < coverage <= 100):
+        raise GateError("test_coverage_percent must be a number in (0, 100]; got %r." % (coverage,))
+    strategy = settings.get("merge_strategy", "squash")
+    if strategy not in ("squash", "merge", "rebase"):
+        raise GateError("merge_strategy must be one of squash|merge|rebase; got %r." % (strategy,))
+    e2e = settings.get("e2e")
+    if e2e is not None:
+        if not isinstance(e2e, dict) or not isinstance(e2e.get("command"), str) or not e2e["command"].strip():
+            raise GateError("e2e must be an object with a non-empty 'command' (plus optional setup/teardown/per_iteration).")
+        for key in ("setup", "teardown"):
+            if key in e2e and (not isinstance(e2e[key], str) or not e2e[key].strip()):
+                raise GateError("e2e.%s must be a non-empty string when set." % key)
+        if "per_iteration" in e2e and not isinstance(e2e["per_iteration"], bool):
+            raise GateError("e2e.per_iteration must be a boolean.")
+    validate_formats(settings.get("formats", {}))
+    validate_models(settings.get("models", {}))
+    return workspace if require_workspace else None
+
+
+def validate_formats(formats):
+    def check(field, template, vocab_key):
+        if not isinstance(template, str) or not template.strip():
+            raise GateError("formats.%s must be a non-empty string." % field)
+        used = set(re.findall(r"\{([a-z_]+)\}", template))
+        unknown = used - FORMAT_PLACEHOLDERS[vocab_key]
+        if unknown:
+            raise GateError(
+                "formats.%s uses unknown placeholder(s) %s; allowed: %s."
+                % (field, ", ".join("{%s}" % p for p in sorted(unknown)),
+                   ", ".join("{%s}" % p for p in sorted(FORMAT_PLACEHOLDERS[vocab_key])))
+            )
+
+    if "branch_name" in formats:
+        check("branch_name", formats["branch_name"], "branch_name")
+        if "{ticket_id}" not in formats["branch_name"]:
+            raise GateError("formats.branch_name must embed {ticket_id} — ticket detection from branch names depends on it.")
+    if "commit_message" in formats:
+        check("commit_message", formats["commit_message"], "commit_message")
+    if "pr_title" in formats:
+        check("pr_title", formats["pr_title"], "pr_title")
+    tickets = formats.get("tickets", {})
+    if not isinstance(tickets, dict):
+        raise GateError("formats.tickets must be an object keyed by ticket type.")
+    for ttype, conf in tickets.items():
+        if ttype not in TICKET_TYPES:
+            raise GateError("formats.tickets.%s: unknown ticket type (epic|story|task)." % ttype)
+        if isinstance(conf, dict) and "title" in conf:
+            check("tickets.%s.title" % ttype, conf["title"], "ticket_title")
+
+
+def validate_models(models):
+    if not isinstance(models, dict):
+        raise GateError("models must be an object.")
+
+    def check_role(path, value):
+        if isinstance(value, str):
+            if not value.strip():
+                raise GateError("models.%s must be a non-empty model string or a {model, effort} object." % path)
+            return
+        if isinstance(value, dict):
+            extra = set(value) - {"model", "effort"}
+            if extra:
+                raise GateError("models.%s: unknown key(s) %s (allowed: model, effort)." % (path, ", ".join(sorted(extra))))
+            return
+        raise GateError("models.%s must be a model string or a {model, effort} object." % path)
+
+    for role in ("planner", "executor", "verifier", "coordinator"):
+        if role in models:
+            check_role(role, models[role])
+    for skill, roles in models.get("overrides", {}).items():
+        if not isinstance(roles, dict):
+            raise GateError("models.overrides.%s must be an object of role -> model." % skill)
+        for role, value in roles.items():
+            check_role("overrides.%s.%s" % (skill, role), value)
+
+
+def resolve_role_model(settings, skill, role):
+    """Per-field resolution: overrides.<skill>.<role> -> models.<role> -> inherit."""
+    models = settings.get("models", {}) or {}
+
+    def as_obj(value):
+        if isinstance(value, str):
+            return {"model": value}
+        return dict(value or {})
+
+    resolved = {}
+    for source in (models.get(role), (models.get("overrides", {}) or {}).get(skill, {}).get(role)):
+        if source:
+            for key, value in as_obj(source).items():
+                if value and value != "inherit":
+                    resolved[key] = value
+    return {"model": resolved.get("model", "inherit"), "effort": resolved.get("effort", "inherit")}
+
+
+def render_format(template, mapping):
+    return re.sub(r"\{([a-z_]+)\}", lambda m: str(mapping.get(m.group(1), "")), template)
+
+
+def resolve_template(value, repo_root, plugin_root):
+    """Built-in name -> plugin templates/; else <repo>/.acs/templates/<value>.md; else absolute path."""
+    if value in BUILTIN_TEMPLATES:
+        return os.path.join(plugin_root, "templates", "%s.md" % value)
+    candidate = os.path.join(repo_root or "", ".acs", "templates", "%s.md" % value)
+    if repo_root and os.path.isfile(candidate):
+        return candidate
+    if os.path.isabs(value) and os.path.isfile(value):
+        return value
+    return None
+
+
+def plugin_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+# ---------------------------------------------------------------------------
+# Workspace layout
+# ---------------------------------------------------------------------------
+
+def repo_dir(workspace, repo_id):
+    return os.path.join(workspace, repo_id)
+
+
+def ticket_dir(workspace, repo_id, ticket_id):
+    return os.path.join(workspace, repo_id, ticket_id)
+
+
+def archive_dir(workspace, repo_id):
+    return os.path.join(workspace, repo_id, "archive")
+
+
+def sessions_dir(workspace, repo_id):
+    return os.path.join(workspace, repo_id, "sessions")
+
+
+def pointer_path(workspace, repo_id, ckid):
+    return os.path.join(sessions_dir(workspace, repo_id), "%s.json" % ckid)
+
+
+def state_path(tdir, skill):
+    return os.path.join(tdir, "%s-state.json" % skill)
+
+
+def lock_path(tdir):
+    return os.path.join(tdir, ".lock")
+
+
+def find_ticket_partition(workspace, repo_id, ticket_id):
+    """Active partition first, then archive/."""
+    active = ticket_dir(workspace, repo_id, ticket_id)
+    if os.path.isdir(active):
+        return active, False
+    archived = os.path.join(archive_dir(workspace, repo_id), ticket_id)
+    if os.path.isdir(archived):
+        return archived, True
+    return active, False
+
+
+# ---------------------------------------------------------------------------
+# Ticket id resolution (deterministic: argument -> pointer file -> branch name)
+# ---------------------------------------------------------------------------
+
+def ticket_id_from_text(text, prefix=None):
+    if not text:
+        return None
+    if prefix:
+        match = re.search(r"\b(%s-\d+)\b" % re.escape(prefix), text)
+        if match:
+            return match.group(1)
+        return None
+    match = TICKET_ID_RE.search(text)
+    return match.group(1) if match else None
+
+
+def resolve_ticket_id(cwd, settings, workspace, repo_id, explicit=None, args_text=None):
+    prefix = settings.get("ticket_prefix")
+    if explicit:
+        return explicit.strip(), "argument"
+    from_args = ticket_id_from_text(args_text, prefix)
+    if from_args:
+        return from_args, "argument"
+    pointer = read_json(pointer_path(workspace, repo_id, checkout_id(cwd)))
+    if isinstance(pointer, dict) and pointer.get("ticket_id"):
+        return pointer["ticket_id"], "pointer"
+    from_branch = ticket_id_from_text(current_branch(cwd), prefix)
+    if from_branch:
+        return from_branch, "branch"
+    return None, None
+
+
+# ---------------------------------------------------------------------------
+# State files (append-only runs; last entry = current state)
+# ---------------------------------------------------------------------------
+
+def empty_state(skill, ticket_id):
+    return {"skill": skill, "ticket_id": ticket_id, "states": {}, "findings": [], "errors": [], "runs": []}
+
+
+def load_state(tdir, skill, ticket_id=None):
+    state = read_json(state_path(tdir, skill))
+    if not isinstance(state, dict) or not isinstance(state.get("runs"), list):
+        return empty_state(skill, ticket_id or os.path.basename(tdir))
+    return state
+
+
+def last_run(state):
+    runs = state.get("runs") or []
+    return runs[-1] if runs else None
+
+
+def last_run_status(tdir, skill):
+    state = read_json(state_path(tdir, skill))
+    if not isinstance(state, dict):
+        return None
+    runs = state.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return None
+    entry = runs[-1]
+    return entry.get("status") if isinstance(entry, dict) else None
+
+
+def skill_completed(tdir, skill):
+    return last_run_status(tdir, skill) == "completed"
+
+
+def append_in_progress_run(tdir, skill, ticket_id):
+    state = load_state(tdir, skill, ticket_id)
+    state["runs"].append({
+        "started_at": now_iso(),
+        "ended_at": None,
+        "tokens": {"input": 0, "output": 0},
+        "cost_usd": 0.0,
+        "status": "in_progress",
+        "stop_reason": None,
+    })
+    write_json(state_path(tdir, skill), state)
+    return state
+
+
+def finalize_run(tdir, skill, ticket_id, result):
+    """Finalize runs[-1] (or append, if the coordinator never registered the run)."""
+    state = load_state(tdir, skill, ticket_id)
+    status = result.get("status", "completed")
+    if status not in RUN_STATUSES or status == "in_progress":
+        raise ValueError("invalid final run status: %r" % status)
+    entry = last_run(state)
+    if not entry or entry.get("status") != "in_progress":
+        entry = {"started_at": now_iso(), "tokens": {"input": 0, "output": 0}, "cost_usd": 0.0}
+        state["runs"].append(entry)
+    entry["ended_at"] = now_iso()
+    entry["status"] = status
+    entry["stop_reason"] = result.get("stop_reason")
+    tokens = result.get("tokens") or {}
+    entry["tokens"] = {"input": int(tokens.get("input", 0) or 0), "output": int(tokens.get("output", 0) or 0)}
+    entry["cost_usd"] = float(result.get("cost_usd", 0.0) or 0.0)
+    if status == "handed_off":
+        entry["handoff_summary"] = result.get("handoff_summary") or result.get("stop_reason") or ""
+    if isinstance(result.get("states"), dict):
+        state["states"].update(result["states"])
+    if isinstance(result.get("findings"), list):
+        state["findings"] = result["findings"]
+    if isinstance(result.get("errors"), list):
+        state["errors"] = result["errors"]
+    write_json(state_path(tdir, skill), state)
+    return state, entry
+
+
+def run_seconds(entry):
+    start, end = parse_iso(entry.get("started_at")), parse_iso(entry.get("ended_at"))
+    if start and end and end >= start:
+        return int((end - start).total_seconds())
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Pipeline ledger (pipeline-state.json)
+# ---------------------------------------------------------------------------
+
+def load_pipeline(tdir, ticket_id, flow="ticket"):
+    data = read_json(os.path.join(tdir, "pipeline-state.json"))
+    if not isinstance(data, dict):
+        data = {"ticket_id": ticket_id, "flow": flow, "steps": {}, "totals": {}}
+    data.setdefault("steps", {})
+    data.setdefault("totals", {})
+    return data
+
+
+def update_pipeline(tdir, ticket_id, skill, status, summary=None, flow=None):
+    data = load_pipeline(tdir, ticket_id, flow or ("product" if skill in PRODUCT_SKILLS else "ticket"))
+    if flow:
+        data["flow"] = flow
+    step = data["steps"].setdefault(skill, {})
+    if status == "in_progress" and not step.get("started_at"):
+        step["started_at"] = now_iso()
+    if status != "in_progress":
+        step["ended_at"] = now_iso()
+    step["status"] = status
+    if summary is not None:
+        step["summary"] = summary
+    data["totals"] = compute_ticket_totals(tdir)
+    write_json(os.path.join(tdir, "pipeline-state.json"), data)
+    return data
+
+
+def compute_ticket_totals(tdir):
+    """Roll up time/tokens/cost across every skill state file in the partition."""
+    totals = {"runs": 0, "working_seconds": 0, "tokens": {"input": 0, "output": 0}, "cost_usd": 0.0}
+    for skill in HOOKED_SKILLS:
+        state = read_json(state_path(tdir, skill))
+        if not isinstance(state, dict):
+            continue
+        for entry in state.get("runs") or []:
+            if not isinstance(entry, dict):
+                continue
+            totals["runs"] += 1
+            totals["working_seconds"] += run_seconds(entry)
+            tokens = entry.get("tokens") or {}
+            totals["tokens"]["input"] += int(tokens.get("input", 0) or 0)
+            totals["tokens"]["output"] += int(tokens.get("output", 0) or 0)
+            totals["cost_usd"] += float(entry.get("cost_usd", 0.0) or 0.0)
+    totals["cost_usd"] = round(totals["cost_usd"], 4)
+    return totals
+
+
+# ---------------------------------------------------------------------------
+# Tickets, index, counters, metrics
+# ---------------------------------------------------------------------------
+
+def load_ticket(tdir):
+    return read_json(os.path.join(tdir, "ticket.json"))
+
+
+def save_ticket(tdir, ticket):
+    ticket["updated_at"] = now_iso()
+    write_json(os.path.join(tdir, "ticket.json"), ticket)
+
+
+def new_ticket_doc(ticket_id, title, ttype, **kw):
+    return {
+        "id": ticket_id,
+        "title": title,
+        "type": ttype,
+        "description": kw.get("description", ""),
+        "acceptance_criteria": kw.get("acceptance_criteria", []),
+        "priority": kw.get("priority", "medium"),
+        "parent": kw.get("parent"),
+        "children": kw.get("children", []),
+        "status": kw.get("status", "open"),
+        "external": kw.get("external"),
+        "assignee": kw.get("assignee"),
+        "story_points": kw.get("story_points"),
+        "needs_design": kw.get("needs_design", ttype == "epic"),
+        "docs_only": kw.get("docs_only", False),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+
+
+def allocate_ticket_id(workspace, repo_id, prefix):
+    """Allocate the next <prefix>-<n> id; counter guarded by an O_EXCL spin lock so
+    parallel worktree sessions never collide."""
+    rdir = repo_dir(workspace, repo_id)
+    os.makedirs(rdir, exist_ok=True)
+    guard = os.path.join(rdir, "counters.json.lock")
+    acquired = False
+    for _ in range(200):
+        try:
+            fd = os.open(guard, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            acquired = True
+            break
+        except FileExistsError:
+            try:
+                if os.path.getmtime(guard) < datetime.now(timezone.utc).timestamp() - 30:
+                    os.unlink(guard)  # stale guard from a crashed allocation
+                    continue
+            except OSError:
+                pass
+            import time
+            time.sleep(0.05)
+    try:
+        counters = read_json(os.path.join(rdir, "counters.json")) or {}
+        next_n = int(counters.get("next", 1))
+        counters["next"] = next_n + 1
+        write_json(os.path.join(rdir, "counters.json"), counters)
+        return "%s-%d" % (prefix, next_n)
+    finally:
+        if acquired:
+            try:
+                os.unlink(guard)
+            except OSError:
+                pass
+
+
+def index_path(workspace, repo_id):
+    return os.path.join(repo_dir(workspace, repo_id), "tickets-index.json")
+
+
+def update_index(workspace, repo_id, ticket, archived=None):
+    path = index_path(workspace, repo_id)
+    data = read_json(path) or {"tickets": {}}
+    data.setdefault("tickets", {})
+    entry = data["tickets"].setdefault(ticket["id"], {})
+    entry.update({
+        "id": ticket["id"],
+        "title": ticket.get("title"),
+        "type": ticket.get("type"),
+        "status": ticket.get("status"),
+        "parent": ticket.get("parent"),
+        "children": ticket.get("children", []),
+        "needs_design": ticket.get("needs_design"),
+        "external": ticket.get("external"),
+        "updated_at": now_iso(),
+    })
+    if archived is not None:
+        entry["archived"] = archived
+    write_json(path, data)
+    return data
+
+
+def metrics_path(workspace, repo_id):
+    return os.path.join(repo_dir(workspace, repo_id), "metrics.json")
+
+
+def update_metrics(workspace, repo_id, run_entry=None, pr_created=False, pr_merged=False):
+    """Repo-level aggregates: ticket counts recomputed from the index (idempotent),
+    PR counts and run totals accumulated incrementally."""
+    path = metrics_path(workspace, repo_id)
+    data = read_json(path) or {}
+    data.setdefault("tickets", {})
+    data.setdefault("prs", {"created": 0, "merged": 0})
+    data.setdefault("totals", {"runs": 0, "working_seconds": 0, "tokens": {"input": 0, "output": 0}, "cost_usd": 0.0})
+
+    index = read_json(index_path(workspace, repo_id)) or {"tickets": {}}
+    by_status = {}
+    by_type = {}
+    for ticket in index.get("tickets", {}).values():
+        by_status[ticket.get("status") or "unknown"] = by_status.get(ticket.get("status") or "unknown", 0) + 1
+        by_type[ticket.get("type") or "unknown"] = by_type.get(ticket.get("type") or "unknown", 0) + 1
+    data["tickets"] = {"total": len(index.get("tickets", {})), "by_status": by_status, "by_type": by_type}
+
+    if pr_created:
+        data["prs"]["created"] = int(data["prs"].get("created", 0)) + 1
+    if pr_merged:
+        data["prs"]["merged"] = int(data["prs"].get("merged", 0)) + 1
+    if run_entry:
+        totals = data["totals"]
+        totals["runs"] = int(totals.get("runs", 0)) + 1
+        totals["working_seconds"] = int(totals.get("working_seconds", 0)) + run_seconds(run_entry)
+        tokens = run_entry.get("tokens") or {}
+        totals.setdefault("tokens", {"input": 0, "output": 0})
+        totals["tokens"]["input"] = int(totals["tokens"].get("input", 0)) + int(tokens.get("input", 0) or 0)
+        totals["tokens"]["output"] = int(totals["tokens"].get("output", 0)) + int(tokens.get("output", 0) or 0)
+        totals["cost_usd"] = round(float(totals.get("cost_usd", 0.0)) + float(run_entry.get("cost_usd", 0.0) or 0.0), 4)
+    data["updated_at"] = now_iso()
+    write_json(path, data)
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Locking (.lock per ticket partition; re-entrant per checkout)
+# ---------------------------------------------------------------------------
+
+def read_lock(tdir):
+    return read_json(lock_path(tdir))
+
+
+def lock_is_stale(lock):
+    """A lock is stale when its process is gone (same host) or it is very old."""
+    created = parse_iso(lock.get("created_at"))
+    age_h = None
+    if created:
+        age_h = (datetime.now(timezone.utc) - created).total_seconds() / 3600.0
+    if lock.get("hostname") == socket.gethostname() and isinstance(lock.get("pid"), int):
+        try:
+            os.kill(lock["pid"], 0)
+            return False
+        except ProcessLookupError:
+            return True
+        except (PermissionError, OSError):
+            return False
+    return age_h is not None and age_h > 24
+
+
+def check_lock(tdir, ckid):
+    """Returns (ok, message). ok=False means another session holds the lock."""
+    lock = read_lock(tdir)
+    if not isinstance(lock, dict):
+        return True, None
+    if lock.get("checkout_id") == ckid:
+        return True, None  # re-entrant for the same checkout
+    holder = lock.get("checkout_path") or lock.get("checkout_id") or "another session"
+    if lock_is_stale(lock):
+        return False, (
+            "ticket is locked by %s but the lock looks stale (no live process / very old). "
+            "If you are sure no other session is working this ticket, remove %s manually and retry."
+            % (holder, lock_path(tdir))
+        )
+    return False, "ticket is locked by another session (%s, since %s)." % (holder, lock.get("created_at"))
+
+
+def acquire_lock(tdir, cwd):
+    ckid = checkout_id(cwd)
+    ok, msg = check_lock(tdir, ckid)
+    if not ok:
+        raise GateError(msg)
+    write_json(lock_path(tdir), {
+        "checkout_id": ckid,
+        "checkout_path": checkout_root(cwd) or os.path.abspath(cwd),
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "created_at": now_iso(),
+    })
+
+
+def release_lock(tdir, cwd=None):
+    lock = read_lock(tdir)
+    if lock and cwd is not None and lock.get("checkout_id") != checkout_id(cwd):
+        return False  # never release someone else's lock
+    try:
+        os.unlink(lock_path(tdir))
+        return True
+    except OSError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Context resolution shared by hooks & helper scripts
+# ---------------------------------------------------------------------------
+
+def build_context(cwd, require_workspace=True):
+    """Resolve everything deterministic about where we are. Raises GateError."""
+    if not checkout_root(cwd):
+        raise GateError("acs requires a git repository; %s is not inside one." % cwd)
+    settings, sources = load_settings(cwd)
+    if require_workspace and not sources:
+        raise GateError("no .acs/settings.json found (user or project scope). Run /acs:init first.")
+    workspace = validate_settings(settings, cwd, require_workspace=require_workspace)
+    repo_id = repo_partition_id(cwd)
+    if not repo_id:
+        raise GateError("could not derive a repo identity (git remote or directory name).")
+    return {
+        "cwd": cwd,
+        "settings": settings,
+        "settings_sources": sources,
+        "workspace": workspace,
+        "repo_id": repo_id,
+        "checkout_id": checkout_id(cwd),
+        "checkout_root": checkout_root(cwd),
+        "main_repo_root": main_repo_root(cwd),
+        "plugin_root": plugin_root(),
+    }
+
+
+def parent_epic_dir(ctx, ticket):
+    parent = (ticket or {}).get("parent")
+    if not parent:
+        return None, None
+    pdir, _archived = find_ticket_partition(ctx["workspace"], ctx["repo_id"], parent)
+    return parent, (pdir if os.path.isdir(pdir) else None)
+
+
+def design_requirement(ctx, tdir, ticket):
+    """Returns (required, design_dir, source) — the partition whose design.md applies:
+    the ticket's own when it needs design, else the parent epic's when that needs design."""
+    if ticket.get("needs_design"):
+        return True, tdir, "own"
+    parent, pdir = parent_epic_dir(ctx, ticket)
+    if parent and pdir:
+        parent_ticket = load_ticket(pdir)
+        if parent_ticket and parent_ticket.get("needs_design"):
+            return True, pdir, "parent"
+    return False, None, None
+
+
+# ---------------------------------------------------------------------------
+# Pre-hook gates
+# ---------------------------------------------------------------------------
+
+def _require_completed(tdir, skill, ticket_id, hint):
+    if not skill_completed(tdir, skill):
+        status = last_run_status(tdir, skill)
+        if status == "in_progress":
+            detail = "/%s is recorded as in_progress for %s (crashed or still running elsewhere); re-run it to reconcile" % (skill, ticket_id)
+        elif status:
+            detail = "/%s last ended with status '%s' for %s" % (skill, status, ticket_id)
+        else:
+            detail = "/%s has not run for %s" % (skill, ticket_id)
+        raise GateError("%s — %s." % (detail, hint))
+
+
+def gate_create_prd(ctx, payload):
+    return None
+
+
+def gate_create_architecture(ctx, payload):
+    root = ctx["checkout_root"]
+    prd = os.path.join(root, ctx["settings"].get("prd_path", "docs/product"), "prd.md")
+    if not os.path.isfile(prd):
+        raise GateError("no PRD found at %s — run /acs:create-prd first (it also baselines existing products)." % prd)
+    return None
+
+
+def gate_create_project(ctx, payload):
+    root = ctx["checkout_root"]
+    arch = os.path.join(root, ctx["settings"].get("architecture_path", "docs/architecture"))
+    tech_stack = os.path.join(arch, "hld", "tech-stack.md")
+    if not os.path.isfile(tech_stack):
+        raise GateError(
+            "no architecture doc set found at %s (expected hld/tech-stack.md) — run /acs:create-architecture first." % arch
+        )
+    return None
+
+
+def gate_create_ticket(ctx, payload):
+    return None
+
+
+def _resolve_ticket_for_gate(ctx, payload, skill):
+    args_text = ""
+    tool_input = payload.get("tool_input") or {}
+    for key in ("args", "arguments", "argument"):
+        if isinstance(tool_input.get(key), str):
+            args_text = tool_input[key]
+            break
+    ticket_id, source = resolve_ticket_id(ctx["cwd"], ctx["settings"], ctx["workspace"], ctx["repo_id"], args_text=args_text)
+    if not ticket_id:
+        raise GateError(
+            "could not resolve a ticket id for /%s (no argument, no session pointer, no ticket in the branch name). "
+            "Pass it explicitly, e.g. /acs:%s %s-123." % (skill, skill, ctx["settings"].get("ticket_prefix", "SHOP"))
+        )
+    tdir, archived = find_ticket_partition(ctx["workspace"], ctx["repo_id"], ticket_id)
+    if archived:
+        raise GateError("ticket %s is done and archived (%s); nothing left to run." % (ticket_id, tdir))
+    if not os.path.isdir(tdir):
+        raise GateError("no workspace partition for %s (expected %s) — run /acs:create-ticket first." % (ticket_id, tdir))
+    ticket = load_ticket(tdir)
+    if not ticket:
+        raise GateError("ticket file missing or corrupt at %s/ticket.json — treat as not created; run /acs:create-ticket." % tdir)
+    ok, msg = check_lock(tdir, ctx["checkout_id"])
+    if not ok:
+        raise GateError(msg)
+    return ticket_id, tdir, ticket
+
+
+def gate_create_design(ctx, payload):
+    ticket_id, tdir, ticket = _resolve_ticket_for_gate(ctx, payload, "create-design")
+    _require_completed(tdir, "create-ticket", ticket_id, "run /acs:create-ticket first")
+    if not ticket.get("needs_design"):
+        raise GateError(
+            "ticket %s is not flagged needs_design — /create-design only runs for design-significant tickets; "
+            "go straight to /acs:create-spec %s." % (ticket_id, ticket_id)
+        )
+    return ticket_id
+
+
+def gate_create_spec(ctx, payload):
+    ticket_id, tdir, ticket = _resolve_ticket_for_gate(ctx, payload, "create-spec")
+    _require_completed(tdir, "create-ticket", ticket_id, "run /acs:create-ticket first")
+    required, ddir, source = design_requirement(ctx, tdir, ticket)
+    if required:
+        owner = ticket_id if source == "own" else (ticket.get("parent") or "parent epic")
+        if ddir is None:
+            raise GateError("ticket %s requires a design but its parent epic's partition was not found." % ticket_id)
+        if not os.path.isfile(os.path.join(ddir, "design.md")):
+            raise GateError("design.md is missing for %s — run /acs:create-design %s first." % (owner, owner))
+        _require_completed(ddir, "create-design", owner, "run /acs:create-design %s first" % owner)
+    return ticket_id
+
+
+def gate_code(ctx, payload):
+    ticket_id, tdir, _ticket = _resolve_ticket_for_gate(ctx, payload, "code")
+    _require_completed(tdir, "create-spec", ticket_id, "run /acs:create-spec %s first" % ticket_id)
+    specs = os.path.join(tdir, "specs")
+    if not os.path.isdir(specs) or not [f for f in os.listdir(specs) if f.endswith(".md")]:
+        raise GateError("no specs found in %s — run /acs:create-spec %s first." % (specs, ticket_id))
+    return ticket_id
+
+
+def gate_create_pr(ctx, payload):
+    ticket_id, tdir, _ticket = _resolve_ticket_for_gate(ctx, payload, "create-pr")
+    _require_completed(tdir, "code", ticket_id, "run /acs:code %s first" % ticket_id)
+    state = load_state(tdir, "code", ticket_id)
+    if state["states"].get("verifier_passed") is not True:
+        raise GateError(
+            "/code completed but its verifier did not pass for %s (verifier_passed != true in code-state.json); "
+            "re-run /acs:code %s until the review loop reports zero findings." % (ticket_id, ticket_id)
+        )
+    return ticket_id
+
+
+def gate_merge_pr(ctx, payload):
+    ticket_id, tdir, _ticket = _resolve_ticket_for_gate(ctx, payload, "merge-pr")
+    pipeline = load_pipeline(tdir, ticket_id)
+    candidates = ["create-pr"] + PRODUCT_SKILLS if pipeline.get("flow") != "product" else PRODUCT_SKILLS + ["create-pr"]
+    for skill in candidates:
+        state = read_json(state_path(tdir, skill))
+        if isinstance(state, dict):
+            pr = (state.get("states") or {}).get("pr") or {}
+            if pr.get("url") or pr.get("number"):
+                if last_run_status(tdir, skill) == "completed":
+                    return ticket_id
+    raise GateError(
+        "no PR reference recorded for %s — /acs:create-pr (or the product-level skill) must complete first." % ticket_id
+    )
+
+
+GATES = {
+    "create-prd": gate_create_prd,
+    "create-architecture": gate_create_architecture,
+    "create-project": gate_create_project,
+    "create-ticket": gate_create_ticket,
+    "create-design": gate_create_design,
+    "create-spec": gate_create_spec,
+    "code": gate_code,
+    "create-pr": gate_create_pr,
+    "merge-pr": gate_merge_pr,
+}
+
+
+def tracker_cli_warning(settings):
+    provider = (settings.get("tracker") or {}).get("provider", "local")
+    if provider == "github" and not shutil.which("gh"):
+        return "tracker.provider is 'github' but the gh CLI is not installed — tracker sync will fail."
+    if provider == "jira" and not shutil.which("acli"):
+        return "tracker.provider is 'jira' but the acli CLI is not installed — tracker sync will fail."
+    return None
+
+
+def run_pre(skill):
+    """Entry point for pre-<skill>.py: read the hook payload from stdin, gate, exit 0/2."""
+    try:
+        payload = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        payload = {}
+    cwd = payload.get("cwd") or os.getcwd()
+    try:
+        ctx = build_context(cwd)
+        warn = tracker_cli_warning(ctx["settings"])
+        if warn:
+            sys.stderr.write("acs: warning: %s\n" % warn)
+        GATES[skill](ctx, payload)
+    except GateError as exc:
+        sys.stderr.write("acs pre-%s: blocked — %s\n" % (skill, exc))
+        sys.exit(2)
+    except Exception as exc:  # fail closed: a gating system must not fail open
+        sys.stderr.write("acs pre-%s: blocked — unexpected error in gate: %r\n" % (skill, exc))
+        sys.exit(2)
+    sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# Post-hook persistence
+# ---------------------------------------------------------------------------
+
+def _read_result_from_argv():
+    """post-<skill>.py CLI: --result-file <path> | JSON on stdin, plus convenience flags."""
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--result-file", help="path to a JSON result document")
+    parser.add_argument("--ticket", help="ticket id (overrides pointer/branch resolution)")
+    parser.add_argument("--status", choices=[s for s in RUN_STATUSES if s != "in_progress"])
+    parser.add_argument("--stop-reason")
+    args = parser.parse_args()
+    result = {}
+    if args.result_file:
+        data = read_json(args.result_file)
+        if not isinstance(data, dict):
+            sys.stderr.write("acs: result file %s is missing or not a JSON object\n" % args.result_file)
+            sys.exit(1)
+        result = data
+    elif not sys.stdin.isatty():
+        raw = sys.stdin.read().strip()
+        if raw:
+            try:
+                result = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                sys.stderr.write("acs: invalid JSON result on stdin: %s\n" % exc)
+                sys.exit(1)
+    if args.status:
+        result["status"] = args.status
+    if args.stop_reason:
+        result["stop_reason"] = args.stop_reason
+    result.setdefault("status", "completed")
+    return result, args.ticket
+
+
+def _epic_auto_done(ctx, ticket):
+    """When the merged ticket is the last open child of an epic, mark the epic done."""
+    parent_id, pdir = parent_epic_dir(ctx, ticket)
+    if not parent_id or not pdir:
+        return None
+    index = read_json(index_path(ctx["workspace"], ctx["repo_id"])) or {"tickets": {}}
+    parent_ticket = load_ticket(pdir)
+    children = (parent_ticket or {}).get("children") or (index["tickets"].get(parent_id, {}).get("children")) or []
+    if not children:
+        return None
+    for child in children:
+        if child == ticket["id"]:
+            continue
+        entry = index["tickets"].get(child)
+        if not entry or entry.get("status") != "done":
+            return None
+    if parent_ticket:
+        parent_ticket["status"] = "done"
+        save_ticket(pdir, parent_ticket)
+        update_index(ctx["workspace"], ctx["repo_id"], parent_ticket)
+        return parent_id
+    return None
+
+
+def _archive_partition(ctx, tdir, ticket_id):
+    dest_root = archive_dir(ctx["workspace"], ctx["repo_id"])
+    os.makedirs(dest_root, exist_ok=True)
+    dest = os.path.join(dest_root, ticket_id)
+    if os.path.isdir(dest):
+        dest = os.path.join(dest_root, "%s-%s" % (ticket_id, now_iso().replace(":", "")))
+    shutil.move(tdir, dest)
+    return dest
+
+
+def _clear_pointers_for_ticket(ctx, ticket_id):
+    sdir = sessions_dir(ctx["workspace"], ctx["repo_id"])
+    if not os.path.isdir(sdir):
+        return
+    for name in os.listdir(sdir):
+        if not name.endswith(".json"):
+            continue
+        pointer = read_json(os.path.join(sdir, name))
+        if isinstance(pointer, dict) and pointer.get("ticket_id") == ticket_id:
+            try:
+                os.unlink(os.path.join(sdir, name))
+            except OSError:
+                pass
+
+
+def run_post(skill):
+    """Entry point for post-<skill>.py."""
+    result, explicit_ticket = _read_result_from_argv()
+    cwd = os.getcwd()
+    try:
+        ctx = build_context(cwd)
+    except GateError as exc:
+        sys.stderr.write("acs post-%s: %s\n" % (skill, exc))
+        sys.exit(1)
+
+    ticket_id, _src = resolve_ticket_id(cwd, ctx["settings"], ctx["workspace"], ctx["repo_id"], explicit=explicit_ticket)
+    if not ticket_id:
+        sys.stderr.write("acs post-%s: could not resolve the ticket id (pass --ticket).\n" % skill)
+        sys.exit(1)
+    tdir, archived = find_ticket_partition(ctx["workspace"], ctx["repo_id"], ticket_id)
+    if archived or not os.path.isdir(tdir):
+        sys.stderr.write("acs post-%s: no active partition for %s.\n" % (skill, ticket_id))
+        sys.exit(1)
+
+    status = result.get("status", "completed")
+    state, entry = finalize_run(tdir, skill, ticket_id, result)
+    flow = "product" if skill in PRODUCT_SKILLS else "ticket"
+    summary = result.get("handoff_summary") or result.get("stop_reason")
+    update_pipeline(tdir, ticket_id, skill, status, summary=summary, flow=flow)
+
+    ticket = load_ticket(tdir)
+    epic_done = None
+    archived_to = None
+    if ticket:
+        if status == "completed":
+            if skill == "create-pr" and ticket.get("status") != "done":
+                ticket["status"] = "in_review"
+                save_ticket(tdir, ticket)
+            if skill in PRODUCT_SKILLS and (result.get("states") or {}).get("pr") and ticket.get("status") != "done":
+                ticket["status"] = "in_review"
+                save_ticket(tdir, ticket)
+            if skill == "merge-pr":
+                ticket["status"] = "done"
+                save_ticket(tdir, ticket)
+        update_index(ctx["workspace"], ctx["repo_id"], ticket)
+
+    update_metrics(
+        ctx["workspace"], ctx["repo_id"], run_entry=entry,
+        pr_created=(status == "completed" and bool((result.get("states") or {}).get("pr"))
+                    and skill in (["create-pr"] + PRODUCT_SKILLS)),
+        pr_merged=(skill == "merge-pr" and status == "completed"),
+    )
+
+    release_lock(tdir, cwd)
+
+    if skill == "merge-pr" and status == "completed" and ticket:
+        epic_done = _epic_auto_done(ctx, ticket)
+        update_index(ctx["workspace"], ctx["repo_id"], ticket, archived=True)
+        _clear_pointers_for_ticket(ctx, ticket_id)
+        archived_to = _archive_partition(ctx, tdir, ticket_id)
+
+    out = {"ok": True, "skill": skill, "ticket_id": ticket_id, "status": status}
+    if archived_to:
+        out["archived_to"] = archived_to
+    if epic_done:
+        out["epic_marked_done"] = epic_done
+    print(json.dumps(out, indent=2))
+    sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# SessionEnd safety net
+# ---------------------------------------------------------------------------
+
+def session_end(payload):
+    """Finalize any run this checkout left in_progress as `interrupted` and release
+    its lock — abnormal endings must still write state (docs/requirements/hooks.md)."""
+    cwd = payload.get("cwd") or os.getcwd()
+    try:
+        ctx = build_context(cwd)
+    except GateError:
+        return  # uninitialized repo: nothing to clean up
+    pointer = read_json(pointer_path(ctx["workspace"], ctx["repo_id"], ctx["checkout_id"]))
+    if not isinstance(pointer, dict) or not pointer.get("ticket_id"):
+        return
+    ticket_id = pointer["ticket_id"]
+    tdir, archived = find_ticket_partition(ctx["workspace"], ctx["repo_id"], ticket_id)
+    if archived or not os.path.isdir(tdir):
+        return
+    lock = read_lock(tdir)
+    if not (isinstance(lock, dict) and lock.get("checkout_id") == ctx["checkout_id"]):
+        return  # not our session's ticket anymore
+    for skill in HOOKED_SKILLS:
+        state = read_json(state_path(tdir, skill))
+        if not isinstance(state, dict):
+            continue
+        runs = state.get("runs") or []
+        if runs and isinstance(runs[-1], dict) and runs[-1].get("status") == "in_progress":
+            _state, entry = finalize_run(tdir, skill, ticket_id, {
+                "status": "interrupted",
+                "stop_reason": "session ended while the skill was in progress",
+            })
+            update_pipeline(tdir, ticket_id, skill, "interrupted",
+                            summary="session ended mid-skill",
+                            flow="product" if skill in PRODUCT_SKILLS else "ticket")
+            # keep repo-level metrics consistent with the ticket ledger:
+            # an interrupted run still spent time/tokens
+            update_metrics(ctx["workspace"], ctx["repo_id"], run_entry=entry)
+    release_lock(tdir, cwd)

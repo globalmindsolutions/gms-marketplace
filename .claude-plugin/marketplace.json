@@ -1,0 +1,17 @@
+{
+  "name": "gms",
+  "owner": {
+    "name": "Global Mind Solutions"
+  },
+  "metadata": {
+    "description": "Global Mind Solutions plugin marketplace for Claude Code. First plugin: acs (Autonomous Coding Skills). Plugin updates reach users only when the plugin's own version bumps (see plugins/acs/CHANGELOG.md).",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "acs",
+      "source": "./plugins/acs",
+      "description": "Autonomous Coding Skills - an agentic software-delivery workflow: PRD, architecture, tickets, design, specs, TDD implementation with review loop, PR, and merge; hook-gated, resumable, workspace-backed."
+    }
+  ]
+}

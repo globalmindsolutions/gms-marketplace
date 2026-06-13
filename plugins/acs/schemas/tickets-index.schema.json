@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolutions/acs/plugins/acs/schemas/tickets-index.schema.json",
+  "title": "acs tickets-index.json",
+  "description": "Repo-level index of every ticket (including archived ones) at <workspace>/<repo>/tickets-index.json. Lets skills and users list work without scanning partitions.",
+  "type": "object",
+  "required": ["tickets"],
+  "properties": {
+    "tickets": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["id", "type", "status"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+          "title": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "type": {"enum": ["epic", "story", "task"]},
+          "status": {"enum": ["open", "in_progress", "in_review", "done"]},
+          "parent": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+          "children": {"type": "array", "items": {"type": "string"}},
+          "needs_design": {"oneOf": [{"type": "boolean"}, {"type": "null"}]},
+          "external": {"oneOf": [{"type": "object"}, {"type": "null"}]},
+          "archived": {"type": "boolean"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
