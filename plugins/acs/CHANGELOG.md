@@ -13,6 +13,17 @@ GitHub release using that section as the notes.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-13
+
+### Fixed
+
+- Plugin failed to install on current Claude Code (manifest validation:
+  `Unrecognized key: "displayName"`), leaving `acs@gms-plugins` uninstallable
+  even after the v0.1.1 hooks fix. Removed the unsupported `displayName` key
+  from `plugin.json`; the marketplace lists the plugin by `name` +
+  `description`. Caught by the M2-0 validation spike
+  ([docs/product/m2-0-validation-spike.md](../../docs/product/m2-0-validation-spike.md)).
+
 ## [0.1.1] - 2026-06-13
 
 ### Fixed
@@ -62,6 +73,7 @@ Initial release.
   release from the matching changelog section when the plugin manifest
   version changes on `main`.
 
-[Unreleased]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/globalmindsolutions/gms-marketplace/releases/tag/v0.1.0
