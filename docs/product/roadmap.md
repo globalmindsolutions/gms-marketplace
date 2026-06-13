@@ -36,6 +36,10 @@ the docs. Step-by-step runbook with per-step assertions:
 
 - **Done when:** a clean end-to-end run, or a logged defect list cut as a
   fast-follow **v0.1.2**. Gates the dogfood epic (E3).
+- **Status (2026-06-13):** ✅ **green** — clean end-to-end run against v0.1.2
+  (G1/G2/G6 observed, ~$2.43 measured for G5; one doc-only nit, no product
+  defects). See the run record in
+  [m2-0-validation-spike.md](m2-0-validation-spike.md#run-record).
 
 ### Epic E1 — Behavioral eval harness *(M2 backbone)*
 
@@ -43,7 +47,10 @@ Traces G1, G3, G4, G5. The regression net that makes dogfooding and every
 future change safe; built on what M2-0 learns by hand.
 
 - **E1.1** — Headless `claude -p` scenario runner in a sandbox repo, asserting
-  on workspace artifacts rather than prose output.
+  on workspace artifacts rather than prose output. *Scaffolded:*
+  [`evals/`](../../evals/README.md) — tiered runner (free gate checks + paid
+  `claude -p`), `Sandbox`/`Check` harness, 2 seed scenarios (both G1, green).
+  Remaining: more scenarios (E1.3) and the nightly job (E1.4).
 - **E1.2** — Description-trigger evals for all 12 skills (the right skill fires
   for a given request).
 - **E1.3** — Per-goal assertion scenarios: zero gate escapes (G1),

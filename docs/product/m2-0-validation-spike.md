@@ -159,11 +159,61 @@ Record one of two outcomes against this runbook:
   fixes as **v0.1.2** (bump `plugin.json` + `marketplace.json` + CHANGELOG,
   same release flow as v0.1.1), and re-run the spike against v0.1.2.
 
+### Run record
+
+**2026-06-13 · `acs` v0.1.2 · CLEAN RUN** ✅
+
+Executed against the installed `acs@gms-plugins` **v0.1.2** in a throwaway
+consumer repo (`/tmp/acs-spike`, workspace `/tmp/acs-spike-workspace`) with a
+real GitHub remote (`ducnd0192/acs-spike-m20`). Every functional `ASSERT`
+passed; no product defects. One documentation nit in this runbook (D1 below).
+
+- **Step 0** — v0.1.2 installs and loads clean; no *Duplicate hooks* / *Unrecognized
+  key: displayName* errors. (G6) ✅
+- **Step 2 (G1 core)** — gate exits 2 and blocks before the skill runs, in both a
+  hand-fed hook payload **and a real headless `claude` session**: no settings →
+  `Run /acs:init first.`; settings + no ticket → `… run /acs:create-ticket first.`;
+  non-acs skills pass through (exit 0). The gate advanced by exactly one step at
+  every stage (`init → create-ticket → create-spec → code → create-pr`). ✅
+- **Step 1** — `/acs:init` wrote project `settings.json` + gitignored
+  `settings.local.json` (workspace_path), created+probed the workspace,
+  validation passed. (G6) ✅
+- **Step 3** — `SPIKE-1` allocated (prefix honored); repo partition has
+  `tickets-index.json`/`counters.json`/`metrics.json`; ticket partition has
+  `ticket.json` (`type: task`, `needs_design: false`) + `pipeline-state.json`. ✅
+- **Step 4** — `/acs:ship` resumed from `code` in a **fresh session using
+  workspace state alone** (G2), ran the TDD `code` cycle (verifier 0 findings),
+  and `create-pr` opened
+  [PR #1](https://github.com/ducnd0192/acs-spike-m20/pull/1): title
+  `[SPIKE-1] …`, base `main`, branch `task/SPIKE-1-…`, `ACS` label — **stopped
+  before merge.** (G1, G2) ✅
+- **Step 5** — `/acs:merge-pr` readiness passed → squash-merged → remote +
+  local branch deleted → ticket `done` → partition moved to `archive/SPIKE-1`;
+  `tickets-index` shows `done`/`archived`, `metrics.json` reflects the run. ✅
+- **Measured for the PRD metrics table (G5):** 5 runs · ~1770 working-seconds ·
+  ~385k in / ~72k out tokens · **~$2.43** total · PR diff 3 files (well under the
+  ~400-line G4 ceiling).
+
+**Verdict:** M2-0 is **green**. Unblocks **E3 (dogfood)** and gives **E1** its
+hand-checked baseline.
+
+> Method note: the run was driven via headless `claude -p`. A follow-up probe
+> (`--output-format stream-json`) confirmed the `Skill` tool dispatches
+> **faithfully** in headless mode — it fires the real `PreToolUse` gate, returns
+> the real `SKILL.md` body (`Launching skill: …`, `is_error=None`), and the
+> coordinator executes it inline. Post-hooks are invoked by the coordinator via
+> Bash per `SKILL.md` (there is **no** `PostToolUse` auto-hook), so they run
+> identically headless and interactive. The only auto-fired hook this run did not
+> exercise is the **`SessionEnd`** safety net (abnormal-interruption cleanup:
+> marks in-flight runs `interrupted`, releases the lock) — E1 should add a
+> kill-mid-run scenario to cover it. (An earlier run's claim that the `Skill`
+> tool "errored" was a model misnarration; the probe shows the happy path works.)
+
 ### Defect log
 
 | # | Step | Expected (per docs) | Observed | Severity | Fix / ticket |
 |---|------|---------------------|----------|----------|--------------|
-|   |      |                     |          |          |              |
+| D1 | 3 | Ticket partition "contains … a `.lock`" after `create-ticket` completes | No `.lock` after completion — `release_lock()` (`os.unlink`) runs in the post-hook on success; the lock only exists *during* an active run | low (doc only — behavior is correct, G1 intact) | Reword this runbook's Step 3 assertion to "a `.lock` **during an active run** (released on completion)" |
 
 ## Cleanup
 
