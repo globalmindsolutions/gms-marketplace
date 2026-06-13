@@ -133,7 +133,7 @@ Resolved questions, newest first. Details live in the linked docs.
 
 | Term | Meaning |
 |------|---------|
-| **Marketplace** | The Claude Code plugin marketplace (`gms-plugins`) this repo publishes, through which `acs` is distributed. |
+| **Marketplace** | The Claude Code plugin marketplace (`gms-marketplace`) this repo publishes, through which `acs` is distributed. |
 | **`acs` plugin** | The plugin implementing the delivery workflow these requirements describe. |
 | **Consumer repo** | Any user repository where the `acs` plugin is installed and used. |
 | **Workspace** | A folder *outside* the consumer repo where all skills and hooks read/write state, partitioned per repo and ticket. |

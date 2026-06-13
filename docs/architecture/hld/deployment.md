@@ -19,7 +19,7 @@ flowchart LR
         PY["python3 (stdlib) · git · gh · acli? · xmllint?"]
     end
 
-    MR -- "claude plugin marketplace add<br/>claude plugin install acs@gms-plugins" --> PI
+    MR -- "claude plugin marketplace add<br/>claude plugin install acs@gms-marketplace" --> PI
     MR --- ACT
     CC --> PI
     PI -- hooks/skills --> CC

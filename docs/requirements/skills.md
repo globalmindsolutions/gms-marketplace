@@ -105,7 +105,7 @@ this skill owns the workflow around it.
   latest release; summarizes the CHANGELOG delta between them and calls out
   breaking changes (MAJOR bumps, settings-key changes, state-shape notes).
 - With user consent, refreshes the marketplace
-  (`claude plugin marketplace update gms-plugins`) — updates reach consumers only
+  (`claude plugin marketplace update gms-marketplace`) — updates reach consumers only
   when the plugin's `version` bumps (semver; automated release tagging).
 - Runs post-update migration checks: settings valid against the new schema,
   status-line paths still resolve (they hold absolute install paths —

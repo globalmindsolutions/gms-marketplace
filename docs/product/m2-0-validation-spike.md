@@ -7,7 +7,7 @@
 > (gates the dogfood epic E3, and seeds the E1 eval harness — E1 systematizes
 > by machine what this spike checks by hand).
 
-**Target build:** `acs` **v0.1.1** (`acs@gms-plugins`). v0.1.0 is not
+**Target build:** `acs` **v0.1.1** (`acs@gms-marketplace`). v0.1.0 is not
 installable end to end — it fails to load with *"Duplicate hooks file
 detected"*; v0.1.1 ([#7](https://github.com/globalmindsolutions/gms-marketplace/pull/7))
 is the first build this spike can run against.
@@ -43,7 +43,7 @@ printf 'def health():\n    return "ok"\n' > app.py
 git add -A && git commit -qm "seed"
 
 claude plugin marketplace add globalmindsolutions/gms-marketplace
-claude plugin install acs@gms-plugins
+claude plugin install acs@gms-marketplace
 ```
 
 - ✅ **ASSERT (v0.1.1 regression):** install completes and the plugin loads
@@ -168,6 +168,6 @@ Record one of two outcomes against this runbook:
 ## Cleanup
 
 ```bash
-claude plugin uninstall acs@gms-plugins
+claude plugin uninstall acs@gms-marketplace
 rm -rf /tmp/acs-spike ~/acs-workspace
 ```

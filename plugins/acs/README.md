@@ -25,11 +25,11 @@ On the machine running Claude Code, inside the consumer repo:
 
 ## Install
 
-From the `gms-plugins` marketplace (this repository):
+From the `gms-marketplace` marketplace (this repository):
 
 ```text
 claude plugin marketplace add globalmindsolutions/gms-marketplace
-claude plugin install acs@gms-plugins
+claude plugin install acs@gms-marketplace
 ```
 
 Or through the UI: run `/plugin` inside a Claude Code session, add the

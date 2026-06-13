@@ -4,7 +4,7 @@ Claude Code agent skills for autonomous coding workflows.
 
 ## Plugin marketplace
 
-This repository is a **Claude Code plugin marketplace** named **`gms-plugins`**
+This repository is a **Claude Code plugin marketplace** named **`gms-marketplace`**
 (manifest: [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)).
 Add it and install plugins from it. Pin the marketplace to a release tag for a
 controlled rollout (recommended), or omit the tag to track the latest:
@@ -12,7 +12,7 @@ controlled rollout (recommended), or omit the tag to track the latest:
 ```text
 # Gated: pin to an immutable marketplace release — only an explicit re-pin upgrades you
 claude plugin marketplace add globalmindsolutions/gms-marketplace@marketplace-v0.1.0
-claude plugin install acs@gms-plugins
+claude plugin install acs@gms-marketplace
 
 # Rolling: track the default branch — updates arrive on every plugin version bump
 claude plugin marketplace add globalmindsolutions/gms-marketplace
@@ -27,7 +27,7 @@ newer `marketplace-v<version>` tag:
 ```json
 {
   "extraKnownMarketplaces": {
-    "gms-plugins": {
+    "gms-marketplace": {
       "source": {
         "source": "github",
         "repo": "globalmindsolutions/gms-marketplace",
@@ -50,7 +50,7 @@ list the exact plugin versions it bundles ([CHANGELOG](plugins/acs/CHANGELOG.md)
 - **Pinned consumers** (recommended) never receive a plugin update without an
   explicit marketplace release: upgrade by re-pinning `ref` to a newer
   `marketplace-v<version>` tag, then reload.
-- **Rolling consumers** run `claude plugin marketplace update gms-plugins` (or start a
+- **Rolling consumers** run `claude plugin marketplace update gms-marketplace` (or start a
   new session) to fetch the latest plugin versions.
 
 Either way, **`/acs:update`** inside a session compares installed vs latest,

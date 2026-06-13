@@ -81,7 +81,7 @@ Then ask for explicit confirmation to proceed with the update.
 On confirmation, run:
 
 ```bash
-claude plugin marketplace update gms-plugins
+claude plugin marketplace update gms-marketplace
 ```
 
 If the `claude` CLI is not on PATH (or refuses to run nested inside a
@@ -132,7 +132,7 @@ Every terminal outcome ends your final message with the standard block
 ```markdown
 ## /acs:update · <status>
 
-- **Scope**: installed <x.y.z> -> latest <x.y.z> (marketplace gms-plugins)
+- **Scope**: installed <x.y.z> -> latest <x.y.z> (marketplace gms-marketplace)
 - **Status**: <status> — <one line>
 - **Results**: changelog delta summarized (<n> versions); marketplace refresh run/printed; migration checks (settings, status-line paths, workspace)
 - **Findings**: <breaking changes, invalid settings, broken paths, or "none">

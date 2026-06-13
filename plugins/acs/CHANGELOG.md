@@ -18,7 +18,7 @@ GitHub release using that section as the notes.
 ### Fixed
 
 - Plugin failed to install on current Claude Code (manifest validation:
-  `Unrecognized key: "displayName"`), leaving `acs@gms-plugins` uninstallable
+  `Unrecognized key: "displayName"`), leaving `acs@gms-marketplace` uninstallable
   even after the v0.1.1 hooks fix. Removed the unsupported `displayName` key
   from `plugin.json`; the marketplace lists the plugin by `name` +
   `description`. Caught by the M2-0 validation spike
