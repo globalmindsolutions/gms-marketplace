@@ -3,7 +3,7 @@
 ```mermaid
 flowchart LR
     subgraph github["GitHub"]
-        MR["globalmindsolutions/acs<br/>(marketplace repo)"]
+        MR["globalmindsolutions/gms-marketplace<br/>(marketplace repo)"]
         ACT["GitHub Actions<br/>CI: tests + validation<br/>Release: tag on version bump"]
         PRS["Consumer-repo PRs"]
     end
@@ -19,7 +19,7 @@ flowchart LR
         PY["python3 (stdlib) · git · gh · acli? · xmllint?"]
     end
 
-    MR -- "claude plugin marketplace add<br/>claude plugin install acs@gms" --> PI
+    MR -- "claude plugin marketplace add<br/>claude plugin install acs@gms-plugins" --> PI
     MR --- ACT
     CC --> PI
     PI -- hooks/skills --> CC

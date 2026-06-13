@@ -1,11 +1,11 @@
 {
-  "name": "gms",
+  "name": "gms-plugins",
+  "version": "0.1.0",
   "owner": {
     "name": "Global Mind Solutions"
   },
   "metadata": {
-    "description": "Global Mind Solutions plugin marketplace for Claude Code. First plugin: acs (Autonomous Coding Skills). Plugin updates reach users only when the plugin's own version bumps (see plugins/acs/CHANGELOG.md).",
-    "version": "0.1.0"
+    "description": "Global Mind Solutions plugin marketplace for Claude Code. First plugin: acs (Autonomous Coding Skills). Plugin updates reach users only when the plugin's own version bumps (see plugins/acs/CHANGELOG.md)."
   },
   "plugins": [
     {

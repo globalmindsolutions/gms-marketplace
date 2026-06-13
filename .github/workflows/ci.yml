@@ -45,6 +45,133 @@ jobs:
           done < <(find .claude-plugin plugins/acs -name '*.json' -not -path '*/__pycache__/*' -print0 | sort -z)
           exit "$status"
 
+      - name: Validate marketplace/plugin version consistency
+        run: |
+          python3 - <<'EOF'
+          import json
+          import os
+          import sys
+
+          with open(".claude-plugin/marketplace.json", encoding="utf-8") as fh:
+              mkt = json.load(fh)
+
+          plugin_root = (mkt.get("metadata") or {}).get("pluginRoot")
+          errors = []
+          warnings = []
+          seen = {}
+
+          for i, entry in enumerate(mkt.get("plugins", [])):
+              name = entry.get("name")
+              if not name:
+                  errors.append(f"plugins[{i}]: missing 'name'")
+                  continue
+              if name in seen:
+                  errors.append(f"duplicate plugin name '{name}' (entries {seen[name]} and {i})")
+              else:
+                  seen[name] = i
+
+              # Only relative-path sources have a local plugin.json to cross-check.
+              # Object sources (github/url/git-subdir/npm) are fetched remotely.
+              src = entry.get("source")
+              if not isinstance(src, str):
+                  continue
+              rel = src
+              if plugin_root and not rel.startswith(("./", "/")):
+                  rel = os.path.join(plugin_root, rel)
+
+              manifest = os.path.join(rel, ".claude-plugin", "plugin.json")
+              if not os.path.exists(manifest):
+                  errors.append(f"'{name}': source '{src}' has no plugin.json at {manifest}")
+                  continue
+              with open(manifest, encoding="utf-8") as fh:
+                  pj = json.load(fh)
+
+              pj_name = pj.get("name")
+              if pj_name and pj_name != name:
+                  errors.append(f"'{name}': marketplace entry name != plugin.json name '{pj_name}'")
+
+              pj_version = pj.get("version")
+              if not pj_version:
+                  warnings.append(f"'{name}': plugin.json declares no 'version' (updates will track the commit SHA)")
+
+              entry_version = entry.get("version")
+              if entry_version is not None and pj_version is not None and entry_version != pj_version:
+                  errors.append(
+                      f"'{name}': marketplace entry version '{entry_version}' != plugin.json version "
+                      f"'{pj_version}'. Remove the entry version or align them — plugin.json wins silently."
+                  )
+
+          for w in warnings:
+              print(f"::warning::{w}")
+          for e in errors:
+              print(f"::error::{e}", file=sys.stderr)
+          if errors:
+              sys.exit(1)
+          print(f"Marketplace/plugin version consistency OK ({len(seen)} plugin(s)).")
+          EOF
+
+      - name: Require marketplace version bump when a plugin version bumps
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          python3 - "$(git rev-parse FETCH_HEAD)" <<'EOF'
+          import json
+          import glob
+          import subprocess
+          import sys
+
+          base = sys.argv[1]
+
+          def at_base(path):
+              # Returns the parsed JSON of `path` at the PR base, or None if the
+              # file did not exist there (newly added in this PR).
+              try:
+                  out = subprocess.run(
+                      ["git", "show", f"{base}:{path}"],
+                      capture_output=True, text=True, check=True,
+                  ).stdout
+                  return json.loads(out)
+              except subprocess.CalledProcessError:
+                  return None
+
+          def current(path):
+              with open(path, encoding="utf-8") as fh:
+                  return json.load(fh)
+
+          def mkt_version(doc):
+              if not doc:
+                  return None
+              return doc.get("version") or (doc.get("metadata") or {}).get("version")
+
+          # Which existing plugins changed their declared version in this PR?
+          changed = []
+          for manifest in sorted(glob.glob("plugins/*/.claude-plugin/plugin.json")):
+              cur_v = current(manifest).get("version")
+              base_doc = at_base(manifest)
+              base_v = base_doc.get("version") if base_doc else None
+              if base_v is not None and cur_v != base_v:
+                  changed.append((manifest, base_v, cur_v))
+
+          mkt_path = ".claude-plugin/marketplace.json"
+          mkt_cur = mkt_version(current(mkt_path))
+          mkt_base = mkt_version(at_base(mkt_path))
+          mkt_changed = mkt_base is not None and mkt_cur != mkt_base
+
+          if changed and not mkt_changed:
+              for manifest, b, c in changed:
+                  print(f"::error::{manifest} version {b} -> {c}, but marketplace version stayed {mkt_cur}.")
+              print(
+                  f"::error::Bump \"version\" in {mkt_path} whenever a plugin version changes, so a new "
+                  "marketplace-v<version> release tag is cut for consumers to pin to."
+              )
+              sys.exit(1)
+
+          if changed:
+              print(f"OK: {len(changed)} plugin bump(s) paired with marketplace {mkt_base} -> {mkt_cur}.")
+          else:
+              print("OK: no plugin version changes in this PR.")
+          EOF
+
       - name: Validate JSON Schema documents (structural)
         run: |
           python3 - <<'EOF'

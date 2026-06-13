@@ -25,15 +25,15 @@ On the machine running Claude Code, inside the consumer repo:
 
 ## Install
 
-From the `gms` marketplace (this repository):
+From the `gms-plugins` marketplace (this repository):
 
 ```text
-claude plugin marketplace add globalmindsolutions/acs
-claude plugin install acs@gms
+claude plugin marketplace add globalmindsolutions/gms-marketplace
+claude plugin install acs@gms-plugins
 ```
 
 Or through the UI: run `/plugin` inside a Claude Code session, add the
-marketplace `globalmindsolutions/acs`, then install `acs` from it.
+marketplace `globalmindsolutions/gms-marketplace`, then install `acs` from it.
 
 ## Quick start
 

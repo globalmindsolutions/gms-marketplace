@@ -24,17 +24,20 @@ checks in Step 6.
 
 ## Step 2 — Latest released version
 
-Prefer the GitHub release (the Release workflow tags `v<version>` on every
-version bump to main):
+Prefer the GitHub release. The per-plugin Release workflow tags `v<version>` on
+every plugin version bump; a separate Marketplace release workflow tags
+`marketplace-v<version>`, so filter to plugin tags (`^v<digit>`) to avoid
+picking up a catalog release:
 
 ```bash
-gh release view --repo globalmindsolutions/acs --json tagName,publishedAt --jq '.tagName + " " + .publishedAt'
+gh release list --repo globalmindsolutions/gms-marketplace --json tagName,publishedAt \
+  --jq '[.[] | select(.tagName | test("^v[0-9]"))] | sort_by(.publishedAt) | last | "\(.tagName) \(.publishedAt)"'
 ```
 
 Fallback when `gh` is unavailable or unauthenticated:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/globalmindsolutions/acs/main/plugins/acs/.claude-plugin/plugin.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"
+curl -fsSL https://raw.githubusercontent.com/globalmindsolutions/gms-marketplace/main/plugins/acs/.claude-plugin/plugin.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"
 ```
 
 If both fail (offline, repo unreachable): report that the version check is
@@ -59,7 +62,7 @@ Fetch the changelog and extract every `## [<version>]` section strictly
 between the installed and latest versions (newest first):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/globalmindsolutions/acs/main/plugins/acs/CHANGELOG.md
+curl -fsSL https://raw.githubusercontent.com/globalmindsolutions/gms-marketplace/main/plugins/acs/CHANGELOG.md
 ```
 
 Present the delta to the user. Call out explicitly:
@@ -78,7 +81,7 @@ Then ask for explicit confirmation to proceed with the update.
 On confirmation, run:
 
 ```bash
-claude plugin marketplace update gms
+claude plugin marketplace update gms-plugins
 ```
 
 If the `claude` CLI is not on PATH (or refuses to run nested inside a
@@ -129,7 +132,7 @@ Every terminal outcome ends your final message with the standard block
 ```markdown
 ## /acs:update · <status>
 
-- **Scope**: installed <x.y.z> -> latest <x.y.z> (marketplace gms)
+- **Scope**: installed <x.y.z> -> latest <x.y.z> (marketplace gms-plugins)
 - **Status**: <status> — <one line>
 - **Results**: changelog delta summarized (<n> versions); marketplace refresh run/printed; migration checks (settings, status-line paths, workspace)
 - **Findings**: <breaking changes, invalid settings, broken paths, or "none">
