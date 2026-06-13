@@ -71,11 +71,13 @@ thing.
   skill (never naming it) must route to that skill; all 12 green. The
   `trigger()` helper captures the first `Skill` call and kills the run, so the
   body never executes — each probe costs only the time-to-route.
-- **E1.3 (in progress)** — per-goal scenarios. Added `resume_and_verify`
-  (paid, G2 + G3): seeds a code-ready pipeline for free, then one fresh
-  `claude -p` `code` session — told only the ticket id — must resume from the
-  workspace specs (G2) and pass the verifier so the create-pr gate opens (G3).
-  Remaining: PR ≤ ~400 lines (G4, needs the `forge` tier) and a kill-mid-run
-  scenario for the `SessionEnd` safety net.
+- **E1.3 (done)** — per-goal scenarios. `resume_and_verify` (paid) seeds a
+  code-ready pipeline for free, then one fresh `claude -p` `code` session — told
+  only the ticket id — must resume from the workspace specs (G2), pass the
+  verifier so the create-pr gate opens (G3), and keep the change under the
+  ~400-line PR cap (G4, measured as the repo diff since the seed — no forge
+  needed). `session_end_safety_net` (free) covers the SessionEnd abnormal-ending
+  cleanup against the shipped build. With `install_gate_smoke` (G1), the harness
+  now exercises G1–G4 plus cleanup.
 - **E1.4** — nightly CI job (needs an API-credential secret) with
   variance/flake handling.

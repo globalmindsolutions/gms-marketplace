@@ -116,6 +116,12 @@ class Sandbox:
         self._git("commit", "-qm", "seed")
         if self._init:
             self._seed_settings()
+        # Baseline = seed + committed acs config, so changed_lines() later
+        # measures only the feature diff (settings.json is committed in real
+        # repos; settings.local.json stays gitignored).
+        self.seed_sha = subprocess.run(
+            ["git", "-C", self.repo, "rev-parse", "HEAD"],
+            capture_output=True, text=True).stdout.strip()
         return self
 
     def __exit__(self, *exc):
@@ -142,6 +148,9 @@ class Sandbox:
         self._write(".acs/settings.local.json", {"workspace_path": self.ws})
         with open(os.path.join(self.repo, ".gitignore"), "a") as fh:
             fh.write(".acs/settings.local.json\n")
+        # Commit the shared config (the gitignored local file stays untracked).
+        self._git("add", ".acs/settings.json", ".gitignore")
+        self._git("commit", "-qm", "acs config")
 
     def _write(self, rel, data):
         path = os.path.join(self.repo, rel)
@@ -209,6 +218,38 @@ class Sandbox:
             input=payload, capture_output=True, text=True, cwd=self.repo,
         )
         return proc.returncode, (proc.stderr or "").strip()
+
+    def session_end(self):
+        """Run the installed SessionEnd hook for this checkout.
+
+        Finalizes any run this checkout left in_progress as `interrupted` and
+        releases the ticket lock — the abnormal-ending safety net. Returns
+        (exit_code, stderr).
+        """
+        proc = subprocess.run(
+            [sys.executable, os.path.join(self.scripts, "dispatch.py"),
+             "session-end"],
+            input=json.dumps({"cwd": self.repo}), capture_output=True,
+            text=True, cwd=self.repo,
+        )
+        return proc.returncode, (proc.stderr or "").strip()
+
+    def changed_lines(self):
+        """Total added+deleted lines in the repo since the seed commit.
+
+        Stages everything first so committed, uncommitted, and untracked
+        changes all count — the same diff size a PR off the seed would show
+        (the G4 ≤ ~400-line check, measured without needing a forge)."""
+        self._git("add", "-A")
+        out = subprocess.run(
+            ["git", "-C", self.repo, "diff", "--numstat", "--cached",
+             self.seed_sha], capture_output=True, text=True).stdout
+        total = 0
+        for line in out.splitlines():
+            cols = line.split("\t")
+            if len(cols) >= 2:
+                total += sum(int(c) for c in cols[:2] if c.isdigit())
+        return total
 
     # -- paid tier: a real claude session --------------------------------- #
 
