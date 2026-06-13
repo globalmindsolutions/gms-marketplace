@@ -16,13 +16,67 @@ Epic-level scope (retrofit; built before dogfooding began):
 
 ## M2 — Hardening (v0.2)
 
-- **Epic: behavioral eval harness** — headless `claude -p` scenario suite in a
-  sandbox consumer repo asserting on workspace artifacts; description-trigger
-  evals for all 12 skills; nightly CI job.
-- **Epic: tracker-sync depth** — conflict-resolution UX, bulk import, epic
-  link fidelity on Jira/GitHub Projects.
-- **Epic: dogfood acs on acs** — every change to this repo ships via
-  `/acs:ship`; PRD/architecture amendments via re-runs; metrics published.
+Sequenced, not flat: M1 proved only the deterministic layer (hooks, schemas,
+Python units). The agentic behavior of the 12 skills is still unverified in a
+real consumer repo, which orders the work below — validate by hand, then
+systematize as evals, then dogfood. Tracker-sync runs as an independent,
+lower-priority track. Goal references (G1–G6) point at
+[`prd.md`](prd.md#goals--success-metrics).
+
+### M2-0 — Validation spike *(prerequisite, ~1 session)*
+
+Traces G1, G2, G6. Install published v0.1.0 into a throwaway consumer repo; run
+`/acs:init` → `/acs:create-ticket` → `/acs:ship` on a trivial change. Assert
+that workspace partitions, hook gates (exit-2 blocks), and the PR flow match
+the docs.
+
+- **Done when:** a clean end-to-end run, or a logged defect list cut as a
+  fast-follow **v0.1.1**. Gates the dogfood epic (E3).
+
+### Epic E1 — Behavioral eval harness *(M2 backbone)*
+
+Traces G1, G3, G4, G5. The regression net that makes dogfooding and every
+future change safe; built on what M2-0 learns by hand.
+
+- **E1.1** — Headless `claude -p` scenario runner in a sandbox repo, asserting
+  on workspace artifacts rather than prose output.
+- **E1.2** — Description-trigger evals for all 12 skills (the right skill fires
+  for a given request).
+- **E1.3** — Per-goal assertion scenarios: zero gate escapes (G1),
+  resume-from-state-only (G2), zero verifier findings within the 3-iteration
+  cap (G3), PR ≤ ~400 changed lines (G4).
+- **E1.4** — Nightly CI job with variance/flake handling.
+
+### Epic E3 — Dogfood acs on acs
+
+Traces all goals (proof by usage). Starts once M2-0 is green and E1 provides a
+safety net.
+
+- **E3.1** — First dogfood act: allocate real ticket ids for this M2 plan via
+  `/acs:create-ticket` (the plan defines the epics; acs assigns the ids).
+- **E3.2** — Every change to this repo ships via `/acs:ship`; PRD/architecture
+  amendments via skill re-runs.
+- **E3.3** — Publish per-ticket metrics roll-ups (G5 cost transparency in
+  practice).
+
+### Epic E2 — Tracker-sync depth *(parallel, lower priority)*
+
+Traces the "team on a shared repo" persona. Independent of E1/E3 — slot in once
+dogfooding is rolling.
+
+- Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
+  Projects.
+
+### Sequence & exit
+
+```
+M2-0 spike ─▶ (v0.1.1 if needed) ─▶ E1 harness ─▶ E3 dogfood ─▶ M2 exit
+                                        └─────────▶ E2 tracker-sync (parallel)
+```
+
+**M2 exits → v0.2.0 when:** the eval harness is green nightly, ≥ 1 real acs
+change has shipped via `/acs:ship`, and PRD metrics G1–G5 are measured on real
+runs.
 
 ## M3 — GA (v1.0)
 
