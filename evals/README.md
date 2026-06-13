@@ -65,11 +65,14 @@ thing.
 
 ## Status / roadmap
 
-- **E1.1 (this)** — scenario runner + sandbox + artifact assertions. Seeded
+- **E1.1 (done)** — scenario runner + sandbox + artifact assertions. Seeded
   with `install_gate_smoke` (free, G1) and `create_ticket_artifacts` (paid, G1).
 - **E1.2** — description-trigger evals for all 12 skills.
-- **E1.3** — per-goal scenarios: gate escapes (G1), resume-from-state (G2),
-  verifier-clean within the 3-iteration cap (G3), PR ≤ ~400 lines (G4); plus a
-  kill-mid-run scenario for the `SessionEnd` safety net.
+- **E1.3 (in progress)** — per-goal scenarios. Added `resume_and_verify`
+  (paid, G2 + G3): seeds a code-ready pipeline for free, then one fresh
+  `claude -p` `code` session — told only the ticket id — must resume from the
+  workspace specs (G2) and pass the verifier so the create-pr gate opens (G3).
+  Remaining: PR ≤ ~400 lines (G4, needs the `forge` tier) and a kill-mid-run
+  scenario for the `SessionEnd` safety net.
 - **E1.4** — nightly CI job (needs an API-credential secret) with
   variance/flake handling.

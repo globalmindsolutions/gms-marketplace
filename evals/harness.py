@@ -143,6 +143,46 @@ class Sandbox:
             json.dump(data, fh, indent=2)
             fh.write("\n")
 
+    # -- deterministic seeding via the installed helper CLIs -------------- #
+    #
+    # These let a scenario fast-forward the pipeline to a known state without
+    # spending `claude` — e.g. seed "ready for /acs:code" so a single paid
+    # session can be asserted on. Same scripts the skills themselves invoke.
+
+    def run_script(self, script, *args, stdin=None):
+        return subprocess.run(
+            [sys.executable, os.path.join(self.scripts, script)] + list(args),
+            input=stdin, capture_output=True, text=True, cwd=self.repo)
+
+    def mint_ticket(self, title, ttype="task", needs_design=False, parent=None):
+        extra = ["--needs-design", "true" if needs_design else "false"]
+        if parent:
+            extra += ["--parent", parent]
+        out = self.run_script("new-ticket.py", "--title", title, "--type", ttype,
+                              *extra)
+        if out.returncode != 0:
+            raise AssertionError("new-ticket failed: %s" % out.stderr)
+        return json.loads(out.stdout)["ticket_id"]
+
+    def start_run(self, skill, ticket):
+        out = self.run_script("skill-start.py", "--skill", skill, "--ticket", ticket)
+        if out.returncode != 0:
+            raise AssertionError("skill-start %s failed: %s" % (skill, out.stderr))
+        return out
+
+    def complete_run(self, skill, ticket, result=None):
+        out = self.run_script("post-%s.py" % skill, "--ticket", ticket,
+                              stdin=json.dumps(result or {"status": "completed"}))
+        if out.returncode != 0:
+            raise AssertionError("post-%s failed: %s" % (skill, out.stderr))
+        return out
+
+    def write_repo_file(self, rel, content):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write(content)
+
     # -- free tier: the real installed gate ------------------------------- #
 
     def gate(self, skill, args=""):
