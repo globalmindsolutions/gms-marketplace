@@ -49,6 +49,15 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Marketplace version: ${VERSION}"
 
+      - name: Read marketplace title
+        id: title
+        run: |
+          # Human-readable label for the release title. Prefer an explicit
+          # displayName, else owner name + "Marketplace", else the catalog name.
+          TITLE="$(python3 -c "import json; m=json.load(open('.claude-plugin/marketplace.json')); print(m.get('displayName') or ((m.get('owner') or {}).get('name','') + ' Marketplace').strip() or m['name'])")"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+          echo "Release title: ${TITLE}"
+
       - name: Check whether tag already exists
         id: tag
         run: |
@@ -108,7 +117,7 @@ jobs:
           TAG="marketplace-v${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "marketplace ${TAG}"
+          git tag -a "${TAG}" -m "${{ steps.title.outputs.title }} v${{ steps.version.outputs.version }}"
           git push origin "${TAG}"
 
       - name: Create GitHub release
@@ -118,5 +127,5 @@ jobs:
         run: |
           TAG="marketplace-v${{ steps.version.outputs.version }}"
           gh release create "${TAG}" \
-            --title "marketplace ${TAG}" \
+            --title "${{ steps.title.outputs.title }} v${{ steps.version.outputs.version }}" \
             --notes-file marketplace-release-notes.md
