@@ -25,13 +25,17 @@ lower-priority track. Goal references (G1–G6) point at
 
 ### M2-0 — Validation spike *(prerequisite, ~1 session)*
 
-Traces G1, G2, G6. Install published v0.1.0 into a throwaway consumer repo; run
+Traces G1, G2, G6. Install published v0.1.1 into a throwaway consumer repo; run
 `/acs:init` → `/acs:create-ticket` → `/acs:ship` on a trivial change. Assert
 that workspace partitions, hook gates (exit-2 blocks), and the PR flow match
-the docs.
+the docs. Step-by-step runbook with per-step assertions:
+[m2-0-validation-spike.md](m2-0-validation-spike.md).
+
+> v0.1.1 was the first fast-follow: v0.1.0 failed to load on install
+> (duplicate hooks reference), so v0.1.1 is the build the spike targets.
 
 - **Done when:** a clean end-to-end run, or a logged defect list cut as a
-  fast-follow **v0.1.1**. Gates the dogfood epic (E3).
+  fast-follow **v0.1.2**. Gates the dogfood epic (E3).
 
 ### Epic E1 — Behavioral eval harness *(M2 backbone)*
 
