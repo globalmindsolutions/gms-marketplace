@@ -79,5 +79,13 @@ thing.
   needed). `session_end_safety_net` (free) covers the SessionEnd abnormal-ending
   cleanup against the shipped build. With `install_gate_smoke` (G1), the harness
   now exercises G1–G4 plus cleanup.
-- **E1.4** — nightly CI job (needs an API-credential secret) with
-  variance/flake handling.
+- **E1.4 (scaffolded)** — [`evals-nightly.yml`](../.github/workflows/evals-nightly.yml):
+  a nightly (07:00 UTC) + manual workflow that always runs the free tier and
+  runs the paid tier when an `ANTHROPIC_API_KEY` secret is present, retrying once
+  to absorb variance. It stays inert until the secret is added.
+
+  **To enable:** add an `ANTHROPIC_API_KEY` repo secret, then run it manually
+  (Actions → *Nightly evals* → *Run workflow*) to validate the claude-CLI and
+  plugin-install path before trusting the schedule. A full paid run spawns
+  several real `claude` sessions (a few dollars/night) — disable by removing the
+  secret or the `schedule:` trigger.
