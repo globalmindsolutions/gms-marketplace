@@ -6,7 +6,7 @@ produce — never on the model's prose. This is the regression net that makes
 dogfooding (E3) safe.
 
 This is the machine version of the [M2-0 validation
-spike](../docs/product/m2-0-validation-spike.md), which proved the same
+spike](../docs/product/spikes/m2-0-validation-spike.md), which proved the same
 behaviors once, by hand. See the [roadmap](../docs/product/roadmap.md#epic-e1--behavioral-eval-harness-m2-backbone)
 for E1.1–E1.4.
 

@@ -1,6 +1,6 @@
 # M2-0 — Validation Spike Runbook
 
-> Prerequisite for M2 (see [roadmap.md](roadmap.md#m2-0--validation-spike-prerequisite-1-session)).
+> Prerequisite for M2 (see [roadmap.md](../roadmap.md#m2-0--validation-spike-prerequisite-1-session)).
 > Run the published `acs` plugin end to end in a throwaway consumer repo and
 > assert that real behavior matches the docs. **Done when:** a clean
 > end-to-end run, or a logged defect list cut as a fast-follow **v0.1.2**
@@ -12,7 +12,7 @@ installable end to end — it fails to load with *"Duplicate hooks file
 detected"*; v0.1.1 ([#7](https://github.com/globalmindsolutions/gms-marketplace/pull/7))
 is the first build this spike can run against.
 
-**Goals traced** (from [prd.md](prd.md#goals--success-metrics)): **G1** zero
+**Goals traced** (from [prd.md](../prd.md#goals--success-metrics)): **G1** zero
 gate escapes, **G2** resume from state only, **G6** clean install/onboarding.
 
 ## Prerequisites
@@ -71,7 +71,7 @@ In a fresh session inside `/tmp/acs-spike`:
 - ✅ `~/acs-workspace/` exists (created and write-probed).
 - ✅ Final validation passes (init refuses to finish on invalid settings).
 
-Validates: [init/SKILL.md](../../plugins/acs/skills/init/SKILL.md) steps 5–7,
+Validates: [init/SKILL.md](../../../plugins/acs/skills/init/SKILL.md) steps 5–7,
 G6.
 
 ## Step 2 — Gate proof (exit-2 blocks) — the G1 core
@@ -88,9 +88,9 @@ Before creating any ticket, try to jump the pipeline:
 - ✅ With settings removed/absent, any skill reports
   `… Run /acs:init first.` instead.
 
-Validates: [README.md "How gating works"](../../plugins/acs/README.md#how-gating-works),
+Validates: [README.md "How gating works"](../../../plugins/acs/README.md#how-gating-works),
 gate messages in
-[acs_lib.py](../../plugins/acs/hooks/scripts/acs_lib.py) (`GateError`), G1.
+[acs_lib.py](../../../plugins/acs/hooks/scripts/acs_lib.py) (`GateError`), G1.
 
 ## Step 3 — `/acs:create-ticket`
 
@@ -108,7 +108,7 @@ gate messages in
   `no specs found … run /acs:create-spec SPIKE-1 first.`) — the gate moved
   forward by exactly one step.
 
-Validates: [README.md "Workspace layout"](../../plugins/acs/README.md#workspace-layout),
+Validates: [README.md "Workspace layout"](../../../plugins/acs/README.md#workspace-layout),
 ticket schema, G1.
 
 ## Step 4 — `/acs:ship SPIKE-1`
@@ -128,8 +128,8 @@ ticket schema, G1.
   incomplete step using workspace state only, with no reliance on prior
   conversation.
 
-Validates: [usage.md "umbrella mode"](../requirements/usage.md#ship-a-feature--umbrella-mode),
-[README.md skills table](../../plugins/acs/README.md#the-12-skills), G1, G2.
+Validates: [usage.md "umbrella mode"](../../requirements/usage.md#ship-a-feature--umbrella-mode),
+[README.md skills table](../../../plugins/acs/README.md#the-12-skills), G1, G2.
 
 ## Step 5 — `/acs:merge-pr SPIKE-1`
 
@@ -145,8 +145,8 @@ After a human glance at the PR:
 - ✅ `tickets-index.json` shows `SPIKE-1` as done; `metrics.json` reflects the
   run's tokens/cost.
 
-Validates: [usage.md merge flow](../requirements/usage.md#ship-a-feature--umbrella-mode),
-[README.md skills table](../../plugins/acs/README.md#the-12-skills).
+Validates: [usage.md merge flow](../../requirements/usage.md#ship-a-feature--umbrella-mode),
+[README.md skills table](../../../plugins/acs/README.md#the-12-skills).
 
 ## Outcome
 

@@ -60,7 +60,7 @@ the notes.
   even after the v0.1.1 hooks fix. Removed the unsupported `displayName` key
   from `plugin.json`; the marketplace lists the plugin by `name` +
   `description`. Caught by the M2-0 validation spike
-  ([docs/product/m2-0-validation-spike.md](../../docs/product/m2-0-validation-spike.md)).
+  ([docs/product/m2-0-validation-spike.md](../../docs/product/spikes/m2-0-validation-spike.md)).
 
 ## [0.1.1] - 2026-06-13
 
