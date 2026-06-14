@@ -46,6 +46,10 @@ They ship **together**: CI blocks a plugin version bump unless
 `.claude-plugin/marketplace.json` `version` is bumped too, and every marketplace
 bump auto-cuts an immutable `marketplace-v<version>` tag whose release notes
 list the exact plugin versions it bundles ([CHANGELOG](plugins/acs/CHANGELOG.md)).
+The catalog sources each plugin from its own pinned release tag (acs via
+`git-subdir` at `v<version>`), so plugins are fetched remotely — individually
+updatable with `claude plugin update acs` — and resolve reproducibly regardless
+of which marketplace commit is fetched.
 
 - **Pinned consumers** (recommended) never receive a plugin update without an
   explicit marketplace release: upgrade by re-pinning `ref` to a newer

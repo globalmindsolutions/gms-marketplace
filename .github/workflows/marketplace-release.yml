@@ -16,8 +16,9 @@ name: Marketplace release
 #
 # Consumers pin a frozen channel by adding the marketplace at this tag:
 #   /plugin marketplace add globalmindsolutions/gms-marketplace@marketplace-v0.1.0
-# Relative-path plugins resolve at the tagged commit, so the whole bundle is
-# reproducible.
+# Each plugin pins its own source ref (acs -> git-subdir at its v<plugin> tag),
+# so the bundle is reproducible regardless of which marketplace commit is
+# fetched, and each plugin stays individually updatable from its remote source.
 
 on:
   push:

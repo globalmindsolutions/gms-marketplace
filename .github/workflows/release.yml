@@ -4,9 +4,13 @@ name: Release
 #   1. Bump "version" in plugins/acs/.claude-plugin/plugin.json following semver:
 #      MAJOR for breaking changes to skills/hooks/state contracts, MINOR for new
 #      backwards-compatible capability, PATCH for backwards-compatible fixes.
-#   2. Bump the top-level "version" in .claude-plugin/marketplace.json too — CI
-#      requires it, and it cuts the marketplace-v<version> tag consumers pin to
-#      (see marketplace-release.yml).
+#   2. In .claude-plugin/marketplace.json: bump the top-level "version" (CI
+#      requires it — it cuts the marketplace-v<version> tag consumers pin to,
+#      see marketplace-release.yml) AND update the acs plugin "source.ref" to
+#      "v<version>" so the catalog serves the new release. acs is sourced via
+#      git-subdir pinned to its plugin tag, so it is fetched remotely and is
+#      individually updatable in /plugin. The v<version> tag is created by this
+#      same push, so the ref resolves once this workflow finishes.
 #   3. Add a matching "## [<version>] - YYYY-MM-DD" section to
 #      plugins/acs/CHANGELOG.md (move entries out of [Unreleased]).
 #   4. Merge to main. This workflow reads the version, and if tag v<version>
