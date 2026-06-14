@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "gms-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "globalmindsolutions/gms-marketplace"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "acs@gms-marketplace": true
+  }
+}

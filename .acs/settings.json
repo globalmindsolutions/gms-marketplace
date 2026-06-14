@@ -1,0 +1,10 @@
+{
+  "ticket_prefix": "MAR",
+  "tracker": {
+    "provider": "github",
+    "github": {
+      "owner": "globalmindsolutions",
+      "project_number": 1
+    }
+  }
+}
