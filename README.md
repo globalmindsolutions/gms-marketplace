@@ -49,6 +49,20 @@ workflow cuts a single immutable `v<version>` tag
 pinned tag — individually updatable with `claude plugin update acs` — and
 resolves reproducibly regardless of which marketplace commit is fetched.
 
+**Before cutting a release** (before bumping `version`), run the behavioral eval
+suite locally as a release gate — including the **paid** tier that the pre-commit
+hook and CI deliberately skip (it spawns real `claude -p` sessions and costs a
+few dollars):
+
+```bash
+python3 evals/run_evals.py --paid     # free + paid; needs an authenticated
+                                      # claude CLI with the acs plugin installed
+```
+
+Treat a clean run as the gate; investigate any failing scenario before tagging.
+The free tier alone (gate + cleanup smoke) already runs on every commit via the
+`acs-free-evals` pre-commit hook — see [evals/README.md](evals/README.md).
+
 - **Pinned consumers** (recommended) never receive an update without an
   explicit re-pin: upgrade by re-pinning `ref` to a newer `v<version>` tag,
   then reload.

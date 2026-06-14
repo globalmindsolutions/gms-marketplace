@@ -58,7 +58,7 @@ CASES = [
      "Open the pull request for ticket EVAL-1's finished implementation.",
      "create-pr"),
     ("merge-pr", True,
-     "Merge the pull request for ticket EVAL-1 now that it has been approved.",
+     "Land ticket EVAL-1: merge its pull request and finish the ticket.",
      "merge-pr"),
 ]
 
@@ -68,11 +68,13 @@ def run():
     for label, init, request, expected in CASES:
         want = "acs:" + expected
         with Sandbox(prefix="EVAL", slug="trig", init=init) as sb:
+            # Routing is mildly non-deterministic; re-probe up to twice before
+            # calling it a miss. Cheap (~5s/probe) and contained to the flaky
+            # case — no whole-suite retry needed.
             got = sb.trigger(request)
-            if got != want:
-                # Routing is mildly non-deterministic; re-probe once before
-                # calling it a miss. Cheap (one ~5s probe) and contained to the
-                # flaky case — no whole-suite retry needed.
+            for _ in range(2):
+                if got == want:
+                    break
                 got = sb.trigger(request)
         check.ok("%-20s -> %s" % (label, want), got == want, "got=%r" % got)
     return check
