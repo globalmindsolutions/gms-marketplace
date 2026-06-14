@@ -59,10 +59,14 @@ cleanup. Validated green against installed v0.1.2.
 - **E1.3 (done)** — `resume_and_verify` (paid) covers G2 (resume-from-state),
   G3 (verifier-clean within the cap), and G4 (PR ≤ ~400 lines, as the seed
   diff); `session_end_safety_net` (free) covers the SessionEnd cleanup.
-- **E1.4 (scaffolded)** — [`evals-nightly.yml`](../../.github/workflows/evals-nightly.yml):
-  nightly + manual workflow, free tier always, paid tier when an
-  `ANTHROPIC_API_KEY` secret is set (retry-once for variance). Inert until the
-  secret is added and a manual dispatch validates the claude/plugin-install path.
+- **E1.4 (done)** — the **free** tier is wired into
+  [`.pre-commit-config.yaml`](../../.pre-commit-config.yaml) as the
+  `acs-free-evals` hook (gate + SessionEnd smoke, `$0`, no `claude`), running on
+  every commit that touches the plugin or harness — locally and in the
+  *Pre-commit hooks* CI job (`ACS_EVAL_SOURCE=1`, so it tests the committed
+  source). The **paid** tier is a local, on-demand developer action; there is no
+  dedicated eval CI workflow. (A 2026-06-14 CI dispatch had confirmed the full
+  paid path runs green in CI before paid was moved local-only.)
 
 ### Epic E2 — Tracker-sync depth *(parallel, lower priority)*
 

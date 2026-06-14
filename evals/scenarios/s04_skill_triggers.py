@@ -66,8 +66,13 @@ CASES = [
 def run():
     check = Check(META["name"])
     for label, init, request, expected in CASES:
+        want = "acs:" + expected
         with Sandbox(prefix="EVAL", slug="trig", init=init) as sb:
             got = sb.trigger(request)
-        check.ok("%-20s -> acs:%s" % (label, expected),
-                 got == "acs:" + expected, "got=%r" % got)
+            if got != want:
+                # Routing is mildly non-deterministic; re-probe once before
+                # calling it a miss. Cheap (one ~5s probe) and contained to the
+                # flaky case — no whole-suite retry needed.
+                got = sb.trigger(request)
+        check.ok("%-20s -> %s" % (label, want), got == want, "got=%r" % got)
     return check

@@ -21,3 +21,16 @@ repos:
       - id: check-yaml
       - id: check-json
       - id: mixed-line-ending
+
+  # acs behavioral evals — FREE tier only (deterministic, $0, no `claude`).
+  # Runs the gate + SessionEnd smoke against the source being committed when the
+  # plugin or the harness changes. The paid tier (real `claude -p` sessions) is
+  # never run here — run it locally on demand: `python3 evals/run_evals.py --paid`.
+  - repo: local
+    hooks:
+      - id: acs-free-evals
+        name: acs free evals (gate + cleanup smoke)
+        entry: env ACS_EVAL_SOURCE=1 python3 evals/run_evals.py
+        language: system
+        pass_filenames: false
+        files: ^(evals/|plugins/acs/)
