@@ -1,6 +1,6 @@
 {
   "name": "acs",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Multi-step agentic software-delivery workflow: PRD -> architecture -> tickets -> design -> specs -> TDD code -> PR -> merge. Every skill runs a plan/execute/verify reflection cycle with dedicated subagents, pre/post hooks gate the pipeline, and all state lives in a workspace outside the consumer repo.",
   "author": {
     "name": "Global Mind Solutions"
