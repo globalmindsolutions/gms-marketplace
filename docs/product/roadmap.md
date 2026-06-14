@@ -64,6 +64,14 @@ cleanup. Validated green against installed v0.1.2.
   `ANTHROPIC_API_KEY` secret is set (retry-once for variance). Inert until the
   secret is added and a manual dispatch validates the claude/plugin-install path.
 
+### Epic E2 — Tracker-sync depth *(parallel, lower priority)*
+
+Traces the "team on a shared repo" persona. Independent of E1/E3 — slot in once
+dogfooding is rolling.
+
+- Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
+  Projects.
+
 ### Epic E3 — Dogfood acs on acs
 
 Traces all goals (proof by usage). Starts once M2-0 is green and E1 provides a
@@ -73,27 +81,28 @@ safety net.
   `/acs:create-ticket` (the plan defines the epics; acs assigns the ids).
 - **E3.2** — Every change to this repo ships via `/acs:ship`; PRD/architecture
   amendments via skill re-runs.
-- **E3.3** — Publish per-ticket metrics roll-ups (G5 cost transparency in
-  practice).
+- **E3.3** — `acs:metrics` skill delivery: implement the dashboard skill reading workspace artifacts; render the six panels (throughput, funnel, cost/time per step, coverage vs target, review iterations, token burn by role); ship as a new skill in the `acs` plugin. Traces G5, G7.
 
-### Epic E2 — Tracker-sync depth *(parallel, lower priority)*
+### Epic E4 — `acs:metrics` dashboard *(gates on E1)*
 
-Traces the "team on a shared repo" persona. Independent of E1/E3 — slot in once
-dogfooding is rolling.
+Traces G5, G7. Starts once E1 (eval harness) is green — behavioral evals for
+the `acs:metrics` skill land in E1 before the skill ships.
 
-- Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
-  Projects.
+- **E4.1** — Skill skeleton + data-source wiring (`metrics.json`, `tickets-index.json`, `pipeline-state.json`, `code-state.json`, `create-pr-state.json`).
+- **E4.2** — Six dashboard panels implemented and rendered via `show_widget` inline in the Claude Code session.
+- **E4.3** — Edge cases: empty workspace, tickets with missing state files, performance target (≤ 5 s for ≤ 50 tickets).
+- **E4.4** — Documentation: skill description, usage example in plugin README and `docs/`.
 
 ### Sequence & exit
 
 ```
-M2-0 spike ─▶ (v0.1.1 if needed) ─▶ E1 harness ─▶ E3 dogfood ─▶ M2 exit
-                                        └─────────▶ E2 tracker-sync (parallel)
+M2-0 spike ─▶ (v0.1.2 if needed) ─▶ E1 harness ─▶ E3 dogfood ─▶ E4 acs:metrics ─▶ M2 exit
+                                                  └──────────────▶ E2 tracker-sync (parallel)
 ```
 
 **M2 exits → v0.2.0 when:** the eval harness is green nightly, ≥ 1 real acs
-change has shipped via `/acs:ship`, and PRD metrics G1–G5 are measured on real
-runs.
+change has shipped via `/acs:ship`, PRD metrics G1–G5 and G7 are measured on real
+runs, and the `acs:metrics` dashboard skill ships and passes evals.
 
 ## M3 — GA (v1.0)
 
