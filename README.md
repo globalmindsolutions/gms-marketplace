@@ -10,19 +10,19 @@ Add it and install plugins from it. Pin the marketplace to a release tag for a
 controlled rollout (recommended), or omit the tag to track the latest:
 
 ```text
-# Gated: pin to an immutable marketplace release — only an explicit re-pin upgrades you
-claude plugin marketplace add globalmindsolutions/gms-marketplace@marketplace-v0.1.0
+# Gated: pin to an immutable release tag — only an explicit re-pin upgrades you
+claude plugin marketplace add globalmindsolutions/gms-marketplace@v0.1.5
 claude plugin install acs@gms-marketplace
 
-# Rolling: track the default branch — updates arrive on every plugin version bump
+# Rolling: track the default branch — updates arrive on every version bump
 claude plugin marketplace add globalmindsolutions/gms-marketplace
 ```
 
 (Or run `/plugin` inside a Claude Code session and install from the UI.)
 
 For a team, pin the marketplace centrally via managed settings so members
-cannot drift onto unreleased plugin versions — upgrade by changing `ref` to a
-newer `marketplace-v<version>` tag:
+cannot drift onto unreleased versions — upgrade by changing `ref` to a
+newer `v<version>` tag:
 
 ```json
 {
@@ -31,7 +31,7 @@ newer `marketplace-v<version>` tag:
       "source": {
         "source": "github",
         "repo": "globalmindsolutions/gms-marketplace",
-        "ref": "marketplace-v0.1.0"
+        "ref": "v0.1.5"
       }
     }
   }
@@ -40,12 +40,14 @@ newer `marketplace-v<version>` tag:
 
 ### Releasing & updating
 
-Each plugin's version lives in its `plugin.json` and is what Claude Code uses to
-detect updates; the marketplace's own top-level `version` labels the catalog.
-They ship **together**: CI blocks a plugin version bump unless
-`.claude-plugin/marketplace.json` `version` is bumped too, and every marketplace
-bump auto-cuts an immutable `marketplace-v<version>` tag whose release notes
-list the exact plugin versions it bundles ([CHANGELOG](plugins/acs/CHANGELOG.md)).
+The catalog and the `acs` plugin share **one version**. A release bumps
+`version` in both `.claude-plugin/marketplace.json` and
+`plugins/acs/.claude-plugin/plugin.json` to the same value (CI enforces they
+match), points the acs `git-subdir` `source.ref` at the new tag, and the Release
+workflow cuts a single immutable `v<version>` tag
+([CHANGELOG](plugins/acs/CHANGELOG.md)). acs is fetched remotely from that
+pinned tag — individually updatable with `claude plugin update acs` — and
+resolves reproducibly regardless of which marketplace commit is fetched.
 
 **Before cutting a release** (before bumping `version`), run the behavioral eval
 suite locally as a release gate — including the **paid** tier that the pre-commit
@@ -61,9 +63,9 @@ Treat a clean run as the gate; investigate any failing scenario before tagging.
 The free tier alone (gate + cleanup smoke) already runs on every commit via the
 `acs-free-evals` pre-commit hook — see [evals/README.md](evals/README.md).
 
-- **Pinned consumers** (recommended) never receive a plugin update without an
-  explicit marketplace release: upgrade by re-pinning `ref` to a newer
-  `marketplace-v<version>` tag, then reload.
+- **Pinned consumers** (recommended) never receive an update without an
+  explicit re-pin: upgrade by re-pinning `ref` to a newer `v<version>` tag,
+  then reload.
 - **Rolling consumers** run `claude plugin marketplace update gms-marketplace` (or start a
   new session) to fetch the latest plugin versions.
 

@@ -86,6 +86,7 @@ safety net.
 - **E3.2** — Every change to this repo ships via `/acs:ship`; PRD/architecture
   amendments via skill re-runs.
 - **E3.3** — `acs:metrics` skill delivery: implement the dashboard skill reading workspace artifacts; render the six panels (throughput, funnel, cost/time per step, coverage vs target, review iterations, token burn by role); ship as a new skill in the `acs` plugin. Traces G5, G7.
+- **E3.4** — Status-line refinement (dogfood-driven): both the prompt line and the reflection agent-panel compose with Claude Code's default status line and add acs state on top (default context + acs pipeline/subagent state) instead of replacing it; ships as a maturing refinement to the v0.1 Should-have status-line feature. Traces G7.
 
 ### Epic E4 — `acs:metrics` dashboard *(gates on E1)*
 

@@ -1,23 +1,28 @@
 name: Release
 
-# Automated semver releases for the acs plugin. To ship a release:
-#   1. Bump "version" in plugins/acs/.claude-plugin/plugin.json following semver:
-#      MAJOR for breaking changes to skills/hooks/state contracts, MINOR for new
-#      backwards-compatible capability, PATCH for backwards-compatible fixes.
-#   2. Bump the top-level "version" in .claude-plugin/marketplace.json too — CI
-#      requires it, and it cuts the marketplace-v<version> tag consumers pin to
-#      (see marketplace-release.yml).
+# Single automated release for the gms-marketplace catalog and its acs plugin,
+# which share ONE version. To ship a release:
+#   1. Bump "version" in BOTH .claude-plugin/marketplace.json AND
+#      plugins/acs/.claude-plugin/plugin.json to the SAME value (CI enforces
+#      they match), following semver: MAJOR for breaking changes to
+#      skills/hooks/state contracts, MINOR for new backwards-compatible
+#      capability, PATCH for backwards-compatible fixes.
+#   2. Point the acs plugin "source.ref" in marketplace.json at "v<version>"
+#      (acs is sourced via git-subdir pinned to the release tag, so it is
+#      fetched remotely and is individually updatable in /plugin). The tag is
+#      created by this same push, so the ref resolves once this workflow runs.
 #   3. Add a matching "## [<version>] - YYYY-MM-DD" section to
 #      plugins/acs/CHANGELOG.md (move entries out of [Unreleased]).
-#   4. Merge to main. This workflow reads the version, and if tag v<version>
-#      does not exist yet, creates an annotated tag and a GitHub release whose
-#      notes are that changelog section. If the tag exists, it skips gracefully.
+#   4. Merge to main. This workflow reads the marketplace version, and if tag
+#      v<version> does not exist yet, creates an annotated tag and a GitHub
+#      release whose notes are that changelog section. If the tag exists, it
+#      skips gracefully. Consumers pin with @v<version>.
 
 on:
   push:
     branches: [main]
     paths:
-      - plugins/acs/.claude-plugin/plugin.json
+      - .claude-plugin/marketplace.json
   workflow_dispatch:
 
 permissions:
@@ -32,17 +37,17 @@ jobs:
         with:
           fetch-depth: 0  # full history so all existing tags are visible
 
-      - name: Read plugin version
+      - name: Read version
         id: version
         run: |
-          MANIFEST="plugins/acs/.claude-plugin/plugin.json"
+          MANIFEST=".claude-plugin/marketplace.json"
           VERSION="$(python3 -c "import json; print(json.load(open('${MANIFEST}'))['version'])")"
-          # Prefer the human-readable displayName for the release title; fall back
-          # to name if displayName is absent.
+          # Prefer the human-readable displayName for the release title; fall
+          # back to name if displayName is absent.
           TITLE="$(python3 -c "import json; m=json.load(open('${MANIFEST}')); print(m.get('displayName') or m['name'])")"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
-          echo "Plugin version: ${VERSION}"
+          echo "Release version: ${VERSION}"
           echo "Release title: ${TITLE}"
 
       - name: Check whether tag already exists

@@ -24,10 +24,10 @@ checks in Step 6.
 
 ## Step 2 — Latest released version
 
-Prefer the GitHub release. The per-plugin Release workflow tags `v<version>` on
-every plugin version bump; a separate Marketplace release workflow tags
-`marketplace-v<version>`, so filter to plugin tags (`^v<digit>`) to avoid
-picking up a catalog release:
+Prefer the GitHub release. The Release workflow tags `v<version>` on every
+version bump (the catalog and the acs plugin share one version). Older
+`marketplace-v<version>` tags remain in history, so filter to `v<digit>` tags to
+get the latest release:
 
 ```bash
 gh release list --repo globalmindsolutions/gms-marketplace --json tagName,publishedAt \

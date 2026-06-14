@@ -230,13 +230,25 @@ print("wrote", path)
 PY
 ```
 
-Then ensure the local file is gitignored — append the exact line if missing
-(run from `<repo>`, the main checkout root):
+Then ensure the local file is gitignored. Run this ALWAYS — on a fresh init
+AND on every re-run, even when no settings keys changed: a repo first
+initialized by an older acs may already have `settings.local.json` but no
+ignore rule, and this is the only step that retro-fixes it. Run from `<repo>`,
+the main checkout root:
 
 ```bash
-grep -qxF '.acs/settings.local.json' .gitignore 2>/dev/null \
-  || printf '.acs/settings.local.json\n' >> .gitignore
+if ! git check-ignore -q .acs/settings.local.json 2>/dev/null; then
+  # Guarantee a trailing newline first so the entry can't glue onto the last line.
+  [ -f .gitignore ] && [ -n "$(tail -c1 .gitignore 2>/dev/null)" ] && printf '\n' >> .gitignore
+  printf '.acs/settings.local.json\n' >> .gitignore
+  echo "gitignored .acs/settings.local.json"
+else
+  echo ".acs/settings.local.json already ignored"
+fi
 ```
+
+Use `git check-ignore` (not a literal `grep`) so an existing broader rule like
+`.acs/` already counts as ignored and no duplicate line is appended.
 
 ## Step 6 — Create and probe the workspace
 

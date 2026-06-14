@@ -6,12 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Releases are automated: bump `version` in
-`plugins/acs/.claude-plugin/plugin.json`, add a matching section here, and
-merge to `main` — the Release workflow tags `v<version>` and publishes a
-GitHub release using that section as the notes.
+Releases are automated: bump `version` in BOTH
+`.claude-plugin/marketplace.json` and `plugins/acs/.claude-plugin/plugin.json`
+to the same value, point the acs `source.ref` in `marketplace.json` at
+`v<version>`, add a matching section here, and merge to `main` — the Release
+workflow tags `v<version>` and publishes a GitHub release using that section as
+the notes.
 
 ## [Unreleased]
+
+## [0.1.6] - 2026-06-14
+
+### Fixed
+
+- `/acs:init` now reliably gitignores `<repo>/.acs/settings.local.json`. The
+  Step 5 ignore step is rewritten to run on **every** init (fresh and re-run,
+  even when no keys changed), so a repo first initialized by an older acs that
+  has the file but no ignore rule gets retro-fixed. It uses `git check-ignore`
+  instead of an exact-line `grep` (a broader existing rule like `.acs/` now
+  counts as ignored, so no duplicate line is appended) and guarantees a
+  trailing newline before appending so the entry can't glue onto the last line
+  of an existing `.gitignore`.
+
+## [0.1.5] - 2026-06-14
+
+### Changed
+
+- Unified release versioning: the marketplace catalog and the `acs` plugin now
+  share **one version** and a single `v<version>` release tag. The separate
+  `marketplace-v<version>` tag scheme and its workflow are retired. Cutting a
+  release now bumps `version` in both `.claude-plugin/marketplace.json` and
+  `plugins/acs/.claude-plugin/plugin.json` to the same value and points the acs
+  `git-subdir` `source.ref` at the new `v<version>` tag; CI enforces that the
+  two versions match. Existing `marketplace-v*` tags remain valid in history.
 
 ## [0.1.3] - 2026-06-13
 
