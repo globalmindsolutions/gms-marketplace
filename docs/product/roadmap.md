@@ -115,6 +115,11 @@ runs, and the `acs:metrics` dashboard skill ships and passes evals.
   heuristics, template gallery for descriptions.
 - **Epic: documentation site** — rendered architecture doc set + usage
   walkthroughs.
+- **Epic: full-SDLC doc-set coverage** — acs maintains the `quality/` and
+  `operations/` doc sets for consumers (test strategy + release/ops runbooks),
+  produced by `/acs:create-architecture` from templates; `settings.schema.json`
+  gains `quality_path`/`operations_path`, and `/acs:init` defaults them. Traces
+  **G8**. Design: [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md).
 - Semver stability promise for state-file schemas (migration notes per minor).
 
 ## Later / icebox
