@@ -19,3 +19,7 @@ the relevant ADR records how the choice was settled.
 > This repo dogfoods acs on itself, so these are also acs's own product docs.
 > Implementation docs for the plugin live separately under
 > [`plugins/acs/docs/`](../plugins/acs/docs/) (INTERNALS, AUTHORING).
+
+**How skill quality is assured** across all the test layers (contract tests,
+deterministic tests, the eval harness, the runtime verifier, dogfooding) is
+written up in [testing-strategy.md](testing-strategy.md).
