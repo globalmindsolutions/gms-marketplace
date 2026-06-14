@@ -1,0 +1,41 @@
+# acs tests + coverage gate — installed by /acs:init into the consumer repo at
+# .github/workflows/acs-tests.yml. Re-run /acs:init to refresh it.
+#
+# Runs the configured test suite on every PR and fails on a failing suite or a
+# coverage shortfall (the command enforces coverage; acs passes
+# ACS_COVERAGE = test_coverage_percent). Make this a REQUIRED status check on
+# your default branch (and block direct pushes) so a PR with failing tests or
+# low coverage cannot merge — /acs:init offers to configure that.
+#
+# Toolchain: ubuntu-latest ships python3/node/go/etc.; `tests.setup` installs
+# your dependencies. For a pinned runtime version, add the matching setup-*
+# action (e.g. actions/setup-node) before the run step.
+name: ACS tests
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+# A newer commit supersedes an in-flight run for the same PR.
+concurrency:
+  group: acs-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests & coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python is for the acs runner only; your suite uses the repo's own
+      # toolchain (present on ubuntu-latest, deps installed by tests.setup).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run tests + coverage gate
+        run: python3 .acs/ci/run-tests.py

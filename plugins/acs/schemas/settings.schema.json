@@ -62,6 +62,16 @@
       },
       "additionalProperties": true
     },
+    "tests": {
+      "description": "Unit/integration test suite for the CI tests+coverage gate scaffolded by /acs:init (.github/workflows/acs-tests.yml + .acs/ci/run-tests.py, opt-in). The command MUST run the suite and FAIL on coverage shortfall — delegate to the tool (e.g. 'pytest --cov --cov-fail-under=$ACS_COVERAGE', or a jest coverageThreshold); acs exports ACS_COVERAGE (= test_coverage_percent) into the env. Read from the committed project settings.json; the CI runner has no acs install.",
+      "type": "object",
+      "required": ["command"],
+      "properties": {
+        "command": {"type": "string", "minLength": 1, "description": "Runs the suite and enforces coverage, e.g. 'pytest --cov --cov-fail-under=$ACS_COVERAGE'."},
+        "setup": {"type": "string", "minLength": 1, "description": "Optional environment bring-up before the command, e.g. 'pip install -e .[test]' or 'npm ci'."}
+      },
+      "additionalProperties": true
+    },
     "models": {
       "description": "Per-role subagent model and reasoning effort. Resolution per field: overrides.<skill>.<role> -> <role> -> inherit. coordinator applies only to /ship-spawned coordinators.",
       "type": "object",

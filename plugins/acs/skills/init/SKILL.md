@@ -575,6 +575,64 @@ Record everything configured here for Steps 8 and the completion report:
 checks enabled, exemptions, files written, labels, pre-push choice, and the
 branch-protection outcome (configured / printed-for-admin / declined).
 
+## Step 7d — CI tests + coverage gate (opt-in, never silent)
+
+Offer a CI check that runs the repo's test suite and enforces the coverage
+target on **every PR** — the same `test_coverage_percent` the `/code` TDD cycle
+hard-fails on, now a merge gate for any PR (including ones that never went
+through the pipeline). Skip the whole step on a plain "no". Same honesty as
+Step 7c: this is a real gate only as a **required status check on a protected
+default branch**.
+
+### Choose the test command (detect candidates first)
+
+acs stores no test command otherwise (`/code` discovers tooling per run), so
+collect one now. Detect candidates and suggest:
+
+```bash
+ls pyproject.toml setup.cfg pytest.ini tox.ini 2>/dev/null            # python
+[ -f package.json ] && grep -oE '"(test|test:unit|coverage)" *:' package.json   # node
+ls go.mod Makefile 2>/dev/null                                       # go / make
+```
+
+Ask for `tests.command` — it MUST run the suite and **fail on a coverage
+shortfall** (delegate to the tool; acs exports `ACS_COVERAGE` = the configured
+`test_coverage_percent`):
+
+| Stack | Example `tests.command` |
+|-------|-------------------------|
+| Python / pytest | `pytest --cov --cov-fail-under=$ACS_COVERAGE` |
+| Node / jest | `jest --coverage` (with a `coverageThreshold` in the jest config) |
+| Go | `go test ./... -coverprofile=cover.out` + a threshold check on `go tool cover -func` |
+
+Optionally collect `tests.setup` (dependency bring-up, e.g. `pip install -e .[test]`
+or `npm ci`). Write `tests` and — if not default — `test_coverage_percent` to the
+**project** file `<repo>/.acs/settings.json`: the CI runner reads only the
+committed project file (same precondition as Step 7c). Confirm it is not
+gitignored.
+
+### Install the workflow + runner (copy, don't hand-write)
+
+```bash
+mkdir -p .acs/ci .github/workflows
+cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/run-tests.py" .acs/ci/run-tests.py
+cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/acs-tests.yml" .github/workflows/acs-tests.yml
+chmod +x .acs/ci/run-tests.py
+```
+
+Regenerated on every re-run. Stage `.acs/settings.json`, `.acs/ci/run-tests.py`,
+and `.github/workflows/acs-tests.yml` for the user to commit (do not commit
+yourself unless asked).
+
+### The gate — branch protection
+
+Same as Step 7c: advisory until required. The required status-check **context is
+the job name `Tests & coverage`**. If you configured branch protection in
+Step 7c, add `"Tests & coverage"` to the `contexts` array alongside the
+conventions check; otherwise print the `gh api … /protection` command (from
+Step 7c) with `contexts: ["Tests & coverage"]` for an admin to run once. Record
+the outcome for Step 8 and the completion report.
+
 ## Step 8 — Summary and next steps
 
 Print a markdown table of every resolved setting, its value, and the file it
@@ -586,6 +644,7 @@ landed in (or "default — not written" for untouched defaults), e.g.:
 | `ticket_prefix` | `SHOP` | `<repo>/.acs/settings.json` |
 | `test_coverage_percent` | `90` | default — not written |
 | `enforcement` (CI) | checks on; gate via required check | `<repo>/.acs/settings.json` + `.github/workflows/acs-conventions.yml` |
+| `tests` (CI) | suite + coverage gate on PRs | `<repo>/.acs/settings.json` + `.acs/ci/run-tests.py` + `.github/workflows/acs-tests.yml` |
 
 Then point the user at the next steps. Decide greenfield vs brownfield by
 looking at the repo (`git ls-files` — an existing product codebase is
