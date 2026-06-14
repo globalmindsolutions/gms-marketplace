@@ -79,17 +79,14 @@ thing.
   needed). `session_end_safety_net` (free) covers the SessionEnd abnormal-ending
   cleanup against the shipped build. With `install_gate_smoke` (G1), the harness
   now exercises G1–G4 plus cleanup.
-- **E1.4 (scaffolded)** — [`evals-nightly.yml`](../.github/workflows/evals-nightly.yml).
-  **Budget-safe by default:** the nightly **schedule runs only the free tier**
-  ($0, deterministic) — a daily signal with no recurring spend. The **paid tier
-  runs only on a manual, opt-in dispatch** (`paid: true`) when an
-  `ANTHROPIC_API_KEY` secret is present, and runs the suite **once** — flake
-  handling is per-scenario (e.g. `skill_triggers` re-probes a missed case), so a
-  single non-deterministic miss never re-runs the whole expensive suite.
+- **E1.4 (done)** — [`evals-nightly.yml`](../.github/workflows/evals-nightly.yml):
+  a **$0** nightly (07:00 UTC) + manual **free-tier smoke**. It installs the
+  plugin from the checkout and runs the deterministic scenarios against the
+  shipped build — catching install/packaging regressions on `main` (the class of
+  bug that blocked the early installs). No repo secret is used.
 
-  **To run paid evals:** add an `ANTHROPIC_API_KEY` repo secret **with enough
-  credit balance** (a full paid run spawns several real `claude` sessions — a few
-  dollars; if the balance runs out mid-run, scenarios fail with *"Credit balance
-  is too low"*), then trigger manually: Actions → *Nightly evals* → *Run
-  workflow* (leave *paid* checked). To put paid evals back on the nightly
-  schedule once budget allows, see the note atop the workflow file.
+  The **paid tier is run locally, on demand** (see [Run](#run) above) — it costs
+  money and is non-deterministic, so it stays a developer action rather than
+  recurring CI spend. Flake handling is per-scenario (e.g. `skill_triggers`
+  re-probes a missed case), so a single non-deterministic miss is absorbed
+  without re-running the whole suite.

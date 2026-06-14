@@ -59,13 +59,14 @@ cleanup. Validated green against installed v0.1.2.
 - **E1.3 (done)** — `resume_and_verify` (paid) covers G2 (resume-from-state),
   G3 (verifier-clean within the cap), and G4 (PR ≤ ~400 lines, as the seed
   diff); `session_end_safety_net` (free) covers the SessionEnd cleanup.
-- **E1.4 (scaffolded)** — [`evals-nightly.yml`](../../.github/workflows/evals-nightly.yml).
-  Budget-safe: the nightly schedule runs only the **free tier** ($0); the
-  **paid tier is manual + opt-in** (`paid: true` dispatch) when an
-  `ANTHROPIC_API_KEY` secret is set, run once with per-scenario flake handling.
-  First manual dispatch (2026-06-14) validated install + free + paid green
-  except a single `merge-pr` trigger flake (now given a per-case re-probe); the
-  API key then hit its credit limit. Re-validate paid after topping up credits.
+- **E1.4 (done)** — [`evals-nightly.yml`](../../.github/workflows/evals-nightly.yml):
+  a **$0** nightly + manual **free-tier smoke** (install the plugin from the
+  checkout, run the deterministic scenarios against the shipped build). The
+  **paid tier runs locally on demand**, not in CI — it costs money and is
+  non-deterministic, so it stays a developer action. A 2026-06-14 CI dispatch
+  had confirmed the full paid path runs green in CI (install + free + paid,
+  modulo one `merge-pr` trigger flake, now re-probed) before paid was moved
+  local-only.
 
 ### Epic E3 — Dogfood acs on acs
 

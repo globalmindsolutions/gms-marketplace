@@ -1,27 +1,23 @@
 name: Nightly evals
 
-# Behavioral eval harness (M2 epic E1.4). Runs the agentic `claude -p`
-# scenarios that must NOT gate PRs — they cost money and are non-deterministic.
+# Behavioral eval harness (M2 epic E1.4) — FREE tier only.
 #
-# Cost policy (budget-safe by default):
-#   * The nightly SCHEDULE runs only the FREE tier (deterministic, $0) — a daily
-#     signal with no recurring spend.
-#   * The PAID tier runs ONLY on a manual dispatch with `paid: true`, and only
-#     when an `ANTHROPIC_API_KEY` repo secret is set (else it's skipped with a
-#     notice). A full paid run spawns several real `claude` sessions (a few
-#     dollars) — so it stays opt-in and human-triggered.
-# To make paid evals run on the schedule too, change the paid step's `if:` to
-# also allow `github.event_name == 'schedule'` (and budget for it).
+# This job is $0: it installs the acs plugin from the checkout and runs the
+# deterministic free scenarios (gate behavior + SessionEnd cleanup) against the
+# shipped build — a nightly smoke that `main` still installs and gates cleanly
+# (the class of bug that blocked v0.1.0/v0.1.1 installs).
+#
+# The PAID tier (real `claude -p` sessions — `create_ticket_artifacts`,
+# `resume_and_verify`, `skill_triggers`) is intentionally NOT run in CI: it
+# costs money and is non-deterministic. Run it LOCALLY on demand instead:
+#     python3 evals/run_evals.py --paid               # full suite
+#     python3 evals/run_evals.py --only <name> --paid # one scenario
+# See evals/README.md. (No `ANTHROPIC_API_KEY` secret is used by this workflow.)
 
 on:
   schedule:
     - cron: "0 7 * * *"          # 07:00 UTC daily
   workflow_dispatch:
-    inputs:
-      paid:
-        description: "Run paid (claude) scenarios"
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -32,9 +28,9 @@ concurrency:
 
 jobs:
   evals:
-    name: Behavioral evals
+    name: Free eval smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -46,12 +42,10 @@ jobs:
         with:
           node-version: "20"
 
-      # Install the CLI + the acs plugin from THIS checkout, so the evals
-      # exercise the code on this ref. If anything here fails, the free tier
-      # still runs (the harness falls back to the in-repo source tree); the
-      # paid tier needs the plugin, so a failure here will surface there.
+      # Install the CLI + the acs plugin from THIS checkout so the free tier
+      # exercises the shipped build. continue-on-error: if install hiccups, the
+      # harness falls back to the in-repo source tree and the free tier still runs.
       - name: Install claude CLI + acs plugin (from checkout)
-        id: install
         continue-on-error: true
         run: |
           npm install -g @anthropic-ai/claude-code
@@ -62,27 +56,3 @@ jobs:
 
       - name: Free-tier evals (deterministic, no API key)
         run: python3 evals/run_evals.py
-
-      - name: Check for API key
-        id: gate
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          if [ -n "$ANTHROPIC_API_KEY" ]; then
-            echo "has_key=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_key=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No ANTHROPIC_API_KEY secret — skipping paid evals. Add the secret to enable E1.4."
-          fi
-
-      # Paid evals run ONLY on a manual, opt-in dispatch (paid: true) with the
-      # secret present — never on the schedule, so there is no recurring spend.
-      # Run the suite ONCE: variance/flake handling lives inside the scenarios
-      # (e.g. skill_triggers re-probes a missed case), so we never re-run the
-      # whole expensive suite — a blanket retry would double cost and can exhaust
-      # the API budget.
-      - name: Paid evals (claude)
-        if: ${{ steps.gate.outputs.has_key == 'true' && github.event_name == 'workflow_dispatch' && inputs.paid }}
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python3 evals/run_evals.py --paid
