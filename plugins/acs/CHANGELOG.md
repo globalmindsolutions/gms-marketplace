@@ -15,6 +15,19 @@ the notes.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-14
+
+### Fixed
+
+- `/acs:init` now reliably gitignores `<repo>/.acs/settings.local.json`. The
+  Step 5 ignore step is rewritten to run on **every** init (fresh and re-run,
+  even when no keys changed), so a repo first initialized by an older acs that
+  has the file but no ignore rule gets retro-fixed. It uses `git check-ignore`
+  instead of an exact-line `grep` (a broader existing rule like `.acs/` now
+  counts as ignored, so no duplicate line is appended) and guarantees a
+  trailing newline before appending so the entry can't glue onto the last line
+  of an existing `.gitignore`.
+
 ## [0.1.5] - 2026-06-14
 
 ### Changed

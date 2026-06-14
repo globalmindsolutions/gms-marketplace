@@ -26,3 +26,6 @@ dist/
 build/
 __pycache__/
 *.log
+
+# acs machine-specific config (workspace_path) — never commit
+.acs/settings.local.json
