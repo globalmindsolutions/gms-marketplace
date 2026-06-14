@@ -1,0 +1,12 @@
+#!/bin/sh
+# acs commit-msg hook — validate the commit message against the configured
+# formats.commit_message the moment the commit is written, so a malformed
+# subject is caught before it exists (not after a failed push).
+#
+# Installed by /acs:init. Per-clone and bypassable with `git commit --no-verify`;
+# the pre-push hook and CI re-check, so this is the earliest of several nets.
+# git passes the path to the message file as $1.
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+checker="$root/.acs/ci/check-conventions.py"
+[ -f "$checker" ] || exit 0   # acs CI not installed in this repo — do not block
+exec python3 "$checker" --mode commit-msg --message-file "$1"

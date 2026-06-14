@@ -30,10 +30,15 @@ the notes.
     the pipeline renders from) and reads `ticket_prefix` + `formats` from the
     committed `.acs/settings.json`; **no acs install is needed on the runner**.
     It is FAIL-CLOSED (no committed conventions → error + "run /acs:init") and
-    runs in `--mode pr` (CI) or `--mode pre-push` (local hook).
-  - An optional **pre-push hook** (raw `.git/hooks/pre-push`, or a tracked
-    pre-commit `pre-push` stage) for fast local feedback before a push reaches
-    GitHub.
+    runs in `--mode pr` (CI), `--mode pre-push`, or `--mode commit-msg` (local
+    hooks) — the same checker and the same configured formats everywhere.
+  - Optional **local git hooks** that enforce conventions *before* push, against
+    the SAME configured `formats.*`/`enforcement.*`: `commit-msg` validates the
+    commit subject against `formats.commit_message` as it is written, and
+    `pre-push` validates `formats.branch_name` + the push range's commit
+    subjects. Installed via the pre-commit framework (tracked, shared across the
+    team) or as raw `.git/hooks/*` (per-clone). PR title/description stay CI-only
+    (they don't exist until a PR is open).
   - New **`enforcement`** settings block (`schemas/settings.schema.json`):
     `checks.*` toggles, `exempt_branches` globs, `exempt_label`, `require_label`,
     and `pr_description_sections`.

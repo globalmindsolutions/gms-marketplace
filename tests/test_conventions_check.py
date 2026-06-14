@@ -176,5 +176,58 @@ class DisabledChecksTests(unittest.TestCase):
         self.assertIn("acs_label", res.skipped)
 
 
+class CommitMsgModeTests(unittest.TestCase):
+    """The commit-msg hook checks only the commit subject, against the configured
+    formats.commit_message — never the branch/title/label (unknown at commit)."""
+
+    def test_commit_check_off_by_default_passes(self):
+        res = cc.evaluate(settings(), ctx(commits=["wip"]), "commit-msg")
+        self.assertEqual(res.errors, [])
+
+    def test_bad_subject_fails_when_enabled(self):
+        s = settings(enforcement={"checks": {"commit_message": True}})
+        self.assertIn("commit_message",
+                      [h for h, _ in cc.evaluate(s, ctx(commits=["wip"]), "commit-msg").errors])
+
+    def test_good_subject_passes_when_enabled(self):
+        s = settings(enforcement={"checks": {"commit_message": True}})
+        self.assertEqual(cc.evaluate(s, ctx(commits=["MAR-9 do the thing"]), "commit-msg").errors, [])
+
+    def test_uses_configured_commit_format(self):
+        # A repo that configured a different commit_message format is honoured.
+        s = settings(formats={"commit_message": "{type}: {summary}"},
+                     enforcement={"checks": {"commit_message": True}})
+        self.assertEqual(cc.evaluate(s, ctx(commits=["task: ship it"]), "commit-msg").errors, [])
+        self.assertIn("commit_message",
+                      [h for h, _ in cc.evaluate(s, ctx(commits=["MAR-9 nope"]), "commit-msg").errors])
+
+    def test_does_not_check_branch_or_title(self):
+        s = settings(enforcement={"checks": {"commit_message": True, "branch_name": True}})
+        res = cc.evaluate(s, ctx(branch="garbage", title="garbage",
+                                 commits=["MAR-9 ok"]), "commit-msg")
+        self.assertEqual(res.errors, [])  # branch_name not in commit-msg mode
+
+    def test_merge_subject_ignored(self):
+        s = settings(enforcement={"checks": {"commit_message": True}})
+        self.assertEqual(cc.evaluate(s, ctx(commits=["Merge branch 'main'"]), "commit-msg").errors, [])
+
+    def test_exempt_branch_skips(self):
+        s = settings(enforcement={"checks": {"commit_message": True}})
+        res = cc.evaluate(s, ctx(branch="release/v1", commits=["wip"]), "commit-msg")
+        self.assertIsNotNone(res.exempt)
+        self.assertEqual(res.errors, [])
+
+
+class ReadCommitSubjectTests(unittest.TestCase):
+    def test_skips_comments_and_blanks(self):
+        import tempfile, os
+        fd, path = tempfile.mkstemp()
+        os.close(fd)
+        self.addCleanup(os.unlink, path)
+        with open(path, "w") as fh:
+            fh.write("\n# a comment\nMAR-9 real subject\n# more\nbody line\n")
+        self.assertEqual(cc._read_commit_subject(path), "MAR-9 real subject")
+
+
 if __name__ == "__main__":
     unittest.main()

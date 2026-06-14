@@ -174,11 +174,81 @@ def is_exempt(settings, branch, labels):
     return None
 
 
+# Which checks each mode runs, further gated by enforcement.checks.*. PR title,
+# label, and description only exist once a PR is open, so the local hooks
+# (pre-push at push time, commit-msg at commit time) check only what is knowable
+# locally — branch name and commit subjects — against the configured formats.
+MODE_CHECKS = {
+    "pr":         ["branch_name", "commit_message", "pr_title", "acs_label", "pr_description"],
+    "pre-push":   ["branch_name", "commit_message"],
+    "commit-msg": ["commit_message"],
+}
+
+
+def _check_branch_name(settings, ctx, prefix, res):
+    branch = (ctx.get("branch") or "").strip()
+    template = _fmt(settings, "branch_name")
+    if not branch:
+        res.errors.append(("branch_name", "could not determine the branch name"))
+    elif not format_to_regex(template, prefix).match(branch):
+        res.errors.append(("branch_name",
+            "branch '%s' does not match required format '%s' (e.g. %s)"
+            % (branch, template, _example(template, prefix))))
+
+
+def _check_commit_message(settings, ctx, prefix, res):
+    template = _fmt(settings, "commit_message")
+    rx = format_to_regex(template, prefix)
+    for subject in (ctx.get("commit_subjects") or []):
+        if not _is_ignorable_commit(subject) and not rx.match((subject or "").strip()):
+            res.errors.append(("commit_message",
+                "commit subject %r does not match required format '%s'" % (subject, template)))
+
+
+def _check_pr_title(settings, ctx, prefix, res):
+    template = _fmt(settings, "pr_title")
+    title = (ctx.get("title") or "").strip()
+    if not title:
+        res.errors.append(("pr_title", "PR has no title"))
+    elif not format_to_regex(template, prefix).match(title):
+        res.errors.append(("pr_title",
+            "PR title '%s' does not match required format '%s' (e.g. %s)"
+            % (title, template, _example(template, prefix))))
+
+
+def _check_acs_label(settings, ctx, prefix, res):
+    required = _enf(settings, "require_label")
+    if required and required not in (ctx.get("labels") or []):
+        res.errors.append(("acs_label",
+            "PR is missing the required '%s' label (added by /acs:create-pr). "
+            "Apply it, or add the '%s' label to exempt a non-ticket PR."
+            % (required, _enf(settings, "exempt_label"))))
+
+
+def _check_pr_description(settings, ctx, prefix, res):
+    body = ctx.get("body") or ""
+    for section in _enf(settings, "pr_description_sections") or []:
+        if not _has_heading(body, section):
+            res.errors.append(("pr_description",
+                "PR description is missing a '## %s' section" % section))
+
+
+_CHECKERS = {
+    "branch_name": _check_branch_name,
+    "commit_message": _check_commit_message,
+    "pr_title": _check_pr_title,
+    "acs_label": _check_acs_label,
+    "pr_description": _check_pr_description,
+}
+
+
 def evaluate(settings, ctx, mode):
     """ctx keys: branch, title, body, labels (list), commit_subjects (list).
 
-    mode 'pr' runs every enabled check; 'pre-push' runs only branch + commits
-    (title/body/labels are unknown before the PR exists).
+    The checks that run are MODE_CHECKS[mode] intersected with the
+    enforcement.checks.* toggles. Every check reads the user-configured
+    formats.* / enforcement.* from .acs/settings.json (set at /acs:init) — there
+    are no hardcoded conventions, so local hooks and CI stay in lockstep.
     """
     res = Result()
     prefix = settings.get("ticket_prefix")
@@ -190,84 +260,15 @@ def evaluate(settings, ctx, mode):
         ))
         return res
 
-    branch = (ctx.get("branch") or "").strip()
-    labels = ctx.get("labels") or []
-
-    res.exempt = is_exempt(settings, branch, labels)
+    res.exempt = is_exempt(settings, (ctx.get("branch") or "").strip(), ctx.get("labels") or [])
     if res.exempt:
         return res
 
-    # Branch name -----------------------------------------------------------
-    if _enabled(settings, "branch_name"):
-        template = _fmt(settings, "branch_name")
-        if not branch:
-            res.errors.append(("branch_name", "could not determine the branch name"))
-        elif not format_to_regex(template, prefix).match(branch):
-            res.errors.append((
-                "branch_name",
-                "branch '%s' does not match required format '%s' "
-                "(e.g. %s)" % (branch, template, _example(template, prefix)),
-            ))
-    else:
-        res.skipped.append("branch_name")
-
-    # Commit messages -------------------------------------------------------
-    if _enabled(settings, "commit_message"):
-        template = _fmt(settings, "commit_message")
-        rx = format_to_regex(template, prefix)
-        bad = [s for s in (ctx.get("commit_subjects") or [])
-               if not _is_ignorable_commit(s) and not rx.match(s.strip())]
-        for subject in bad:
-            res.errors.append((
-                "commit_message",
-                "commit subject %r does not match required format '%s'" % (subject, template),
-            ))
-    else:
-        res.skipped.append("commit_message")
-
-    if mode == "pre-push":
-        return res  # title/body/labels don't exist yet
-
-    # PR title --------------------------------------------------------------
-    if _enabled(settings, "pr_title"):
-        template = _fmt(settings, "pr_title")
-        title = (ctx.get("title") or "").strip()
-        if not title:
-            res.errors.append(("pr_title", "PR has no title"))
-        elif not format_to_regex(template, prefix).match(title):
-            res.errors.append((
-                "pr_title",
-                "PR title '%s' does not match required format '%s' "
-                "(e.g. %s)" % (title, template, _example(template, prefix)),
-            ))
-    else:
-        res.skipped.append("pr_title")
-
-    # ACS label -------------------------------------------------------------
-    if _enabled(settings, "acs_label"):
-        required = _enf(settings, "require_label")
-        if required and required not in labels:
-            res.errors.append((
-                "acs_label",
-                "PR is missing the required '%s' label (added by /acs:create-pr). "
-                "Apply it, or add the '%s' label to exempt a non-ticket PR."
-                % (required, _enf(settings, "exempt_label")),
-            ))
-    else:
-        res.skipped.append("acs_label")
-
-    # PR description --------------------------------------------------------
-    if _enabled(settings, "pr_description"):
-        body = ctx.get("body") or ""
-        for section in _enf(settings, "pr_description_sections") or []:
-            if not _has_heading(body, section):
-                res.errors.append((
-                    "pr_description",
-                    "PR description is missing a '## %s' section" % section,
-                ))
-    else:
-        res.skipped.append("pr_description")
-
+    for check in MODE_CHECKS.get(mode, []):
+        if _enabled(settings, check):
+            _CHECKERS[check](settings, ctx, prefix, res)
+        else:
+            res.skipped.append(check)
     return res
 
 
@@ -338,6 +339,19 @@ def _commit_subjects_prepush(repo_root):
     return subjects
 
 
+def _read_commit_subject(path):
+    """The commit subject is the first non-blank, non-comment line of the message file."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#"):
+                    return stripped
+    except OSError as exc:
+        sys.stderr.write("warning: could not read commit message file %s (%s)\n" % (path, exc))
+    return ""
+
+
 def _env_labels():
     raw = (os.environ.get("ACS_PR_LABELS", "") or "").strip()
     if raw.startswith("["):  # JSON array from `toJSON(...labels.*.name)`
@@ -351,7 +365,7 @@ def _env_labels():
 def _emit(res, mode):
     in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
     if res.exempt:
-        print("acs conventions: PR exempt (%s) — checks skipped." % res.exempt)
+        print("acs conventions: exempt (%s) — checks skipped." % res.exempt)
         return 0
     if res.passed:
         skipped = (" (skipped: %s)" % ", ".join(res.skipped)) if res.skipped else ""
@@ -375,30 +389,42 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     mode = "pr"
     repo_root = "."
+    message_file = None
     while argv:
         arg = argv.pop(0)
         if arg == "--mode":
             mode = argv.pop(0)
         elif arg == "--repo-root":
             repo_root = argv.pop(0)
+        elif arg == "--message-file":  # commit-msg hook passes git's $1
+            message_file = argv.pop(0)
         elif arg in ("-h", "--help"):
             print(__doc__)
             return 0
         else:
             sys.stderr.write("unknown argument: %s\n" % arg)
             return 2
-    if mode not in ("pr", "pre-push"):
-        sys.stderr.write("invalid --mode %r (expected 'pr' or 'pre-push')\n" % mode)
+    if mode not in ("pr", "pre-push", "commit-msg"):
+        sys.stderr.write("invalid --mode %r (expected 'pr', 'pre-push', or 'commit-msg')\n" % mode)
+        return 2
+    if mode == "commit-msg" and not message_file:
+        sys.stderr.write("--mode commit-msg requires --message-file <path>\n")
         return 2
 
     repo_root = _git(["rev-parse", "--show-toplevel"], repo_root)
     repo_root = repo_root.strip() if repo_root else "."
 
     settings, _ = load_settings(repo_root)
+    cur_branch = (_git(["rev-parse", "--abbrev-ref", "HEAD"], repo_root) or "").strip()
 
-    if mode == "pre-push":
+    if mode == "commit-msg":
         ctx = {
-            "branch": (_git(["rev-parse", "--abbrev-ref", "HEAD"], repo_root) or "").strip(),
+            "branch": cur_branch,
+            "commit_subjects": [_read_commit_subject(message_file)],
+        }
+    elif mode == "pre-push":
+        ctx = {
+            "branch": cur_branch,
             "commit_subjects": _commit_subjects_prepush(repo_root),
         }
     else:

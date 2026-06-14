@@ -416,20 +416,46 @@ gh label create ACS        --description "Created/validated by the acs pipeline"
 gh label create acs-exempt --description "Skip acs convention checks for this PR" 2>/dev/null || true
 ```
 
-### Optional — local pre-push hook (fast feedback, not the gate)
+### Optional — local hooks: enforce conventions before push (config-driven)
 
-Offer a pre-push hook that validates the branch name + commit messages before a
-push reaches GitHub. Per-clone and `--no-verify`-bypassable, so it is a
-convenience layer. If the repo uses pre-commit (`.pre-commit-config.yaml`
-present), prefer a tracked, shared entry over clobbering `.git/hooks/pre-push` —
-show this snippet for the user to add under `repos:` and run
-`pre-commit install --hook-type pre-push`:
+Offer git hooks that enforce the conventions **locally**, before anything
+reaches GitHub. They run the SAME `check-conventions.py` against the SAME
+committed `formats.*` / `enforcement.*` the user just configured — so a custom
+`commit_message` or `branch_name` format is honoured identically on the laptop
+and in CI. PR title and PR description only exist once a PR is open, so the
+local hooks check what is knowable locally:
+
+- **`commit-msg`** (`--mode commit-msg`) — validates the commit subject against
+  `formats.commit_message` the instant it is written (earliest catch).
+- **`pre-push`** (`--mode pre-push`) — validates `formats.branch_name` plus
+  every commit subject in the push range, the last gate before code leaves the
+  machine.
+
+Both honour the `enforcement.checks.*` toggles and the exempt label/branches,
+and both are `--no-verify`-bypassable per-clone — CI is still the backstop. The
+acs pipeline (`/acs:code`, `/acs:create-pr`) already generates branch, commits,
+PR title, and PR body from these formats+templates, so these hooks only bite on
+work done by hand outside the pipeline.
+
+**Preferred — pre-commit framework (tracked, shared with the team).** If the
+repo uses pre-commit (`.pre-commit-config.yaml` present, or the user agrees to
+add it), add these entries under `repos:` and install both stages with
+`pre-commit install --hook-type commit-msg --hook-type pre-push`. Tracked in the
+repo, so every teammate gets them after `pre-commit install` — not per-clone
+copying:
 
 ```yaml
   - repo: local
     hooks:
-      - id: acs-conventions
-        name: acs conventions (branch + commits)
+      - id: acs-commit-msg
+        name: acs commit message convention
+        entry: python3 .acs/ci/check-conventions.py --mode commit-msg --message-file
+        language: system
+        stages: [commit-msg]
+        pass_filenames: true       # pre-commit appends the message-file path
+        always_run: true
+      - id: acs-pre-push
+        name: acs branch + commit conventions
         entry: python3 .acs/ci/check-conventions.py --mode pre-push
         language: system
         stages: [pre-push]
@@ -437,11 +463,18 @@ show this snippet for the user to add under `repos:` and run
         always_run: true
 ```
 
-Otherwise install the raw hook (note it is per-clone — each teammate re-runs
-`/acs:init` or copies it):
+**Fallback — raw git hooks (per-clone; each teammate re-runs `/acs:init` or
+copies them).** Only when not using pre-commit; do NOT clobber an existing
+`.git/hooks/*` the user maintains — check first:
 
 ```bash
-cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/pre-push" .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+for h in commit-msg pre-push; do
+  if [ -e ".git/hooks/$h" ]; then
+    echo "WARNING: .git/hooks/$h exists — merge manually instead of overwriting"
+  else
+    cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/$h" ".git/hooks/$h" && chmod +x ".git/hooks/$h" && echo "installed .git/hooks/$h"
+  fi
+done
 ```
 
 ### The actual gate — branch protection (admin, one-time)
