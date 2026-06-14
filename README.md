@@ -47,6 +47,20 @@ They ship **together**: CI blocks a plugin version bump unless
 bump auto-cuts an immutable `marketplace-v<version>` tag whose release notes
 list the exact plugin versions it bundles ([CHANGELOG](plugins/acs/CHANGELOG.md)).
 
+**Before cutting a release** (before bumping `version`), run the behavioral eval
+suite locally as a release gate — including the **paid** tier that the pre-commit
+hook and CI deliberately skip (it spawns real `claude -p` sessions and costs a
+few dollars):
+
+```bash
+python3 evals/run_evals.py --paid     # free + paid; needs an authenticated
+                                      # claude CLI with the acs plugin installed
+```
+
+Treat a clean run as the gate; investigate any failing scenario before tagging.
+The free tier alone (gate + cleanup smoke) already runs on every commit via the
+`acs-free-evals` pre-commit hook — see [evals/README.md](evals/README.md).
+
 - **Pinned consumers** (recommended) never receive a plugin update without an
   explicit marketplace release: upgrade by re-pinning `ref` to a newer
   `marketplace-v<version>` tag, then reload.

@@ -62,6 +62,19 @@ whenever `evals/` or `plugins/acs/` change — locally on `git commit` (run
 dedicated eval CI workflow**; the **paid** tier is never automated and is run
 locally on demand.
 
+## Before a release
+
+The paid tier is the **release gate**. Before bumping the plugin `version`, run
+the full suite locally and treat a clean run as a precondition for tagging:
+
+```bash
+python3 evals/run_evals.py --paid
+```
+
+This is the on-demand counterpart to the per-commit free smoke — it exercises
+the real agentic behavior (G1–G4) that CI deliberately doesn't pay for. See the
+release steps in the [root README](../README.md#releasing--updating).
+
 ## Adding a scenario
 
 1. Drop `scenarios/sNN_<name>.py` exposing:
