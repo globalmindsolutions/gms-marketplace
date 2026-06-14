@@ -15,7 +15,7 @@ consolidated.
 | Validation runbook | Step-by-step end-to-end install/run checks | the [M2-0 validation spike](../product/m2-0-validation-spike.md) is the first such runbook |
 | `observability.md` | Metrics/status surfaces and how to read them (the `acs:metrics` dashboard, status lines — PRD goal G7) | planned |
 | `incident-response.md` | What to do when a release misbehaves; rollback (re-pin to the previous `v<version>` tag) | planned |
-| `release-runbook.md` | A single consolidated release checklist (incl. the pre-release eval gate: `python3 evals/run_evals.py --paid`) | planned |
+| [release-runbook.md](release-runbook.md) | The consolidated release checklist (incl. the pre-release eval gate: `python3 evals/run_evals.py --paid`) and rollback | ✅ |
 
 Release readiness traces upward: a release is cut only after the
 [quality](../quality/) gate (the pre-release paid eval suite) passes.

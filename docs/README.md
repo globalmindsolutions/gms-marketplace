@@ -28,7 +28,7 @@ they're auto-discovered):
 | Concern | Where |
 |---------|-------|
 | Security policy | [`SECURITY.md`](../SECURITY.md) (root) |
-| How to contribute / develop the plugin | [`plugins/acs/docs/`](../plugins/acs/docs/) (INTERNALS, AUTHORING) — a root `CONTRIBUTING.md` is a known gap |
+| How to contribute / develop the plugin | [`CONTRIBUTING.md`](../CONTRIBUTING.md) (root) + [`plugins/acs/docs/`](../plugins/acs/docs/) (INTERNALS, AUTHORING) |
 | Install / usage / troubleshooting | [`plugins/acs/README.md`](../plugins/acs/README.md) |
 
 > This repo dogfoods acs on itself, so these are also acs's own product docs:
