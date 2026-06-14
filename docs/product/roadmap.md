@@ -51,15 +51,13 @@ future change safe; built on what M2-0 learns by hand.
   cap (G3), PR ≤ ~400 changed lines (G4).
 - **E1.4** — Nightly CI job with variance/flake handling.
 
-### Epic E4 — `acs:metrics` dashboard *(gates on E1)*
+### Epic E2 — Tracker-sync depth *(parallel, lower priority)*
 
-Traces G5, G7. Starts once E1 (eval harness) is green — behavioral evals for
-the `acs:metrics` skill land in E1 before the skill ships.
+Traces the "team on a shared repo" persona. Independent of E1/E3 — slot in once
+dogfooding is rolling.
 
-- **E4.1** — Skill skeleton + data-source wiring (`metrics.json`, `tickets-index.json`, `pipeline-state.json`, `code-state.json`, `create-pr-state.json`).
-- **E4.2** — Six dashboard panels implemented and rendered via `show_widget` inline in the Claude Code session.
-- **E4.3** — Edge cases: empty workspace, tickets with missing state files, performance target (≤ 5 s for ≤ 50 tickets).
-- **E4.4** — Documentation: skill description, usage example in plugin README and `docs/`.
+- Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
+  Projects.
 
 ### Epic E3 — Dogfood acs on acs
 
@@ -72,13 +70,15 @@ safety net.
   amendments via skill re-runs.
 - **E3.3** — `acs:metrics` skill delivery: implement the dashboard skill reading workspace artifacts; render the six panels (throughput, funnel, cost/time per step, coverage vs target, review iterations, token burn by role); ship as a new skill in the `acs` plugin. Traces G5, G7.
 
-### Epic E2 — Tracker-sync depth *(parallel, lower priority)*
+### Epic E4 — `acs:metrics` dashboard *(gates on E1)*
 
-Traces the "team on a shared repo" persona. Independent of E1/E3 — slot in once
-dogfooding is rolling.
+Traces G5, G7. Starts once E1 (eval harness) is green — behavioral evals for
+the `acs:metrics` skill land in E1 before the skill ships.
 
-- Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
-  Projects.
+- **E4.1** — Skill skeleton + data-source wiring (`metrics.json`, `tickets-index.json`, `pipeline-state.json`, `code-state.json`, `create-pr-state.json`).
+- **E4.2** — Six dashboard panels implemented and rendered via `show_widget` inline in the Claude Code session.
+- **E4.3** — Edge cases: empty workspace, tickets with missing state files, performance target (≤ 5 s for ≤ 50 tickets).
+- **E4.4** — Documentation: skill description, usage example in plugin README and `docs/`.
 
 ### Sequence & exit
 
