@@ -79,16 +79,17 @@ thing.
   needed). `session_end_safety_net` (free) covers the SessionEnd abnormal-ending
   cleanup against the shipped build. With `install_gate_smoke` (G1), the harness
   now exercises G1–G4 plus cleanup.
-- **E1.4 (scaffolded)** — [`evals-nightly.yml`](../.github/workflows/evals-nightly.yml):
-  a nightly (07:00 UTC) + manual workflow that always runs the free tier and
-  runs the paid tier when an `ANTHROPIC_API_KEY` secret is present. The paid
-  suite runs **once** — flake handling is per-scenario (e.g. `skill_triggers`
-  re-probes a missed case), so a single non-deterministic miss never re-runs the
-  whole expensive suite. It stays inert until the secret is added.
+- **E1.4 (scaffolded)** — [`evals-nightly.yml`](../.github/workflows/evals-nightly.yml).
+  **Budget-safe by default:** the nightly **schedule runs only the free tier**
+  ($0, deterministic) — a daily signal with no recurring spend. The **paid tier
+  runs only on a manual, opt-in dispatch** (`paid: true`) when an
+  `ANTHROPIC_API_KEY` secret is present, and runs the suite **once** — flake
+  handling is per-scenario (e.g. `skill_triggers` re-probes a missed case), so a
+  single non-deterministic miss never re-runs the whole expensive suite.
 
-  **To enable:** add an `ANTHROPIC_API_KEY` repo secret **with enough credit
-  balance** (a full paid run spawns several real `claude` sessions — a few
-  dollars/run; if the balance runs out mid-run, scenarios fail with *"Credit
-  balance is too low"*). Then run it manually (Actions → *Nightly evals* → *Run
-  workflow*) to validate the claude-CLI / plugin-install path before trusting
-  the schedule. Disable by removing the secret or the `schedule:` trigger.
+  **To run paid evals:** add an `ANTHROPIC_API_KEY` repo secret **with enough
+  credit balance** (a full paid run spawns several real `claude` sessions — a few
+  dollars; if the balance runs out mid-run, scenarios fail with *"Credit balance
+  is too low"*), then trigger manually: Actions → *Nightly evals* → *Run
+  workflow* (leave *paid* checked). To put paid evals back on the nightly
+  schedule once budget allows, see the note atop the workflow file.

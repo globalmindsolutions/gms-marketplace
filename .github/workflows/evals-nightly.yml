@@ -3,12 +3,15 @@ name: Nightly evals
 # Behavioral eval harness (M2 epic E1.4). Runs the agentic `claude -p`
 # scenarios that must NOT gate PRs — they cost money and are non-deterministic.
 #
-# Stays INERT until an `ANTHROPIC_API_KEY` repo secret is configured:
-#   * the free tier (deterministic, no API) always runs;
-#   * the paid tier is skipped with a notice when the secret is absent.
-#
-# Heads-up: a full paid run spawns several real `claude` sessions and costs a
-# few dollars per night. Disable by removing the secret or the schedule.
+# Cost policy (budget-safe by default):
+#   * The nightly SCHEDULE runs only the FREE tier (deterministic, $0) — a daily
+#     signal with no recurring spend.
+#   * The PAID tier runs ONLY on a manual dispatch with `paid: true`, and only
+#     when an `ANTHROPIC_API_KEY` repo secret is set (else it's skipped with a
+#     notice). A full paid run spawns several real `claude` sessions (a few
+#     dollars) — so it stays opt-in and human-triggered.
+# To make paid evals run on the schedule too, change the paid step's `if:` to
+# also allow `github.event_name == 'schedule'` (and budget for it).
 
 on:
   schedule:
@@ -72,13 +75,14 @@ jobs:
             echo "::notice::No ANTHROPIC_API_KEY secret — skipping paid evals. Add the secret to enable E1.4."
           fi
 
-      # Run paid evals when the secret exists and either this is the nightly
-      # schedule or a manual dispatch that asked for paid. Run the suite ONCE:
-      # variance/flake handling lives inside the scenarios (e.g. skill_triggers
-      # re-probes a missed case), so we never re-run the whole expensive suite —
-      # a blanket retry would double the cost and can exhaust the API budget.
+      # Paid evals run ONLY on a manual, opt-in dispatch (paid: true) with the
+      # secret present — never on the schedule, so there is no recurring spend.
+      # Run the suite ONCE: variance/flake handling lives inside the scenarios
+      # (e.g. skill_triggers re-probes a missed case), so we never re-run the
+      # whole expensive suite — a blanket retry would double cost and can exhaust
+      # the API budget.
       - name: Paid evals (claude)
-        if: ${{ steps.gate.outputs.has_key == 'true' && (github.event_name != 'workflow_dispatch' || inputs.paid) }}
+        if: ${{ steps.gate.outputs.has_key == 'true' && github.event_name == 'workflow_dispatch' && inputs.paid }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python3 evals/run_evals.py --paid
