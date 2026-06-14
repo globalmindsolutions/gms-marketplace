@@ -38,6 +38,7 @@ parallelize work that lives in a conversation window.
 | G4 — Reviewable delivery | ≥ 80% of story/task PRs ≤ ~400 changed lines; every PR carries ticket trace, test plan, and findings. |
 | G5 — Auditability | Every decision (clarification, assumption, finding, phase output) recoverable from the ticket partition; cost/tokens/time recorded per run, ticket, and repo. |
 | G6 — Portability | Works on any git repo with `python3` + `gh`; zero pip installs; one `/acs:init` to onboard. |
+| G7 — Observability | Dashboard renders all 6 panels (throughput, pipeline funnel, cost/time per step, coverage vs target, review iterations, token burn by role) in ≤ 5 s for ≤ 50 tickets; reads only workspace artifacts; requires no network calls and no new config beyond `.acs/settings.json`. |
 
 ## Features (MoSCoW)
 
@@ -51,11 +52,12 @@ parallelize work that lives in a conversation window.
 - Local-first tickets: epics with child fan-out, per-repo id sequence, archive lifecycle.
 - Resume at three levels (gates, `/ship` ledger, mid-skill reconcile) + deliberate handoff.
 - Requirement clarification ledger; grounding rules; standard completion reports.
+- `acs:metrics` dashboard skill — reads workspace artifacts (`metrics.json`, `tickets-index.json`, per-ticket `pipeline-state.json`, `code-state.json`, `create-pr-state.json`) and renders an interactive HTML dashboard inline in the Claude Code session (`show_widget`) covering: ticket throughput by status/type, pipeline funnel, cost and time per ticket broken down by pipeline step, test coverage achieved vs target, review iterations before verifier passed, and token burn by role (planner/executor/verifier). Read-only; no new file writes; no new config; single-repo scope. Traces G5, G7. *(Must have for M2 exit)*
 
 **Should have** *(shipped in v0.1, maturing)*
 - Two-way tracker sync (GitHub Projects / Jira via `gh` / `acli`), remote import.
 - Configured e2e test layer; `docs_only` fast-path; PR-size control with ticket splitting.
-- Status lines (prompt + agent panel); per-role model/effort configuration; metrics roll-ups.
+- Status lines (prompt + agent panel); per-role model/effort configuration.
 
 **Could have**
 - Scheduled background tracker sync; cross-machine handoff (shared workspace); behavioral eval harness for skills; additional description templates.
