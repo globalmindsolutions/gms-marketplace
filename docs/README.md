@@ -1,25 +1,35 @@
 # Documentation
 
-Product documentation for **`acs`**, organized as the doc sets the acs
-workflow maintains for every consumer repo. Each set answers a different
-question and is normative for its own concern — none replaces another.
+Product documentation for **`acs`**, organized as the doc sets the acs workflow
+maintains across the **software development lifecycle**. Each set is normative
+for one concern and answers one question — none replaces another. Together they
+cover define → specify → design → decide → **verify → release & operate**.
 
-| Set | What it holds | Question it answers |
-|-----|---------------|---------------------|
-| [product/](product/) | PRD, roadmap | WHY & WHAT, prioritized — vision, goals, features, product NFRs |
-| [requirements/](requirements/) | Living behavioral contract, one file per feature area | the detailed, testable behavior (every MUST/SHOULD/MAY) |
-| [architecture/](architecture/) | HLD (C4, data model, deployment, tech stack) + LLD (flow sequence diagrams, contracts) | HOW the system is structured |
-| [adr/](adr/) | Architecture decision records | WHY each structural choice was made |
+| Lifecycle phase | Set | Question it answers |
+|-----------------|-----|---------------------|
+| Define | [product/](product/) | WHY & WHAT, prioritized — vision, goals, features, product NFRs |
+| Specify | [requirements/](requirements/) | the detailed, testable behavior (every MUST/SHOULD/MAY) |
+| Design | [architecture/](architecture/) | HOW the system is structured — HLD (C4, data model, deployment, tech stack) + LLD (flows, contracts) |
+| Decide | [adr/](adr/) | WHY each structural choice was made |
+| **Verify** | [quality/](quality/) | HOW correctness is assured — test strategy, coverage policy, the release gate |
+| **Release & operate** | [operations/](operations/) | HOW it ships and runs — release process, runbooks, observability, incident response |
 
-Conformance flows top to bottom: **PRD → architecture → design → specs →
-code**, each level verified against the one above it. On conflict, the PRD
-wins on intent and prioritization, the requirements set wins on behavior, and
-the relevant ADR records how the choice was settled.
+Conformance flows top to bottom: **PRD → architecture → design → specs → code →
+verify → release**, each level checked against the one above it. On conflict, the
+PRD wins on intent and prioritization, the requirements set wins on behavior, the
+relevant ADR records how the choice was settled, and a release ships only after
+the [quality](quality/) gate passes.
 
-> This repo dogfoods acs on itself, so these are also acs's own product docs.
-> Implementation docs for the plugin live separately under
-> [`plugins/acs/docs/`](../plugins/acs/docs/) (INTERNALS, AUTHORING).
+## Cross-cutting & contributor docs
 
-**How skill quality is assured** across all the test layers (contract tests,
-deterministic tests, the eval harness, the runtime verifier, dogfooding) is
-written up in [testing-strategy.md](testing-strategy.md).
+These sit outside the lifecycle sets (root files follow GitHub's conventions so
+they're auto-discovered):
+
+| Concern | Where |
+|---------|-------|
+| Security policy | [`SECURITY.md`](../SECURITY.md) (root) |
+| How to contribute / develop the plugin | [`plugins/acs/docs/`](../plugins/acs/docs/) (INTERNALS, AUTHORING) — a root `CONTRIBUTING.md` is a known gap |
+| Install / usage / troubleshooting | [`plugins/acs/README.md`](../plugins/acs/README.md) |
+
+> This repo dogfoods acs on itself, so these are also acs's own product docs:
+> the same sets acs maintains for any consumer repo.

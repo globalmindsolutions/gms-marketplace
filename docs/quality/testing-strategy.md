@@ -14,9 +14,9 @@ deterministic at the base, most expensive and least deterministic at the top.
 
 | # | Layer | What it verifies | Cost / determinism | Where | Runs |
 |---|-------|------------------|--------------------|-------|------|
-| 1 | Structural / contract | every skill & agent is wired right — frontmatter, lifecycle-script calls, completion reports, tool restrictions, grounding, phase artifacts | free, deterministic | [tests/test_skill_contracts.py](../tests/test_skill_contracts.py) | every PR |
-| 2 | Deterministic layer | gates block/advance, state/locks/counters/metrics, helper CLIs | free, deterministic | [tests/test_acs_plugin.py](../tests/test_acs_plugin.py) | every PR |
-| 3 | Static validation | JSON / JSON-Schema / XSD parse, byte-compile, version consistency | free, deterministic | [ci.yml](../.github/workflows/ci.yml) | every PR |
+| 1 | Structural / contract | every skill & agent is wired right — frontmatter, lifecycle-script calls, completion reports, tool restrictions, grounding, phase artifacts | free, deterministic | [tests/test_skill_contracts.py](../../tests/test_skill_contracts.py) | every PR |
+| 2 | Deterministic layer | gates block/advance, state/locks/counters/metrics, helper CLIs | free, deterministic | [tests/test_acs_plugin.py](../../tests/test_acs_plugin.py) | every PR |
+| 3 | Static validation | JSON / JSON-Schema / XSD parse, byte-compile, version consistency | free, deterministic | [ci.yml](../../.github/workflows/ci.yml) | every PR |
 | 4 | Free eval smoke | the *shipped build* still installs & gates; SessionEnd cleanup | free, deterministic | `evals/` (`install_gate_smoke`, `session_end_safety_net`) | pre-commit + CI |
 | 5 | Trigger evals | the *right skill fires* for a natural-language request | paid (cheap), ~deterministic w/ re-probe | `evals/skill_triggers` | on-demand |
 | 6 | Artifact / behavioral evals | a *real run* produces correct workspace artifacts | paid (costly), non-deterministic | `evals/` (`create_ticket_artifacts`, `resume_and_verify`) | pre-release |
@@ -26,7 +26,7 @@ deterministic at the base, most expensive and least deterministic at the top.
 
 Layers 1–4 are free and gate every PR (and, for layer 4, every commit via the
 `acs-free-evals` pre-commit hook). Layers 5–6 are the paid
-[eval harness](../evals/README.md). Layer 7 is a *runtime control*, not a test.
+[eval harness](../../evals/README.md). Layer 7 is a *runtime control*, not a test.
 
 ## Coverage today (per skill)
 
@@ -55,7 +55,7 @@ report, a broken gate, the wrong skill firing) are already caught cheaply.
 1. **Assert artifacts, never prose.** A scenario passes because the right JSON
    state exists with the right values — not because the model "said" the right
    thing. Validate produced artifacts against
-   [`plugins/acs/schemas/*.schema.json`](../plugins/acs/schemas/).
+   [`plugins/acs/schemas/*.schema.json`](../../plugins/acs/schemas/).
 2. **Push checks down the pyramid.** Prefer a deterministic assertion (layers
    1–4) over a paid eval whenever the property is structural.
 3. **One run, many assertions.** The live-agent run is the expensive part —
@@ -88,6 +88,6 @@ report, a broken gate, the wrong skill firing) are already caught cheaply.
 
 ## See also
 
-- [evals/README.md](../evals/README.md) — the harness, cost tiers, how to add a scenario
-- [tests/](../tests/) — the deterministic + contract suites
-- [docs/product/roadmap.md](product/roadmap.md) — Epic **E1** (eval harness) and **E3** (dogfood)
+- [evals/README.md](../../evals/README.md) — the harness, cost tiers, how to add a scenario
+- [tests/](../../tests/) — the deterministic + contract suites
+- [docs/product/roadmap.md](../product/roadmap.md) — Epic **E1** (eval harness) and **E3** (dogfood)
