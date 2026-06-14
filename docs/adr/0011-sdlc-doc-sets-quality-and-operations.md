@@ -1,4 +1,4 @@
-# 0011 — Full-SDLC doc sets: acs maintains quality and operations docs
+# 0011 — Full-SDLC doc sets (quality, operations) + standing test runs
 
 **Status**: Proposed · **Date**: 2026-06-14
 
@@ -54,6 +54,23 @@ that.
    postmortems in `operations/` are deferred — bootstrap the strategy/runbooks
    first.
 
+6. **Add `/acs:test` — standing, scheduled product verification.** Distinct from
+   the per-ticket `/code` reflection-verifier and from the doc producers above,
+   `/acs:test` *runs* the product's configured suites
+   (unit/integration/e2e/regression), writes an auditable results artifact,
+   **triages** failures into a regression summary, and **opens an acs ticket per
+   regression** to drive the fix (closed loop). It is a non-ticket utility skill
+   (unhooked, like `/init`/`/update`) and is the **execution counterpart** to
+   `/create-quality`: that skill writes the test *strategy* (`quality/`),
+   `/acs:test` runs the tests the strategy describes.
+   - **Config:** generalize the existing `e2e` setting into a `suites` map
+     (named commands with optional setup/teardown); `/acs:test` runs all or a
+     selected subset.
+   - **Cadence:** daily/regression runs come from scheduling `/acs:test` headless
+     via Claude Code routines/cron — acs does **not** build its own scheduler;
+     the scheduling recipe lives in `operations/`.
+   - **Reporting:** results feed the planned `acs:metrics` dashboard (G7).
+
 ## Alternatives considered
 
 - **Extend `/acs:create-architecture`** to emit all three sets — *rejected*:
@@ -68,13 +85,25 @@ that.
   existing `templates/` model.
 - **Scaffold only in `/acs:create-project`** (greenfield) — *rejected* as the
   sole mechanism: brownfield onboarding also needs these sets.
+- **Build a scheduler into acs** (for the daily `/acs:test` runs) — *rejected*:
+  Claude Code routines/cron already schedule headless skill runs; acs stays a
+  set of *schedulable* skills rather than owning a scheduler.
+- **Run the suite without triage** (a bare `cron pytest`) — *rejected*: the
+  model's value is turning failures into a regression summary + tickets, not
+  just an exit code; a deterministic-only run needs no acs skill.
 
 ## Consequences
 
-- Two new product-level skills (`create-quality`, `create-operations`) and their
-  six agents; the skill count goes **12 → 14**. Touches: `settings.schema.json`,
-  `/init`, the dispatcher + pre/post hooks (`HOOKED_SKILLS`), `templates/`, the
-  contract tests, the plugin README skill table, and the architecture C4 docs.
+- Three new skills (`create-quality`, `create-operations`, `test`) — the two
+  doc producers carry a planner/executor/verifier triad, `test` is a utility
+  skill; the skill count goes **12 → 15**. Touches: `settings.schema.json`
+  (`quality_path`/`operations_path` + a `suites` map), `/init`, the dispatcher +
+  pre/post hooks (`HOOKED_SKILLS`), `templates/`, the contract tests, the plugin
+  README skill table, and the architecture C4 docs.
+- `/acs:test` runs unattended on a schedule (Claude Code routines/cron) and, on
+  regression, invokes the create-ticket flow (like `/ship` orchestrates other
+  skills); its results feed `acs:metrics`. The scheduling recipe is documented
+  in `operations/`.
 - A release ships only after the [quality](../operations/release-runbook.md)
   gate passes; `operations/` is the home for the release/observability runbooks.
 - acs's *own* `quality/` and `operations/` docs become the reference instance of

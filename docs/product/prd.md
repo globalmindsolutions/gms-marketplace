@@ -64,7 +64,7 @@ parallelize work that lives in a conversation window.
 
 **Could have**
 - Scheduled background tracker sync; cross-machine handoff (shared workspace); additional description templates.
-- acs maintains the `quality/` and `operations/` doc sets for consumers (test strategy + release/ops runbooks), produced by two new skills `/acs:create-quality` and `/acs:create-operations` from templates. *(Proposed — see [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md).)*
+- acs maintains the `quality/` and `operations/` doc sets for consumers (test strategy + release/ops runbooks) via `/acs:create-quality` and `/acs:create-operations`, plus `/acs:test` — a schedulable regression runner that triages failures and opens a ticket per regression (closed loop). *(Proposed — see [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md).)*
 
 **Won't have (now)**
 - Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes; plugins other than `acs`.
