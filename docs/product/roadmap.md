@@ -9,7 +9,7 @@ Epic-level scope (retrofit; built before dogfooding began):
 
 - Marketplace + plugin skeleton (manifests, CI, release automation).
 - Deterministic layer: hooks, gates, workspace/state, locks, metrics, helper CLIs.
-- 12 skills + 27 agents with the reflection protocol, XML/XSD messaging, phase artifacts.
+- 14 skills + 27 agents with the reflection protocol, XML/XSD messaging, phase artifacts.
 - Quality systems: grounding rules, clarification ledger, completion reports,
   size control, `docs_only`, e2e layer, living-architecture enforcement.
 - Test suites: deterministic-layer integration tests + prose contract tests; CI green.
@@ -76,6 +76,41 @@ dogfooding is rolling.
 - Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
   Projects.
 
+### Epic E5 — Convention enforcement & onboarding/repo hardening *(shipped in v0.2.0)*
+
+Traces G9 (+ the Tech-lead persona). The v0.2.0 release that this roadmap entry
+records — what actually shipped under the M2 hardening banner. Delivers the PRD
+Must-have convention-enforcement, `/acs:install-hooks`, and Step 0b preflight
+features.
+
+- **E5.1 — Step 7c repo-side CI convention check.** `/acs:init` Step 7c scaffolds
+  `.github/workflows/acs-conventions.yml` backed by a stdlib-only
+  `.acs/ci/check-conventions.py` (fail-closed; modes `pr` / `pre-push` /
+  `commit-msg`), config-driven local git hooks (`commit-msg` + `pre-push`), and a
+  new `enforcement` settings block
+  (`checks.{branch_name,pr_title,pr_description,acs_label,commit_message}`,
+  `require_label`, `exempt_label` default `acs-exempt`, `exempt_branches`,
+  `pr_description_sections`). Observed live on this repo: ruleset 17602044 is
+  `active` on `main` with "PR title convention" among the required status-check
+  contexts (`gh api repos/:owner/:repo/rulesets/17602044`).
+- **E5.2 — `/acs:install-hooks` skill** + committed `.acs/ci/install-hooks.sh`.
+  The per-clone `pre-commit install` equivalent for acs; the committed script
+  lets teammates install the local hooks without the plugin.
+- **E5.3 — `/acs:init` Step 0b toolchain preflight.** Detects and offers to
+  install `git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli` with
+  per-platform install commands, so onboarding fails up front with consent.
+- **E5.4 — Repo hardening.** This repo is public under the MIT `LICENSE`; a branch
+  ruleset on `main` requires a PR with squash-only merges, linear history,
+  non-fast-forward protection, and the required status checks (PR title
+  convention, secret scan, pre-commit hooks, tests); secret scanning + push
+  protection are enabled; Dependabot runs alerts, security updates, and version
+  updates. The default `GITHUB_TOKEN` workflow permission is **read**, and
+  Actions are restricted to a selected allowlist (`allowed_actions=selected`,
+  `github_owned_allowed=true`, `verified_allowed=true`,
+  `patterns_allowed=["pre-commit/action@*"]`) — confirmed live via
+  `gh api repos/:owner/:repo/actions/permissions` and
+  `.../actions/permissions/workflow`; re-confirmable the same way.
+
 ### Epic E3 — Dogfood acs on acs
 
 Traces all goals (proof by usage). Starts once M2-0 is green and E1 provides a
@@ -101,13 +136,20 @@ the `acs:metrics` skill land in E1 before the skill ships.
 ### Sequence & exit
 
 ```
-M2-0 spike ─▶ (v0.1.2 if needed) ─▶ E1 harness ─▶ E3 dogfood ─▶ E4 acs:metrics ─▶ M2 exit
-                                                  └──────────────▶ E2 tracker-sync (parallel)
+M2-0 spike ─▶ (v0.1.2 if needed) ─▶ E1 harness ─▶ E5 enforcement + hardening ─▶ v0.2.0
+                                       │                                          └▶ E2 tracker-sync (parallel)
+                                       └▶ E3 dogfood ─▶ E4 acs:metrics ─▶ v0.3.0
 ```
 
-**M2 exits → v0.2.0 when:** the eval harness is green nightly, ≥ 1 real acs
-change has shipped via `/acs:ship`, PRD metrics G1–G5 and G7 are measured on real
-runs, and the `acs:metrics` dashboard skill ships and passes evals.
+**M2 exits → v0.2.0 when:** the eval harness is green (E1), the convention-
+enforcement + `/acs:install-hooks` + Step 0b preflight features ship (E5), and
+the repo is hardened (public/MIT, branch ruleset with required checks, secret
+scanning + push protection, Dependabot, read-only `GITHUB_TOKEN` + Actions
+allowlist). *(Shipped.)*
+
+**Exits → v0.3.0 when:** ≥ 1 real acs change has shipped via `/acs:ship` (E3
+dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
+`acs:metrics` dashboard skill ships and passes evals (E4).
 
 ## M3 — GA (v1.0)
 
@@ -121,7 +163,7 @@ runs, and the `acs:metrics` dashboard skill ships and passes evals.
   templates), and adds **`/acs:test`** — a standing, schedulable skill that runs
   the product's suites, triages regressions, and opens a ticket per failure
   (closed loop). `settings.schema.json` gains `quality_path`/`operations_path`
-  and a `suites` map; `/acs:init` defaults them. Skill count 12 → 15. Traces
+  and a `suites` map; `/acs:init` defaults them. Skill count 14 → 17. Traces
   **G8**. Design: [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md).
   All design skills also gain a shared **design-time consistency step** — detect
   doc gaps/staleness across the graph and recommend adjustments in-session, no
