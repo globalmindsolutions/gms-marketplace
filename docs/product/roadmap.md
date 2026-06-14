@@ -29,7 +29,7 @@ Traces G1, G2, G6. Install published v0.1.1 into a throwaway consumer repo; run
 `/acs:init` → `/acs:create-ticket` → `/acs:ship` on a trivial change. Assert
 that workspace partitions, hook gates (exit-2 blocks), and the PR flow match
 the docs. Step-by-step runbook with per-step assertions:
-[m2-0-validation-spike.md](m2-0-validation-spike.md).
+[m2-0-validation-spike.md](spikes/m2-0-validation-spike.md).
 
 > v0.1.1 was the first fast-follow: v0.1.0 failed to load on install
 > (duplicate hooks reference), so v0.1.1 is the build the spike targets.
@@ -39,7 +39,7 @@ the docs. Step-by-step runbook with per-step assertions:
 - **Status (2026-06-13):** ✅ **green** — clean end-to-end run against v0.1.2
   (G1/G2/G6 observed, ~$2.43 measured for G5; one doc-only nit, no product
   defects). See the run record in
-  [m2-0-validation-spike.md](m2-0-validation-spike.md#run-record).
+  [m2-0-validation-spike.md](spikes/m2-0-validation-spike.md#run-record).
 
 ### Epic E1 — Behavioral eval harness *(M2 backbone)*
 
