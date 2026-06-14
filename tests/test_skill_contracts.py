@@ -19,7 +19,7 @@ PLUGIN = os.path.join(REPO_ROOT, "plugins", "acs")
 HOOKED_SKILLS = ["create-prd", "create-architecture", "create-project",
                  "create-ticket", "create-design", "create-spec", "code",
                  "create-pr", "merge-pr"]
-ALL_SKILLS = HOOKED_SKILLS + ["init", "ship", "handoff", "update"]
+ALL_SKILLS = HOOKED_SKILLS + ["init", "ship", "handoff", "update", "install-hooks"]
 ROLES = ["planner", "executor", "verifier"]
 
 
@@ -73,17 +73,18 @@ class TestSkillContracts(unittest.TestCase):
         for name in HOOKED_SKILLS + ["ship"]:
             fm, _ = frontmatter(read(self.skill_path(name)), name)
             self.assertRegex(fm, r"(?m)^disallowed-tools: Edit, NotebookEdit$", name)
-        for name in ("init", "handoff", "update"):
+        for name in ("init", "handoff", "update", "install-hooks"):
             fm, _ = frontmatter(read(self.skill_path(name)), name)
             self.assertNotIn("disallowed-tools", fm, name)
 
     def test_user_action_only_skills(self):
-        # merge-pr (human merge gate) and update (changes the environment)
-        for name in ("merge-pr", "update"):
+        # merge-pr (human merge gate), update + install-hooks (change the environment)
+        user_action = ("merge-pr", "update", "install-hooks")
+        for name in user_action:
             fm, _ = frontmatter(read(self.skill_path(name)), name)
             self.assertRegex(fm, r"(?m)^disable-model-invocation: true$", name)
         for name in ALL_SKILLS:
-            if name in ("merge-pr", "update"):
+            if name in user_action:
                 continue
             fm, _ = frontmatter(read(self.skill_path(name)), name)
             self.assertNotIn("disable-model-invocation: true", fm, name)

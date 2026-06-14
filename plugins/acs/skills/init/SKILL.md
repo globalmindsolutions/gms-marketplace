@@ -397,10 +397,16 @@ Run from `<repo>` (the main checkout root):
 
 ```bash
 mkdir -p .acs/ci .github/workflows
-cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/check-conventions.py" .acs/ci/check-conventions.py
-cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/acs-conventions.yml"  .github/workflows/acs-conventions.yml
-chmod +x .acs/ci/check-conventions.py
+for f in check-conventions.py commit-msg pre-push install-hooks.sh; do
+  cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/$f" ".acs/ci/$f"
+done
+cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/acs-conventions.yml" .github/workflows/acs-conventions.yml
+chmod +x .acs/ci/check-conventions.py .acs/ci/commit-msg .acs/ci/pre-push .acs/ci/install-hooks.sh
 ```
+
+`.acs/ci/` carries the checker, the two hook scripts, and `install-hooks.sh` so a
+teammate who only cloned the repo can install the local hooks without the acs
+plugin.
 
 These are regenerated on every re-run, so changing a format later and re-running
 `/acs:init` refreshes them. Stage `.acs/settings.json`, `.acs/ci/`, and
@@ -463,19 +469,19 @@ copying:
         always_run: true
 ```
 
-**Fallback — raw git hooks (per-clone; each teammate re-runs `/acs:init` or
-copies them).** Only when not using pre-commit; do NOT clobber an existing
-`.git/hooks/*` the user maintains — check first:
+**Fallback — raw git hooks (per-clone).** When not using pre-commit, run the
+committed installer, which copies `.acs/ci/commit-msg` + `.acs/ci/pre-push` into
+this clone and refuses to clobber a non-acs hook:
 
 ```bash
-for h in commit-msg pre-push; do
-  if [ -e ".git/hooks/$h" ]; then
-    echo "WARNING: .git/hooks/$h exists — merge manually instead of overwriting"
-  else
-    cp "${CLAUDE_PLUGIN_ROOT}/templates/ci/$h" ".git/hooks/$h" && chmod +x ".git/hooks/$h" && echo "installed .git/hooks/$h"
-  fi
-done
+sh .acs/ci/install-hooks.sh
 ```
+
+Either way, hooks are **per-clone** — each teammate runs it once after cloning.
+The dedicated command for that is **`/acs:install-hooks`** (or
+`sh .acs/ci/install-hooks.sh` without the plugin); it ensures the `.acs/ci/`
+files exist and installs the hooks, and is the thing to tell teammates to run.
+Offer to run it now for this clone.
 
 ### The actual gate — branch protection (admin, one-time)
 

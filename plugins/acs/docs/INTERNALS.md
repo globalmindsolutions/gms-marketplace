@@ -404,7 +404,10 @@ sanctioned way to keep children shippable when a slice alone would break.
   intersected with the `enforcement.checks.*` toggles, so local hooks and CI
   enforce identical, user-configured `formats.*` — laptop and runner never drift.
   Local hooks install via the pre-commit framework (tracked/shared) or raw
-  `.git/hooks/*` (per-clone), both `--no-verify`-bypassable.
+  `.git/hooks/*` (per-clone), both `--no-verify`-bypassable. The per-clone
+  install is the unhooked, user-invoked skill `/acs:install-hooks` (wrapping the
+  committed `.acs/ci/install-hooks.sh`, which a teammate can run without the
+  plugin) — the `pre-commit install` equivalent for acs.
 
 ## Consumer-repo prerequisites
 

@@ -42,6 +42,14 @@ the notes.
   - New **`enforcement`** settings block (`schemas/settings.schema.json`):
     `checks.*` toggles, `exempt_branches` globs, `exempt_label`, `require_label`,
     and `pr_description_sections`.
+- **New skill `/acs:install-hooks`** — the `pre-commit install` equivalent for
+  acs: installs this clone's local `commit-msg` + `pre-push` hooks (per-clone,
+  user-invoked). It ensures the `.acs/ci/` files exist (copying them from the
+  plugin if needed), then installs via the pre-commit framework when the repo
+  uses it or via raw git hooks otherwise. A committed `.acs/ci/install-hooks.sh`
+  lets a teammate who only cloned the repo run it (`sh .acs/ci/install-hooks.sh`)
+  without the acs plugin. `/acs:init` Step 7c now copies the hook scripts +
+  installer into `.acs/ci/` and points at this command.
 - **No-bypass gate guidance.** Because branch/title are cosmetic and the proof
   of pipeline use lives in the workspace outside the repo, the check is *mandatory
   to merge* but the real gate is a **required status check on a protected default
