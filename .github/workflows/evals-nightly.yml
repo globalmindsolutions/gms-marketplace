@@ -1,0 +1,94 @@
+name: Nightly evals
+
+# Behavioral eval harness (M2 epic E1.4). Runs the agentic `claude -p`
+# scenarios that must NOT gate PRs — they cost money and are non-deterministic.
+#
+# Stays INERT until an `ANTHROPIC_API_KEY` repo secret is configured:
+#   * the free tier (deterministic, no API) always runs;
+#   * the paid tier is skipped with a notice when the secret is absent.
+#
+# Heads-up: a full paid run spawns several real `claude` sessions and costs a
+# few dollars per night. Disable by removing the secret or the schedule.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"          # 07:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      paid:
+        description: "Run paid (claude) scenarios"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-evals
+  cancel-in-progress: false
+
+jobs:
+  evals:
+    name: Behavioral evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Install the CLI + the acs plugin from THIS checkout, so the evals
+      # exercise the code on this ref. If anything here fails, the free tier
+      # still runs (the harness falls back to the in-repo source tree); the
+      # paid tier needs the plugin, so a failure here will surface there.
+      - name: Install claude CLI + acs plugin (from checkout)
+        id: install
+        continue-on-error: true
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+          claude plugin marketplace add "$GITHUB_WORKSPACE"
+          claude plugin install acs@gms-marketplace
+          claude plugin list
+
+      - name: Free-tier evals (deterministic, no API key)
+        run: python3 evals/run_evals.py
+
+      - name: Check for API key
+        id: gate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No ANTHROPIC_API_KEY secret — skipping paid evals. Add the secret to enable E1.4."
+          fi
+
+      # Run paid evals when the secret exists and either this is the nightly
+      # schedule or a manual dispatch that asked for paid. Retry once: these
+      # sessions are non-deterministic, so a single transient miss shouldn't
+      # red the whole nightly (variance/flake handling).
+      - name: Paid evals (claude; retry once for variance)
+        if: ${{ steps.gate.outputs.has_key == 'true' && (github.event_name != 'workflow_dispatch' || inputs.paid) }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          for attempt in 1 2; do
+            echo "::group::paid evals attempt $attempt"
+            if python3 evals/run_evals.py --paid; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "::warning::paid evals attempt $attempt failed; retrying"
+          done
+          echo "::error::paid evals failed after 2 attempts"
+          exit 1

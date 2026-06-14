@@ -46,17 +46,23 @@ the docs. Step-by-step runbook with per-step assertions:
 Traces G1, G3, G4, G5. The regression net that makes dogfooding and every
 future change safe; built on what M2-0 learns by hand.
 
-- **E1.1** — Headless `claude -p` scenario runner in a sandbox repo, asserting
-  on workspace artifacts rather than prose output. *Scaffolded:*
-  [`evals/`](../../evals/README.md) — tiered runner (free gate checks + paid
-  `claude -p`), `Sandbox`/`Check` harness, 2 seed scenarios (both G1, green).
-  Remaining: more scenarios (E1.3) and the nightly job (E1.4).
-- **E1.2** — Description-trigger evals for all 12 skills (the right skill fires
-  for a given request).
-- **E1.3** — Per-goal assertion scenarios: zero gate escapes (G1),
-  resume-from-state-only (G2), zero verifier findings within the 3-iteration
-  cap (G3), PR ≤ ~400 changed lines (G4).
-- **E1.4** — Nightly CI job with variance/flake handling.
+All four sub-epics are implemented in [`evals/`](../../evals/README.md): a tiered
+runner (free deterministic checks + paid `claude -p`), a `Sandbox`/`Check`
+harness asserting on workspace artifacts, and 6 scenarios covering G1–G4 plus
+cleanup. Validated green against installed v0.1.2.
+
+- **E1.1 (done)** — `claude -p` scenario runner + sandbox + artifact assertions;
+  seed scenarios `install_gate_smoke` (free, G1) and `create_ticket_artifacts`
+  (paid, G1).
+- **E1.2 (done)** — `skill_triggers` (paid): one un-named request per skill
+  routes to the right skill; all 12 green.
+- **E1.3 (done)** — `resume_and_verify` (paid) covers G2 (resume-from-state),
+  G3 (verifier-clean within the cap), and G4 (PR ≤ ~400 lines, as the seed
+  diff); `session_end_safety_net` (free) covers the SessionEnd cleanup.
+- **E1.4 (scaffolded)** — [`evals-nightly.yml`](../../.github/workflows/evals-nightly.yml):
+  nightly + manual workflow, free tier always, paid tier when an
+  `ANTHROPIC_API_KEY` secret is set (retry-once for variance). Inert until the
+  secret is added and a manual dispatch validates the claude/plugin-install path.
 
 ### Epic E3 — Dogfood acs on acs
 
