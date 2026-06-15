@@ -21,9 +21,10 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pr-title-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No `concurrency: cancel-in-progress` here on purpose: this is a REQUIRED status
+# check, and label/edit events (e.g. adding `acs-exempt`) would otherwise cancel
+# the in-flight run, leaving a cancelled required-check run that blocks merge even
+# after a later run succeeds. The check is fast, so just let each event run.
 
 jobs:
   title:
