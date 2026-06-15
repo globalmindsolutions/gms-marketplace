@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/globalmindsolutions/gms-marketplace/plugins/acs/schemas/counters.schema.json",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/acs/schemas/counters.schema.json",
   "title": "acs counters.json",
   "description": "Per-repo ticket id sequence at <workspace>/<repo>/counters.json. Ids are <ticket_prefix>-<n>; allocation is guarded against parallel sessions.",
   "type": "object",

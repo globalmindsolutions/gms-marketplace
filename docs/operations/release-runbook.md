@@ -31,7 +31,7 @@ the step-by-step the maintainer follows.
    release from the changelog section.
 5. **Verify the tag** resolves and the plugin installs from it:
    ```bash
-   claude plugin marketplace add globalmindsolutions/gms-marketplace@v<version>
+   claude plugin marketplace add globalmindsolution/gms-marketplace@v<version>
    claude plugin install acs@gms-marketplace
    ```
 

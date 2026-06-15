@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/globalmindsolutions/gms-marketplace/plugins/acs/schemas/skill-state.schema.json",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/acs/schemas/skill-state.schema.json",
   "title": "acs <skill>-state.json",
   "description": "Per-skill state file in the ticket partition. The append-only `runs` array is the single source of truth for status: runs[-1].status is the current state; pre-hooks gate on it. Status, stop reason, and timestamps are never mirrored at top level. `skill` and `ticket_id` echo the filename/partition deliberately, so the file stays self-describing after archiving.",
   "type": "object",

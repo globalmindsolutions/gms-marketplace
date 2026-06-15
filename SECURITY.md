@@ -54,7 +54,7 @@ Required approvals are currently `0` so a solo maintainer can merge; raise to
 `1+` once there is a second maintainer. Re-apply the checked-in ruleset with:
 
 ```bash
-gh api -X PUT repos/globalmindsolutions/gms-marketplace/rulesets/<id> \
+gh api -X PUT repos/globalmindsolution/gms-marketplace/rulesets/<id> \
   --input .github/branch-protection-ruleset.json     # or POST to create a new one
 ```
 

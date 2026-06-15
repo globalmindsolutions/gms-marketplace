@@ -165,11 +165,11 @@ Initial release.
   release from the matching changelog section when the plugin manifest
   version changes on `main`.
 
-[Unreleased]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.6...v0.2.0
-[0.1.6]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.5...v0.1.6
-[0.1.5]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.3...v0.1.5
-[0.1.3]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/globalmindsolutions/gms-marketplace/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/globalmindsolutions/gms-marketplace/releases/tag/v0.1.0
+[Unreleased]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.6...v0.2.0
+[0.1.6]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.3...v0.1.5
+[0.1.3]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/globalmindsolution/gms-marketplace/releases/tag/v0.1.0

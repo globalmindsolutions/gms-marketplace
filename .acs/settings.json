@@ -3,7 +3,7 @@
   "tracker": {
     "provider": "github",
     "github": {
-      "owner": "globalmindsolutions",
+      "owner": "globalmindsolution",
       "project_number": 1
     }
   }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/globalmindsolutions/gms-marketplace/plugins/acs/schemas/tickets-index.schema.json",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/acs/schemas/tickets-index.schema.json",
   "title": "acs tickets-index.json",
   "description": "Repo-level index of every ticket (including archived ones) at <workspace>/<repo>/tickets-index.json. Lets skills and users list work without scanning partitions.",
   "type": "object",

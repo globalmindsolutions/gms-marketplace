@@ -9,7 +9,7 @@
 
 **Target build:** `acs` **v0.1.1** (`acs@gms-marketplace`). v0.1.0 is not
 installable end to end — it fails to load with *"Duplicate hooks file
-detected"*; v0.1.1 ([#7](https://github.com/globalmindsolutions/gms-marketplace/pull/7))
+detected"*; v0.1.1 ([#7](https://github.com/globalmindsolution/gms-marketplace/pull/7))
 is the first build this spike can run against.
 
 **Goals traced** (from [prd.md](../prd.md#goals--success-metrics)): **G1** zero
@@ -42,7 +42,7 @@ git init -q
 printf 'def health():\n    return "ok"\n' > app.py
 git add -A && git commit -qm "seed"
 
-claude plugin marketplace add globalmindsolutions/gms-marketplace
+claude plugin marketplace add globalmindsolution/gms-marketplace
 claude plugin install acs@gms-marketplace
 ```
 

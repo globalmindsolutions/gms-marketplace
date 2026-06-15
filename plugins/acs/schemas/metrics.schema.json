@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/globalmindsolutions/gms-marketplace/plugins/acs/schemas/metrics.schema.json",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/acs/schemas/metrics.schema.json",
   "title": "acs metrics.json",
   "description": "Per-repo aggregates at <workspace>/<repo>/metrics.json, maintained by post-hooks. Ticket counts are recomputed from tickets-index.json; PR counts and run totals accumulate per event/run.",
   "type": "object",

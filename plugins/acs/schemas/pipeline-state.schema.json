@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/globalmindsolutions/gms-marketplace/plugins/acs/schemas/pipeline-state.schema.json",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/acs/schemas/pipeline-state.schema.json",
   "title": "acs pipeline-state.json",
   "description": "Compact per-ticket step ledger. /ship reads this single file to pick the next step or resume, so its context can be cleared at any step boundary. Maintained by post-hooks and skill-start.",
   "type": "object",

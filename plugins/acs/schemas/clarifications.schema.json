@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/globalmindsolutions/gms-marketplace/plugins/acs/schemas/clarifications.schema.json",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/acs/schemas/clarifications.schema.json",
   "title": "acs clarifications.json",
   "description": "Per-ticket requirement-clarification ledger at <workspace>/<repo>/<ticket-id>/clarifications.json — the single source of truth for every ambiguity resolved (or assumed) during the pipeline. Append-only via clarify.py; coordinators read it before asking the user anything (re-asking an answered question is a defect).",
   "type": "object",

@@ -30,14 +30,14 @@ version bump (the catalog and the acs plugin share one version). Older
 get the latest release:
 
 ```bash
-gh release list --repo globalmindsolutions/gms-marketplace --json tagName,publishedAt \
+gh release list --repo globalmindsolution/gms-marketplace --json tagName,publishedAt \
   --jq '[.[] | select(.tagName | test("^v[0-9]"))] | sort_by(.publishedAt) | last | "\(.tagName) \(.publishedAt)"'
 ```
 
 Fallback when `gh` is unavailable or unauthenticated:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/globalmindsolutions/gms-marketplace/main/plugins/acs/.claude-plugin/plugin.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"
+curl -fsSL https://raw.githubusercontent.com/globalmindsolution/gms-marketplace/main/plugins/acs/.claude-plugin/plugin.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"
 ```
 
 If both fail (offline, repo unreachable): report that the version check is
@@ -62,7 +62,7 @@ Fetch the changelog and extract every `## [<version>]` section strictly
 between the installed and latest versions (newest first):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/globalmindsolutions/gms-marketplace/main/plugins/acs/CHANGELOG.md
+curl -fsSL https://raw.githubusercontent.com/globalmindsolution/gms-marketplace/main/plugins/acs/CHANGELOG.md
 ```
 
 Present the delta to the user. Call out explicitly:

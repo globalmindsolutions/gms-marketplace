@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/globalmindsolutions/gms-marketplace/plugins/acs/schemas/ticket.schema.json",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/acs/schemas/ticket.schema.json",
   "title": "acs ticket.json",
   "description": "Local source of truth for a ticket; lives at <workspace>/<repo>/<ticket-id>/ticket.json.",
   "type": "object",

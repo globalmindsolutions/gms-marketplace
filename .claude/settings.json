@@ -3,7 +3,7 @@
     "gms-marketplace": {
       "source": {
         "source": "github",
-        "repo": "globalmindsolutions/gms-marketplace"
+        "repo": "globalmindsolution/gms-marketplace"
       }
     }
   },

@@ -3,7 +3,7 @@
 ```mermaid
 flowchart LR
     subgraph github["GitHub"]
-        MR["globalmindsolutions/gms-marketplace<br/>(marketplace repo)"]
+        MR["globalmindsolution/gms-marketplace<br/>(marketplace repo)"]
         ACT["GitHub Actions<br/>CI: tests + validation<br/>Release: tag on version bump"]
         PRS["Consumer-repo PRs"]
     end

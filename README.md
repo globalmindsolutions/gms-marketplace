@@ -11,11 +11,11 @@ controlled rollout (recommended), or omit the tag to track the latest:
 
 ```text
 # Gated: pin to an immutable release tag — only an explicit re-pin upgrades you
-claude plugin marketplace add globalmindsolutions/gms-marketplace@v0.1.5
+claude plugin marketplace add globalmindsolution/gms-marketplace@v0.1.5
 claude plugin install acs@gms-marketplace
 
 # Rolling: track the default branch — updates arrive on every version bump
-claude plugin marketplace add globalmindsolutions/gms-marketplace
+claude plugin marketplace add globalmindsolution/gms-marketplace
 ```
 
 (Or run `/plugin` inside a Claude Code session and install from the UI.)
@@ -30,7 +30,7 @@ newer `v<version>` tag:
     "gms-marketplace": {
       "source": {
         "source": "github",
-        "repo": "globalmindsolutions/gms-marketplace",
+        "repo": "globalmindsolution/gms-marketplace",
         "ref": "v0.1.5"
       }
     }

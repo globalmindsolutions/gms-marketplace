@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/globalmindsolutions/gms-marketplace/plugins/acs/schemas/session-pointer.schema.json",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/acs/schemas/session-pointer.schema.json",
   "title": "acs sessions/<checkout-id>.json",
   "description": "Per-checkout current-ticket pointer, written by skill-start at skill start. Hooks (deterministic scripts that cannot read conversation history) resolve the current ticket from it, falling back to the branch name. One pointer per repo checkout/worktree, so parallel sessions never clash.",
   "type": "object",
