@@ -1,7 +1,7 @@
 # Flow — Hook-gated skill run
 
 The core runtime flow: every hooked skill, direct invocation. (Under `/ship`
-the same flow runs inside a step subagent — see `ship-pipeline.md`.)
+the coordinator invokes the same flow directly — see `ship-pipeline.md`.)
 
 ```mermaid
 sequenceDiagram

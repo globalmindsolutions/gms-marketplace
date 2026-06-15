@@ -37,8 +37,8 @@ onto the plugin hooks API like this:
    otherwise runs the named `pre-<skill>.py` with the same stdin payload.
    Exit 2 blocks the skill before any of its instructions run; stderr tells the
    user which skill to run first. This fires for user-typed slash commands and
-   model-initiated Skill calls alike — including the skill invocations `/ship`
-   makes inside step subagents.
+   model-initiated Skill calls alike — including the step skills `/ship` invokes
+   directly.
 2. **Post-hooks — coordinator-invoked, gate-backed.** `post-<skill>.py` is the
    skill's mandatory final step (each SKILL.md ends with it). It must be a
    script the coordinator calls because its inputs — final status, stop reason,
@@ -295,9 +295,9 @@ rationale for assumptions.
    /create-design, spec-level behavior at /create-spec, execution blockers at
    /code), batched, not dribbled.
 3. **Record everything.** Every answer received — interactively or via a
-   /ship re-spawn brief — is recorded with `clarify.py add/answer` BEFORE
-   acting on it; coordinators feed the ledger into subagent `<context>`, and
-   executors cite the `C-n` ids they relied on (`clarifications_used`).
+   /ship relay when re-invoking a step — is recorded with `clarify.py add/answer`
+   BEFORE acting on it; coordinators feed the ledger into subagent `<context>`,
+   and executors cite the `C-n` ids they relied on (`clarifications_used`).
 4. **Assumptions are visible debt.** When no user is available (or the user
    says "you decide"), the decision is recorded as `assumed` with a
    rationale; assumptions surface in the completion report's Findings line
@@ -305,8 +305,9 @@ rationale for assumptions.
    them. A silent default is a verifier finding.
 
 Under /ship: a step that cannot proceed records its questions as `open`,
-returns the `needs_input` handoff; /ship relays the user's answers in the
-re-spawn brief, and the re-spawned coordinator records them before resuming.
+returns the `needs_input` handoff; /ship relays the user's answers when it
+re-invokes the step directly, and the step coordinator records them before
+resuming.
 (Product-level elicitation — e.g. /create-prd's product definition — lands
 in its real artifact, the PRD itself; the ledger is for ambiguity
 resolution, not for primary content capture.)

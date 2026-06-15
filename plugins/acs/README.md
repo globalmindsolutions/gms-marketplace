@@ -115,7 +115,7 @@ name.
   `pre-<skill>.py`. Exit 2 blocks the skill before any of its instructions
   run; stderr tells you exactly what is missing and which skill to run
   first. This fires for typed slash commands and model-initiated calls
-  alike, including the steps `/acs:ship` spawns.
+  alike, including the step skills `/acs:ship` invokes directly.
 - **Post-hooks close the loop without trusting the model.** Each skill's
   coordinator must call `post-<skill>.py --result-file …` as its mandatory
   final step; that is the only thing that flips the run to `completed`.

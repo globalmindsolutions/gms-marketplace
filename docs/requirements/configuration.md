@@ -35,7 +35,7 @@ folder.
 | `adr_path` | string (repo-relative path) or `null` | `"docs/adr"` | No | `/code` commits the accepted decision records from the ticket's `design.md` to this path as part of its documentation updates — on by default so decisions outlive archived ticket partitions. Explicit `null` disables (designs then stay workspace-only). |
 | `e2e` | object | unset | No | End-to-end test layer: `{ "command", "setup"?, "teardown"?, "per_iteration"? }`. Unset = no e2e suite. When configured: spec test plans state the e2e impact, `/code` authors the declared e2e tests in the same changeset, and the `code-verifier` runs the full suite (`setup` → `command` → `teardown` always) — a green run is required for a passing verdict; `per_iteration: false` (default) defers the run past iterations that already have other blocking findings. `/create-project` scaffolds the harness and proposes this block for greenfield repos with a user-facing surface. |
 | `tests` | object | unset | No | Unit/integration suite for the **CI tests + coverage gate** scaffolded by `/acs:init` (Step 7d, opt-in): `{ "command", "setup"? }`. `command` runs the suite and MUST fail on a coverage shortfall — delegate to the tool (e.g. `pytest --cov --cov-fail-under=$ACS_COVERAGE`); acs exports `ACS_COVERAGE` (= `test_coverage_percent`) into the environment. Installed as `.github/workflows/acs-tests.yml` + `.acs/ci/run-tests.py`, which read the **committed** project `.acs/settings.json` (the CI runner has no acs install). A merge gate once made a required status check (`Tests & coverage`) on a protected default branch. |
-| `models` | object | inherit | No | Which Claude model **and reasoning effort** each subagent role runs on: `models.planner`, `models.executor`, `models.verifier` (optionally `models.coordinator` for `/ship`-spawned coordinators), with per-skill overrides under `models.overrides.<skill>`. Each role accepts a model string or a `{ "model", "effort" }` object. See [Subagent models](#subagent-models). |
+| `models` | object | inherit | No | Which Claude model **and reasoning effort** each subagent role runs on: `models.planner`, `models.executor`, `models.verifier` (optionally `models.coordinator` for the `/ship` coordinator's own run), with per-skill overrides under `models.overrides.<skill>`. Each role accepts a model string or a `{ "model", "effort" }` object. See [Subagent models](#subagent-models). |
 | `tracker` | object | `{ "provider": "local" }` | No | Ticket tracking backend. `provider` is `local` (default), `github` (GitHub Projects), or `jira` (Jira board). Tickets are always stored **local-first** in the workspace; when `github`/`jira` is configured, tickets sync **two-way** with the remote tracker, and `ticket.json` keeps the local↔remote id mapping. Access goes through the official CLIs: `gh` (GitHub) and `acli` (Jira). Provider-specific sub-keys live under `tracker.github` / `tracker.jira`. |
 | `formats` | object | built-in defaults | No | Formats for generated artifacts. Short fields are inline template strings with placeholders such as `{ticket_id}`, `{title}`, `{type}`, `{summary}`: `formats.branch_name` (MUST embed `{ticket_id}`), `formats.commit_message`, `formats.pr_title`, and per-ticket-type titles under `formats.tickets.<type>` (`epic`, `story`, `task`). **Descriptions** (PR description, ticket descriptions) use **pre-defined templates** shipped with the plugin, referenced by name; users can select another template or point to a custom template file. |
 
@@ -122,14 +122,15 @@ configured under `models`:
 - Model values are Claude model aliases or full model ids, passed through to
   the subagent spawn. The literal `"inherit"` (or omitting a key) uses the
   parent's value.
-- `models.coordinator` applies only when a skill's coordinator itself runs
-  as a spawned subagent (i.e. under `/ship`) — the only place the plugin
-  controls a coordinator's model and effort. A skill invoked directly runs
-  its coordinator **in the user's session**, whose model/effort are chosen
-  in Claude Code, not in `settings.json`. If `models.coordinator` is set
-  (model or effort) and differs from the session on a direct invocation,
-  the skill MUST surface a notice that the key applies only under `/ship` —
-  never a silent divergence.
+- `models.coordinator` governs the **`/ship` coordinator's own session/run**
+  — the only place the plugin controls a coordinator's model and effort. Under
+  `/ship` each step skill is invoked **directly** in that coordinator's context
+  (there is no separate per-step agent for the key to apply to). A skill invoked
+  directly by the user runs **in the user's session**, whose model/effort are
+  chosen in Claude Code, not in `settings.json`. If `models.coordinator` is set
+  (model or effort) and differs from the session on such a direct invocation,
+  the skill MUST surface a notice that the key governs the `/ship` coordinator's
+  own run, not a directly typed skill — never a silent divergence.
 - `models.coordinator` SHOULD usually stay on inherit: coordination is
   orchestration-heavy but reasoning-light compared to the planner and
   verifier. The reasons to set it are cost control on long `/ship` runs and

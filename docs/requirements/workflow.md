@@ -82,9 +82,11 @@ clarifications wherever a skill requires them, and MUST **stop before
 `/ship` MUST keep its own context window small — a full pipeline cannot fit
 every skill's transcript in one context:
 
-- Each workflow skill runs in a **fresh subagent context** (the skill's
-  coordinator). `/ship` passes only a compact XML task brief: ticket id, step
-  name, workspace partition path.
+- The `/ship` coordinator **invokes each step skill directly in its own
+  context** (it holds the Agent tool the step needs to spawn its own
+  planner/executor/verifier). Between steps it reads only `pipeline-state.json`,
+  `ticket.json`, and the step's `<handoff>` / `result.json` — never the step's
+  transcript — so its own context stays small.
 - A step returns only a **compact XML handoff result** (status, stop reason,
   artifact references — bounded to roughly a kilobyte); full detail lives in
   the workspace state files.

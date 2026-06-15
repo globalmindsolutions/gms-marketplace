@@ -72,11 +72,11 @@ Purpose: drive the whole pipeline from one command.
 - MUST NOT bypass any pre/post hook; it adds orchestration only.
 - SHOULD be resumable: re-running it for a ticket continues from the first
   incomplete step recorded in workspace state.
-- No planner/executor/verifier of its own; each invoked skill runs its own
-  reflection cycle **in a fresh subagent context**, returning only a compact
-  XML handoff — `/ship` tracks the pipeline through `pipeline-state.json` so
-  its context can be cleared between steps
-  ([workflow.md](workflow.md#context-handoff-between-steps)).
+- No planner/executor/verifier of its own; each step skill is **invoked
+  directly by the ship coordinator in its own context** and runs its own
+  reflection cycle, returning only a compact XML handoff — `/ship` tracks the
+  pipeline through `pipeline-state.json` so its context can be cleared between
+  steps ([workflow.md](workflow.md#context-handoff-between-steps)).
 
 ## `/handoff` (utility)
 

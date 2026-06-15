@@ -20,6 +20,6 @@ run first, and every downstream gate requires `runs[-1] == "completed"`. A
 ## Consequences
 
 Gating is enforced for user-typed and model-initiated invocations alike
-(including /ship's spawned steps); a skipped post-hook can close but never
+(including /ship's direct step invocations); a skipped post-hook can close but never
 open the pipeline; a hard kill leaves `in_progress` + a stale lock, which
 the next run reconciles.

@@ -134,8 +134,8 @@ completed" event exists):
   tool: a dispatcher (`dispatch.py pre`) extracts the skill name from the
   tool input and routes to the named `pre-<skill>.py` with the same stdin
   payload; exit 2 blocks the skill before it runs. This fires for user-typed
-  slash commands and model-initiated Skill calls alike (including the steps
-  `/ship` spawns).
+  slash commands and model-initiated Skill calls alike (including the step skills
+  `/ship` invokes directly).
 - **Post-hooks** are invoked by the skill's **coordinator as its mandatory
   final step** (`post-<skill>.py --result-file …`) — their inputs (final
   status, findings, tokens, cost) exist only in the coordinator's context.
