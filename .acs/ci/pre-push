@@ -1,0 +1,16 @@
+#!/bin/sh
+# acs pre-push hook — fast local feedback so a non-conforming branch name or
+# commit message is caught before it ever reaches GitHub (where the required
+# `ACS conventions` check would block the merge anyway).
+#
+# Installed by /acs:init. This is a convenience layer, NOT the gate: it is
+# per-clone and can be bypassed with `git push --no-verify`. The real gate is
+# the required status check + protected default branch.
+#
+# git passes the push refs on stdin; the checker reads them to scope the commit
+# range. PR title/body/labels do not exist yet, so only branch + commit-message
+# checks run here.
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+checker="$root/.acs/ci/check-conventions.py"
+[ -f "$checker" ] || exit 0   # acs CI not installed in this repo — do not block
+exec python3 "$checker" --mode pre-push

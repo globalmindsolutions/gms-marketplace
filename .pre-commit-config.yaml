@@ -34,3 +34,20 @@ repos:
         language: system
         pass_filenames: false
         files: ^(evals/|plugins/acs/)
+
+      # acs convention hooks — validate branch/commit against committed formats.*
+      # (honour enforcement.checks.* toggles + exempt label/branches).
+      - id: acs-commit-msg
+        name: acs commit message convention
+        entry: python3 .acs/ci/check-conventions.py --mode commit-msg --message-file
+        language: system
+        stages: [commit-msg]
+        pass_filenames: true       # pre-commit appends the message-file path
+        always_run: true
+      - id: acs-pre-push
+        name: acs branch + commit conventions
+        entry: python3 .acs/ci/check-conventions.py --mode pre-push
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true

@@ -6,5 +6,53 @@
       "owner": "globalmindsolution",
       "project_number": 1
     }
+  },
+  "models": {
+    "planner": "opus",
+    "executor": "sonnet",
+    "verifier": "opus",
+    "coordinator": "opus"
+  },
+  "enforcement": {
+    "checks": {
+      "branch_name": true,
+      "pr_title": true,
+      "pr_description": true,
+      "acs_label": true,
+      "commit_message": false
+    },
+    "exempt_branches": [
+      "release/*",
+      "dependabot/*",
+      "renovate/*"
+    ],
+    "exempt_label": "acs-exempt",
+    "require_label": "ACS",
+    "pr_description_sections": [
+      "Summary",
+      "Ticket",
+      "Changes",
+      "Test plan"
+    ]
+  },
+  "formats": {
+    "branch_name": "{type}/{ticket_id}-{slug}",
+    "commit_message": "{ticket_id} {summary}",
+    "pr_title": "[{ticket_id}] {title}",
+    "pr_description_template": "pr-default",
+    "tickets": {
+      "epic": {
+        "title": "[EPIC] {title}",
+        "description_template": "epic-default"
+      },
+      "story": {
+        "title": "{title}",
+        "description_template": "story-default"
+      },
+      "task": {
+        "title": "{title}",
+        "description_template": "task-default"
+      }
+    }
   }
 }

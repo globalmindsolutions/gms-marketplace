@@ -1,0 +1,49 @@
+# acs convention enforcement — installed by /acs:init into the consumer repo at
+# .github/workflows/acs-conventions.yml. Re-run /acs:init to refresh it.
+#
+# Validates that the branch name, PR title, PR description, labels, and commit
+# messages match the formats in .acs/settings.json — the same conventions the
+# acs pipeline renders from. Make this a REQUIRED status check on your default
+# branch (and block direct pushes) so a non-conforming PR cannot merge:
+#   /acs:init offers to configure that, or run it once as a repo admin:
+#   gh api -X PUT repos/{owner}/{repo}/branches/{branch}/protection ...
+name: ACS conventions
+
+on:
+  pull_request:
+    # `edited` re-checks when the title/body change; `labeled`/`unlabeled`
+    # re-evaluate the ACS / acs-exempt labels; `synchronize` covers new commits.
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# A newer commit/edit supersedes an in-flight run for the same PR.
+concurrency:
+  group: acs-conventions-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  conventions:
+    name: Branch / PR / commit conventions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so the commit range against the base resolves
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Check acs conventions
+        # Payload reaches the script via env (never interpolated into the shell),
+        # so a crafted PR title/body cannot inject commands.
+        env:
+          ACS_PR_TITLE: ${{ github.event.pull_request.title }}
+          ACS_PR_BODY: ${{ github.event.pull_request.body }}
+          ACS_PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          ACS_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          ACS_PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: python3 .acs/ci/check-conventions.py --mode pr

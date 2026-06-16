@@ -161,6 +161,35 @@ jobs:
           sys.exit(1 if failed else 0)
           EOF
 
+      - name: Validate committed .acs/settings.json against the schema
+        run: |
+          python3 -m pip install --quiet jsonschema
+          python3 - <<'EOF'
+          import json, os, sys
+          from jsonschema import Draft202012Validator
+
+          schema_path = "plugins/acs/schemas/settings.schema.json"
+          schema = json.load(open(schema_path, encoding="utf-8"))
+          Draft202012Validator.check_schema(schema)
+          validator = Draft202012Validator(schema)
+
+          target = ".acs/settings.json"
+          if not os.path.exists(target):
+              print(f"skip: no {target}")
+              sys.exit(0)
+
+          errors = sorted(
+              validator.iter_errors(json.load(open(target, encoding="utf-8"))),
+              key=lambda e: list(e.path),
+          )
+          for e in errors:
+              loc = "/".join(map(str, e.path)) or "(root)"
+              print(f"::error file={target}::{loc}: {e.message}", file=sys.stderr)
+          if errors:
+              sys.exit(1)
+          print(f"ok   {target} conforms to {schema_path}")
+          EOF
+
       - name: Validate XSD (acs-messages.xsd)
         run: xmllint --noout plugins/acs/schemas/acs-messages.xsd
 
