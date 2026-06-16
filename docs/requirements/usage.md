@@ -147,3 +147,8 @@ the tests for specs marked implemented) before continuing.
 Inspect progress and spend anytime: `tickets-index.json` for status across
 tickets, `metrics.json` for per-repo totals, a ticket's
 `pipeline-state.json` for where it stands in the pipeline.
+
+Or just run `/metrics` for a read-only in-session dashboard of the same numbers
+— six panels (throughput, pipeline funnel, cost/time per ticket, coverage vs
+target, review iterations, token burn by role) rendered from this workspace
+state; it writes nothing.

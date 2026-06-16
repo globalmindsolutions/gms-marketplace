@@ -19,7 +19,7 @@ PLUGIN = os.path.join(REPO_ROOT, "plugins", "acs")
 HOOKED_SKILLS = ["create-prd", "create-architecture", "create-project",
                  "create-ticket", "create-design", "create-spec", "code",
                  "create-pr", "merge-pr"]
-ALL_SKILLS = HOOKED_SKILLS + ["init", "ship", "handoff", "update", "install-hooks"]
+ALL_SKILLS = HOOKED_SKILLS + ["init", "ship", "handoff", "update", "install-hooks", "metrics"]
 ROLES = ["planner", "executor", "verifier"]
 
 

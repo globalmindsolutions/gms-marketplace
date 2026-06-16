@@ -1,4 +1,4 @@
-"""s04 — description-trigger evals for all 12 skills (paid, E1.2).
+"""s04 — description-trigger evals for all 15 skills (paid, E1.2).
 
 For each skill, a natural-language request that describes the intent *without
 naming the skill* must route to that skill. Asserts on the first `Skill`
@@ -13,7 +13,7 @@ META = {
     "name": "skill_triggers",
     "tier": "paid",
     "goal": "route",
-    "summary": "the right skill fires for a natural-language request (all 12)",
+    "summary": "the right skill fires for a natural-language request (all 15)",
 }
 
 # (label, init?, request, expected skill) — requests avoid naming the skill.
@@ -60,6 +60,10 @@ CASES = [
     ("merge-pr", True,
      "Land ticket EVAL-1: merge its pull request and finish the ticket.",
      "merge-pr"),
+    ("metrics", True,
+     "Show me a dashboard of throughput, cost, coverage and review effort for "
+     "this repo, read straight from the workspace state — no external tools.",
+     "metrics"),
 ]
 
 

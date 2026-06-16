@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 PRODUCT_SKILLS = ["create-prd", "create-architecture", "create-project"]
 WORKFLOW_SKILLS = ["create-ticket", "create-design", "create-spec", "code", "create-pr", "merge-pr"]
 HOOKED_SKILLS = PRODUCT_SKILLS + WORKFLOW_SKILLS
-UNHOOKED_SKILLS = ["init", "ship", "handoff", "update", "install-hooks"]
+UNHOOKED_SKILLS = ["init", "ship", "handoff", "update", "install-hooks", "metrics"]
 
 RUN_STATUSES = ["in_progress", "completed", "failed", "interrupted", "handed_off"]
 TICKET_TYPES = ["epic", "story", "task"]

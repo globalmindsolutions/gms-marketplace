@@ -1,8 +1,9 @@
 # Skill Requirements
 
-Thirteen skills in total: the bootstrap skill (`/init`), the umbrella command
-(`/ship`), the session-handoff utility (`/handoff`), the update assistant
-(`/update`), the product-level
+Fifteen skills in total: the bootstrap skill (`/init`), the umbrella command
+(`/ship`), the utility skills — the session-handoff helper (`/handoff`), the
+update assistant (`/update`), the local-hooks installer (`/install-hooks`), and
+the read-only metrics dashboard (`/metrics`) — the product-level
 `/create-prd`, `/create-architecture`, and `/create-project`, and six
 workflow skills (one of them, `/create-design`, conditional).
 Every **workflow** skill MUST:
@@ -112,6 +113,31 @@ this skill owns the workflow around it.
   re-run `/init` Step 7b when the install moved), workspace reachable.
 - Reloading is the user's action (`/reload-plugins` or a new session); the
   skill states this explicitly — the current session keeps the old version.
+- Not part of the gated pipeline; no planner/executor/verifier subagents.
+
+## `/metrics` (utility)
+
+Purpose: render a **read-only** in-session dashboard of this repo's delivery
+metrics, derived entirely from existing workspace state — no network, no new
+config key, nothing written.
+
+- **Model-invocable** (unlike `/update` and `/install-hooks`, it does not set
+  `disable-model-invocation`): a natural-language request to see this repo's
+  throughput, spend, coverage, or review effort routes here.
+- Runs the stdlib helper `metrics_aggregate.py`, which emits one aggregate JSON
+  of **six panels** — throughput by status/type, pipeline funnel, cost and time
+  per ticket by step, coverage achieved vs target, review iterations before the
+  verifier passed, and token burn by role (planner/executor/verifier).
+- The coordinator **routes** the aggregate JSON through the deterministic stdlib
+  renderer `metrics_render.py` rather than composing the layout itself: the
+  **terminal** Unicode dashboard is the Claude Code CLI default, and `--html`
+  emits a self-contained HTML string handed to `show_widget` on Claude
+  Desktop / claude.ai. Rendering is deterministic and read-only; every panel key
+  is always present (a panel with no data renders as "no data", not a missing
+  frame). The deterministic terminal renderer **supersedes** the former
+  Markdown-table fallback.
+- **Reads only** — writes no file, makes no network/`gh` call, and consumes no
+  config key beyond the `.acs/settings.json` the helper already reads.
 - Not part of the gated pipeline; no planner/executor/verifier subagents.
 
 ## Product-level delivery (tickets)

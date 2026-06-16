@@ -89,7 +89,7 @@ the hooks enforce the order either way. The ticket id argument is optional
 when context is unambiguous: explicit argument → session context → branch
 name.
 
-## The 12 skills
+## The 15 skills
 
 | Skill | Gated by | What it does |
 |-------|----------|--------------|
@@ -98,6 +98,7 @@ name.
 | `/acs:handoff` | — (utility) | Flushes in-flight work and decisions to the ticket partition, marks the run `handed_off`, releases the lock, prints the command to continue in a fresh session. |
 | `/acs:update` | — (utility, user-invoked only) | Upgrade assistant: installed-vs-latest version check, CHANGELOG delta with breaking-change callouts, marketplace refresh, post-update migration checks (settings, status-line paths). Reloading stays your action. |
 | `/acs:install-hooks` | — (utility, user-invoked only) | Installs this clone's local convention hooks (`commit-msg` + `pre-push`) that enforce the configured `formats.*` before push — the `pre-commit install` equivalent for acs. Per-clone; each teammate runs it once. |
+| `/acs:metrics` | — (utility) | Read-only in-session dashboard: renders six panels (throughput, pipeline funnel, cost/time per ticket, coverage vs target, review iterations, token burn by role) for the current repo from workspace state. Writes nothing. |
 | `/acs:create-prd` | `/acs:init` done | Product-level: elicits (greenfield) or reverse-engineers (brownfield) the PRD doc set at `prd_path`; docs PR via its own delivery ticket. |
 | `/acs:create-architecture` | PRD doc set exists | Product-level: HLD (C4 levels 1–3, data model, deployment, tech stack) + LLD (sequence-diagram flows, contracts) at `architecture_path`, all Mermaid; docs PR. |
 | `/acs:create-project` | Architecture doc set exists | Product-level, greenfield-only: scaffolds layout, build, test framework + coverage tooling, lint, CI, and a minimal green vertical slice; bootstrap PR. |

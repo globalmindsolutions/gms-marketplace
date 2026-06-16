@@ -15,6 +15,30 @@ the notes.
 
 ## [Unreleased]
 
+### Added
+
+- **`/acs:metrics` — read-only delivery dashboard (MAR-5).** A new
+  model-invocable utility skill that renders six panels for the current repo —
+  throughput by status/type, pipeline funnel, cost and time per ticket by step,
+  coverage achieved vs target, review iterations before the verifier passed, and
+  token burn by role (planner/executor/verifier). Backed by the stdlib-only
+  `metrics_aggregate.py` helper, which aggregates the panels from existing
+  workspace artifacts and emits one JSON object (every panel key always present;
+  degradation is an in-band "no data" marker, never a missing key). The skill is
+  read-only: it writes no file, makes no network call, and adds no config key.
+- **Deterministic cross-surface metrics renderer (MAR-5).** Rendering is now a
+  deterministic stdlib helper `metrics_render.py` that consumes the aggregate
+  JSON and emits the same six panels on two surfaces: a Unicode block-bar
+  **terminal** dashboard for the Claude Code CLI (default) and a self-contained
+  **HTML** component (`--html`, inline CSS, no external fetch) handed to
+  `show_widget` verbatim on Claude Desktop / claude.ai. The skill now **routes**
+  (aggregate → render) instead of model-composing the layout, and the
+  deterministic terminal renderer **supersedes** the former model-improvised
+  Markdown-table fallback. `metrics_render.py` is stdlib-only, never imports
+  `show_widget`, is read-only, and is deterministic (identical JSON in →
+  byte-identical output; no clock read in render) — unit-tested to the same 90%
+  coverage bar as the aggregator.
+
 ## [0.2.0] - 2026-06-14
 
 ### Added
