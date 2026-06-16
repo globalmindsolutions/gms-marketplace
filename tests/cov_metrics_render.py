@@ -221,6 +221,15 @@ def _drive():
     mod._humanize_seconds(mod.NO_DATA)                        # the NO_DATA string -> NO_DATA
     # the Panel-3 average formatter directly: a cost cell whose value is non-numeric -> NO_DATA.
     mod._format_average("x", "cost")
+    # _fmt_money directly: numeric 2dp, long-float rounding, the NO_DATA / non-numeric / bool
+    # empty branch, and the custom "-" empty marker used by the per-ticket / role cost cells.
+    mod._fmt_money(36.0)                       # "36.00"
+    mod._fmt_money(5.142857142857143)          # "5.14" (long-float rounding)
+    mod._fmt_money(0)                          # "0.00"
+    mod._fmt_money(mod.NO_DATA)                # the NO_DATA string -> NO_DATA
+    mod._fmt_money(None)                       # non-numeric -> NO_DATA
+    mod._fmt_money(True)                       # bool -> NO_DATA
+    mod._fmt_money("-", empty="-")             # custom empty marker passthrough
 
     # 7) the html bar helpers directly: integer-percent path, the divide-by-zero guard
     #    (panel_max <= 0), the bool/non-numeric guards, and the >100 clamp.

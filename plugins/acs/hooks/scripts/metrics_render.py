@@ -119,6 +119,22 @@ def _humanize_seconds(value):
     return sign + " ".join(parts[:2])
 
 
+def _fmt_money(value, empty=NO_DATA):
+    """Format a USD cost cell to EXACTLY 2 decimals, or the cell's empty marker for any non-number.
+
+    Pure function of its arguments only — NO clock, NO locale, NO random (determinism / R4).
+    A numeric value renders "%.2f" (e.g. 36.0 -> "36.00", 5.142857... -> "5.14", 7.2 -> "7.20").
+    bool (an int subclass) and any non-numeric value (the literal NO_DATA string, a missing-cell
+    default, None) return `empty` — the marker the calling cell uses for its empty state (NO_DATA
+    for the average cells, "-" for the per-ticket / REPO-TOTAL / role cost columns), so the cell's
+    existing empty handling and B1 ("no data" cells still render) are preserved. Mirrors the bool
+    guard in _humanize_seconds.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return empty
+    return "%.2f" % value
+
+
 def _meta_lines(meta):
     """The header lines drawn from meta (rendered as given — generated_at is data, no clock read)."""
     meta = meta if isinstance(meta, dict) else {}
@@ -215,9 +231,8 @@ def _format_average(value, kind):
         return NO_DATA
     if kind == "duration":
         return _humanize_seconds(value)
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return str(value)
-    return NO_DATA
+    # kind == "cost": money to exactly 2 decimals; non-numeric -> NO_DATA cell (B1).
+    return _fmt_money(value, empty=NO_DATA)
 
 
 def _average_cells(value):
@@ -245,13 +260,13 @@ def _term_panel3(value):
             continue
         totals = row.get("totals") if isinstance(row.get("totals"), dict) else {}
         seconds = totals.get("working_seconds", "-")
-        cost = totals.get("cost_usd", "-")
+        cost = _fmt_money(totals.get("cost_usd", "-"), empty="-")
         out.append("  %-12s %12s %12s" % (str(row.get("ticket_id", "?")), seconds, cost))
     repo_totals = value.get("repo_totals") if isinstance(value.get("repo_totals"), dict) else {}
     if repo_totals:
         out.append("  %-12s %12s %12s"
                    % ("REPO TOTAL", repo_totals.get("working_seconds", "-"),
-                      repo_totals.get("cost_usd", "-")))
+                      _fmt_money(repo_totals.get("cost_usd", "-"), empty="-")))
     # Four averages summary rows after REPO TOTAL (B1 — each value present, "no data" when absent).
     for label, formatted in _average_cells(value):
         out.append("  %-30s %12s" % (label, formatted))
@@ -307,8 +322,8 @@ def _term_panel6(value):
         bucket = value.get(role) if isinstance(value.get(role), dict) else {}
         inp = bucket.get("input", 0)
         out.append("  %-10s %12s %12s %10s   %s"
-                   % (role, inp, bucket.get("output", 0), bucket.get("cost", 0),
-                      _bar(inp, peak)))
+                   % (role, inp, bucket.get("output", 0),
+                      _fmt_money(bucket.get("cost", 0), empty="-"), _bar(inp, peak)))
     return out
 
 
@@ -514,12 +529,12 @@ def _html_panel3(value):
         totals = row.get("totals") if isinstance(row.get("totals"), dict) else {}
         rows.append("<tr><td>%s</td><td>%s</td><td>%s</td></tr>"
                     % (_esc(row.get("ticket_id", "?")), _esc(totals.get("working_seconds", "-")),
-                       _esc(totals.get("cost_usd", "-"))))
+                       _esc(_fmt_money(totals.get("cost_usd", "-"), empty="-"))))
     repo_totals = value.get("repo_totals") if isinstance(value.get("repo_totals"), dict) else {}
     if repo_totals:
         rows.append("<tr><td>REPO TOTAL</td><td>%s</td><td>%s</td></tr>"
                     % (_esc(repo_totals.get("working_seconds", "-")),
-                       _esc(repo_totals.get("cost_usd", "-"))))
+                       _esc(_fmt_money(repo_totals.get("cost_usd", "-"), empty="-"))))
     # Four averages summary rows (B1 — a "no data" average renders the nodata cell, never omitted).
     for label, formatted in _average_cells(value):
         cls = ' class="nodata"' if formatted == NO_DATA else ""
@@ -578,7 +593,8 @@ def _html_panel6(value):
         inp = bucket.get("input", 0)
         rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>%s</tr>"
                     % (_esc(role), _esc(inp), _esc(bucket.get("output", 0)),
-                       _esc(bucket.get("cost", 0)), _html_bar_cell(inp, panel_max)))
+                       _esc(_fmt_money(bucket.get("cost", 0), empty="-")),
+                       _html_bar_cell(inp, panel_max)))
     return "<table>" + "".join(rows) + "</table>"
 
 

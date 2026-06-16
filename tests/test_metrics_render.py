@@ -172,7 +172,13 @@ class TerminalSurface(unittest.TestCase):
         out = metrics_render.render_terminal(_full_workspace_data())
         self.assertIn("MAR-6", out)
         self.assertIn("11922", out)  # working_seconds total appears
-        self.assertIn("8.31", out)   # cost row appears
+        self.assertIn("8.31", out)   # per-ticket cost (already 2dp) appears
+        # C-5: every money cell renders EXACTLY 2 decimals. The avg cost / merged PR is
+        # 18.75 / 4 = 4.6875 -> "4.69" (was a raw-float "4.6875" before the fix); the
+        # repo-total cost and avg cost / ticket render "18.75", not a bare/unrounded float.
+        self.assertIn("18.75", out)   # repo total cost + avg cost / ticket
+        self.assertIn("4.69", out)    # avg cost / merged PR, rounded to 2dp
+        self.assertNotIn("4.6875", out)  # the old unrounded money float must be gone
 
     def test_panel4_coverage_cell(self):
         out = metrics_render.render_terminal(_full_workspace_data())
@@ -191,6 +197,11 @@ class TerminalSurface(unittest.TestCase):
         self.assertIn("executor", out)
         self.assertIn("verifier", out)
         self.assertIn("480000", out)  # executor input tokens
+        # C-5: the per-role cost_usd column renders EXACTLY 2 decimals on the terminal surface
+        # (planner 0.17, executor 3.5 -> "3.50", verifier 1.0 -> "1.00").
+        self.assertIn("3.50", out)   # executor cost, 2dp (was a raw "3.5")
+        self.assertIn("1.00", out)   # verifier cost, 2dp (was a raw "1.0"/"1")
+        self.assertIn("0.17", out)   # planner cost
 
     def test_no_ansi_escape_codes_by_default(self):
         out = metrics_render.render_terminal(_full_workspace_data())
@@ -473,6 +484,51 @@ class HumanizeSeconds(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# _fmt_money — pure USD formatter to exactly 2 decimals (C-5)
+# ---------------------------------------------------------------------------
+
+class FmtMoney(unittest.TestCase):
+    def test_whole_float_two_decimals(self):
+        self.assertEqual(metrics_render._fmt_money(36.0), "36.00")
+
+    def test_int_two_decimals(self):
+        self.assertEqual(metrics_render._fmt_money(0), "0.00")
+        self.assertEqual(metrics_render._fmt_money(7), "7.00")
+
+    def test_one_decimal_padded_to_two(self):
+        self.assertEqual(metrics_render._fmt_money(7.2), "7.20")
+        self.assertEqual(metrics_render._fmt_money(3.5), "3.50")
+
+    def test_long_float_rounded_to_two(self):
+        # the C-5 bug case: a raw float like 5.142857142857143 -> "5.14", never the long form
+        self.assertEqual(metrics_render._fmt_money(5.142857142857143), "5.14")
+        self.assertEqual(metrics_render._fmt_money(18.75 / 4), "4.69")
+
+    def test_no_data_string_passthrough(self):
+        self.assertEqual(metrics_render._fmt_money("no data"), metrics_render.NO_DATA)
+
+    def test_non_numeric_is_empty_marker(self):
+        self.assertEqual(metrics_render._fmt_money(None), metrics_render.NO_DATA)
+        self.assertEqual(metrics_render._fmt_money("x"), metrics_render.NO_DATA)
+
+    def test_bool_is_empty_marker(self):
+        # bool is an int subclass — excluded from the numeric branch like _humanize_seconds/_bar
+        self.assertEqual(metrics_render._fmt_money(True), metrics_render.NO_DATA)
+        self.assertEqual(metrics_render._fmt_money(False), metrics_render.NO_DATA)
+
+    def test_custom_empty_marker_for_dash_cells(self):
+        # the per-ticket / REPO-TOTAL / role cost columns use "-" for their empty state
+        self.assertEqual(metrics_render._fmt_money("-", empty="-"), "-")
+        self.assertEqual(metrics_render._fmt_money(None, empty="-"), "-")
+        # a numeric value still formats to 2dp regardless of the empty marker
+        self.assertEqual(metrics_render._fmt_money(8.31, empty="-"), "8.31")
+
+    def test_pure_repeatable_no_clock(self):
+        self.assertEqual(metrics_render._fmt_money(4.6875),
+                         metrics_render._fmt_money(4.6875))
+
+
+# ---------------------------------------------------------------------------
 # Flow metrics — Panel 3 averages + new Panel 7 (lead/cycle), BOTH surfaces (AC-3)
 # ---------------------------------------------------------------------------
 
@@ -484,9 +540,12 @@ class Panel3Averages(unittest.TestCase):
         for out in (term, html):
             # the two working-time averages are humanized (avg per ticket = 3600s = 1h)
             self.assertIn("1h", out)
-            # the two cost averages render their numeric values
-            self.assertIn("3.0", out)   # avg_cost_per_ticket
-            self.assertIn("6.0", out)   # avg_cost_per_pr
+            # C-5: the two cost averages render EXACTLY 2 decimals on BOTH surfaces
+            # (avg_cost_per_ticket 3.0 -> "3.00", avg_cost_per_pr 6.0 -> "6.00") — not raw floats.
+            self.assertIn("3.00", out)   # avg_cost_per_ticket, 2dp
+            self.assertIn("6.00", out)   # avg_cost_per_pr, 2dp
+            # the per-ticket / repo-total money cells are also 2dp on this payload
+            self.assertIn("5.00", out)   # MAR-6 per-ticket cost 5.0 -> "5.00"
 
     def test_no_data_average_renders_cell_both_surfaces(self):
         # zero merged PRs -> per-PR averages are "no data"; cells present, never omitted (B1)
