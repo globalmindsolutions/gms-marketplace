@@ -635,6 +635,55 @@ conventions check; otherwise print the `gh api … /protection` command (from
 Step 7c) with `contexts: ["Tests & coverage"]` for an admin to run once. Record
 the outcome for Step 8 and the completion report.
 
+## Step 7e — Project agent guidance: pipeline-default `CLAUDE.md` (opt-in, default-on)
+
+Write (or refresh) an **acs-managed block** in the consumer repo's `CLAUDE.md`
+so every Claude session in the repo defaults to the pipeline instead of
+freelancing a raw `gh pr create` — the steer that makes acs the *automatic*
+path, not merely an available one (a non-ticket PR opened ad hoc has no ticket
+for `/acs:merge-pr` to resolve; this block prevents that dead end at the
+source). Offer it with a default-**yes** confirmation — recommended, but never
+written silently. Skip the whole step on an explicit "no".
+
+The block is **marker-delimited and idempotent**: it lives between
+`<!-- BEGIN acs-managed … -->` and `<!-- END acs-managed -->`, so re-running
+`/acs:init` replaces only that span and never touches the surrounding
+`CLAUDE.md` content the user owns. Render it from the plugin template
+`templates/CLAUDE.acs.md` (the configured `ticket_prefix` and the enforcement
+`exempt_label` fill its placeholders), then upsert it into the repo-root
+`CLAUDE.md` (created if absent) via the `acs_lib` helpers. Run from `<repo>`
+(the main checkout — linked worktrees share it):
+
+```bash
+python3 - "${CLAUDE_PLUGIN_ROOT}/hooks/scripts" "${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.acs.md" <<'PY'
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import acs_lib
+cwd = os.getcwd()
+root = acs_lib.main_repo_root(cwd) or acs_lib.checkout_root(cwd) or cwd
+settings, _ = acs_lib.load_settings(cwd)
+prefix = settings.get("ticket_prefix", "")
+exempt = ((settings.get("enforcement") or {}).get("exempt_label")) or "acs-exempt"
+with open(sys.argv[2], encoding="utf-8") as fh:
+    block = acs_lib.render_managed_block(fh.read(), prefix, exempt)
+path = os.path.join(root, "CLAUDE.md")
+existing = ""
+if os.path.exists(path):
+    with open(path, encoding="utf-8") as fh:
+        existing = fh.read()
+with open(path, "w", encoding="utf-8") as fh:
+    fh.write(acs_lib.upsert_managed_block(existing, block))
+print("wrote acs-managed block to", path)
+PY
+```
+
+`render_managed_block` only substitutes the two placeholders (no other content
+changes); `upsert_managed_block` replaces an existing acs-managed span in place
+or appends one separated by a blank line, leaving the rest byte-for-byte — so a
+re-run is safe and a hand-written `CLAUDE.md` is never clobbered. Tell the user
+to **commit** `CLAUDE.md` so teammates inherit the guidance. Record the outcome
+(written / refreshed / declined) for Step 8 and the completion report.
+
 ## Step 8 — Summary and next steps
 
 Print a markdown table of every resolved setting, its value, and the file it
@@ -647,6 +696,7 @@ landed in (or "default — not written" for untouched defaults), e.g.:
 | `test_coverage_percent` | `90` | default — not written |
 | `enforcement` (CI) | checks on; gate via required check | `<repo>/.acs/settings.json` + `.github/workflows/acs-conventions.yml` |
 | `tests` (CI) | suite + coverage gate on PRs | `<repo>/.acs/settings.json` + `.acs/ci/run-tests.py` + `.github/workflows/acs-tests.yml` |
+| `CLAUDE.md` guidance | acs-managed block (pipeline default + exempt `--pr` merge) | `<repo>/CLAUDE.md` (written / refreshed / declined) |
 
 Then point the user at the next steps. Decide greenfield vs brownfield by
 looking at the repo (`git ls-files` — an existing product codebase is
@@ -684,7 +734,7 @@ succeeded. Same labels, same order, `none` where empty; replace the Ticket line 
 
 - **Ticket**: <id> — <title> (<type>)
 - **Status**: <status> — <stop_reason>
-- **Results**: toolchain preflight outcome (tools present / installed / still missing with the install hint); settings written, per key: value and which file (user/project `settings.json`, gitignored `settings.local.json`); workspace created/verified; tracker CLI check outcome; status line + subagent status line opt-in outcomes (configured at which scope / declined / already set); CI convention enforcement outcome (checks enabled, files written, labels, pre-push choice, branch-protection: configured / printed-for-admin / declined)
+- **Results**: toolchain preflight outcome (tools present / installed / still missing with the install hint); settings written, per key: value and which file (user/project `settings.json`, gitignored `settings.local.json`); workspace created/verified; tracker CLI check outcome; status line + subagent status line opt-in outcomes (configured at which scope / declined / already set); CI convention enforcement outcome (checks enabled, files written, labels, pre-push choice, branch-protection: configured / printed-for-admin / declined); `CLAUDE.md` pipeline-default guidance block (written / refreshed / declined)
 - **Findings**: <open findings / clarifications, or "none">
 - **Artifacts**: <partition files, repo paths, branch, PR URL>
 - **Metrics**: iterations <n>/3 · <wall time> · ~<tokens in/out> · ~$<cost_usd>
