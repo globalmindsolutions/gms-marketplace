@@ -23,10 +23,80 @@ Usage:
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acs_lib as lib  # noqa: E402
+
+
+_PR_VIEW_FIELDS = "number,state,headRefName,baseRefName,labels,isDraft,url"
+
+
+def _pr_view(number):
+    """Look the PR up via `gh pr view`. Returns the parsed JSON object, or raises
+    GateError with a clean message when gh is missing or the lookup fails. The gh
+    shell-out is isolated here so unit tests stub it via a fake gh on PATH."""
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "view", str(number), "--json", _PR_VIEW_FIELDS],
+            capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        raise lib.GateError(
+            "gh (the GitHub CLI) is required for --pr mode but was not found on PATH; "
+            "install and authenticate it (gh auth login) first.")
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip() or "gh pr view failed"
+        raise lib.GateError("could not look up PR %s via gh: %s" % (number, detail))
+    try:
+        return json.loads(proc.stdout)
+    except (json.JSONDecodeError, ValueError):
+        raise lib.GateError("gh pr view returned no parseable JSON for PR %s" % number)
+
+
+def _run_exempt_pr_mode(args, ctx):
+    """The /acs:merge-pr --pr exempt-pr path: validate the PR via gh, print an
+    exempt-pr context JSON. Resolves NO ticket and writes NO partition, lock,
+    pointer, or state. Exits 2 (clean stderr, never a traceback) on any failure."""
+    if args.skill != "merge-pr":
+        sys.stderr.write("acs skill-start: --pr is only valid with --skill merge-pr "
+                         "(got --skill %s)\n" % args.skill)
+        sys.exit(2)
+    kind, pr_ref = lib.classify_merge_pr_arg(args.pr, ctx["settings"].get("ticket_prefix"))
+    if kind != "exempt-pr" or not pr_ref:
+        sys.stderr.write("acs skill-start: --pr %r does not parse to a PR reference "
+                         "(use --pr N, #N, or a PR URL)\n" % args.pr)
+        sys.exit(2)
+    try:
+        pr = _pr_view(pr_ref)
+    except lib.GateError as exc:
+        sys.stderr.write("acs skill-start: %s\n" % exc)
+        sys.exit(2)
+    ok, message = lib.validate_exempt_pr(pr, ctx["settings"])
+    if not ok:
+        sys.stderr.write("acs skill-start: %s\n" % message)
+        sys.exit(2)
+    print(json.dumps({
+        "skill": args.skill,
+        "mode": "exempt-pr",
+        "repo_id": ctx["repo_id"],
+        "workspace": ctx["workspace"],
+        "checkout_id": ctx["checkout_id"],
+        "checkout_root": ctx["checkout_root"],
+        "plugin_root": ctx["plugin_root"],
+        "settings": ctx["settings"],
+        "settings_sources": ctx["settings_sources"],
+        "exempt_reason": message,
+        "pr": {
+            "number": pr.get("number"),
+            "url": pr.get("url"),
+            "branch": pr.get("headRefName"),
+            "base": pr.get("baseRefName"),
+            "labels": lib._pr_labels(pr),
+        },
+        "post_hook": os.path.join(ctx["plugin_root"], "hooks", "scripts", "post-merge-pr.py"),
+    }, indent=2))
 
 
 def main():
@@ -39,6 +109,8 @@ def main():
     parser.add_argument("--title", help="ticket title when allocating")
     parser.add_argument("--type", dest="ttype", choices=lib.TICKET_TYPES, default="task",
                         help="ticket type when allocating (default: task)")
+    parser.add_argument("--pr", help="exempt non-ticket PR ref (--pr N / #N / PR URL); "
+                        "only valid with --skill merge-pr")
     args = parser.parse_args()
 
     cwd = os.getcwd()
@@ -47,6 +119,12 @@ def main():
     except lib.GateError as exc:
         sys.stderr.write("acs skill-start: %s\n" % exc)
         sys.exit(2)
+
+    # Exempt non-ticket PR mode (MAR-9): no ticket resolution, no partition/lock/
+    # pointer/state. Slots BEFORE all of that and returns.
+    if args.pr is not None:
+        _run_exempt_pr_mode(args, ctx)
+        return
 
     workspace, repo_id = ctx["workspace"], ctx["repo_id"]
     flow = "product" if args.skill in lib.PRODUCT_SKILLS else "ticket"
