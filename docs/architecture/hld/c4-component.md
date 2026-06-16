@@ -18,6 +18,7 @@ C4Component
         Component(handoff, "handoff.py", "session handoff", "finalize handed_off + summary; release lock; print continue_with")
         Component(vxml, "validate_xml.py", "message validation", "xmllint vs acs-messages.xsd, stdlib structural fallback")
         Component(sline, "statusline.py / subagent-statusline.py", "observability", "prompt line + agent-panel rows from workspace state")
+        Component(metrics, "metrics_aggregate.py", "observability", "read-only: aggregate the six /acs:metrics dashboard panels from workspace artifacts; emits JSON, never writes/gates/locks")
         Component(lib, "acs_lib.py", "shared core", "settings resolution, repo/checkout identity, state files, ledger, index, counters, metrics, locks, gates")
     }
     ContainerDb_Ext(ws, "Workspace store")
@@ -30,6 +31,7 @@ C4Component
     Rel(clarify, lib, "")
     Rel(handoff, lib, "")
     Rel(sline, lib, "")
+    Rel(metrics, lib, "build_context + read-only state reads")
     Rel(lib, ws, "atomic JSON read/write")
 ```
 
