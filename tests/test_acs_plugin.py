@@ -205,7 +205,7 @@ class TestPipelineSequence(AcsWorkspaceCase):
 
         with open(lib.metrics_path(self.ws, "acme-shop")) as fh:
             metrics = json.load(fh)
-        self.assertEqual(metrics["prs"], {"created": 1, "merged": 1})
+        self.assertEqual(metrics["prs"], {"created": 1, "merged": 1, "created_pr_numbers": [7]})
 
     def test_docs_only_flag_minted(self):
         ticket = self.new_ticket("Fix README", "task", "--docs-only", "true")
@@ -742,6 +742,290 @@ class TestExemptPrMerge(AcsWorkspaceCase):
         out = self.run_script("post-merge-pr.py", "--pr", "1", cwd=plain)
         self.assertEqual(out.returncode, 1)
         self.assertNotIn("Traceback", out.stderr)
+
+
+
+class TestDistinctPRCount(AcsWorkspaceCase):
+    """AC-1, AC-2, AC-3: distinct-PR counting via created_pr_numbers."""
+
+    def _make_ticket_with_pr(self, pr_number=7):
+        """Run the full pipeline up through create-pr with the given PR number,
+        returning the child ticket id. The workspace is pre-seeded via setUp."""
+        out = self.run_script("skill-start.py", "--skill", "create-ticket",
+                              "--allocate", "--type", "epic", "--title", "E")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        epic = json.loads(out.stdout)["ticket_id"]
+        self.post("create-ticket", epic, {"status": "completed"})
+
+        child = self.new_ticket("C", "story", "--parent", epic, "--needs-design", "false")
+
+        with open(os.path.join(self.tdir(epic), "design.md"), "w") as fh:
+            fh.write("# design")
+        self.start("create-design", epic)
+        self.post("create-design", epic, {"status": "completed"})
+
+        self.start("create-spec", child)
+        self.post("create-spec", child, {"status": "completed", "states": {"specs": ["01"]}})
+        os.makedirs(os.path.join(self.tdir(child), "specs"), exist_ok=True)
+        with open(os.path.join(self.tdir(child), "specs", "01.md"), "w") as fh:
+            fh.write("# spec")
+        self.start("code", child)
+        self.post("code", child, {"status": "completed", "states": {"verifier_passed": True}})
+
+        self.start("create-pr", child)
+        self.post("create-pr", child, {
+            "status": "completed",
+            "states": {"pr": {"number": pr_number, "url": "https://github.com/acme/shop/pull/%d" % pr_number}},
+        })
+        return child
+
+    def _read_metrics(self):
+        with open(lib.metrics_path(self.ws, "acme-shop")) as fh:
+            return json.load(fh)
+
+    # AC-1 + AC-3: pr_number flows from states.pr.number into created_pr_numbers
+    def test_ac1_created_pr_numbers_recorded_end_to_end(self):
+        """After create-pr post with states.pr.number=7, prs.created_pr_numbers==[7]
+        and prs.created==1.  Confirms the caller (run_post) extracts and passes
+        the number (AC-3)."""
+        self._make_ticket_with_pr(pr_number=7)
+        metrics = self._read_metrics()
+        self.assertEqual(metrics["prs"]["created"], 1)
+        self.assertEqual(metrics["prs"]["created_pr_numbers"], [7])
+
+    # AC-2: same number twice → no increment
+    def test_ac2_same_number_twice_no_increment(self):
+        """Calling update_metrics with the same pr_number twice must NOT double-count."""
+        # Use update_metrics directly to control the pr_number precisely
+        ws = self.ws
+        repo_id = "acme-shop"
+        # seed the workspace (the repo dir must exist for metrics_path)
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        # write a minimal tickets-index.json so index rebuild does not crash
+        lib.write_json(lib.index_path(ws, repo_id), {"tickets": {}})
+
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=7)
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=7)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 1)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [7])
+
+    # AC-2: new number after same number → +1
+    def test_ac2_new_number_increments(self):
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        lib.write_json(lib.index_path(ws, repo_id), {"tickets": {}})
+
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=7)
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=7)
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=8)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 2)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [7, 8])
+
+    # AC-2: pr_number=None with pr_created=True → no-op
+    def test_ac2_none_pr_number_noop(self):
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        lib.write_json(lib.index_path(ws, repo_id), {"tickets": {}})
+
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=7)
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=None)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 1)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [7])
+
+    # AC-2: non-positive pr_number with pr_created=True → no-op
+    def test_ac2_nonpositive_pr_number_noop(self):
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        lib.write_json(lib.index_path(ws, repo_id), {"tickets": {}})
+
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=7)
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=0)
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=-1)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 1)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [7])
+
+    # AC-2: pr_created=False with a valid number → no-op
+    def test_ac2_pr_created_false_noop(self):
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        lib.write_json(lib.index_path(ws, repo_id), {"tickets": {}})
+
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=7)
+        lib.update_metrics(ws, repo_id, pr_created=False, pr_number=99)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 1)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [7])
+
+    # AC-2: default prs block includes created_pr_numbers
+    def test_ac1_default_prs_includes_created_pr_numbers(self):
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        lib.write_json(lib.index_path(ws, repo_id), {"tickets": {}})
+        lib.update_metrics(ws, repo_id)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertIn("created_pr_numbers", m["prs"])
+        self.assertEqual(m["prs"]["created_pr_numbers"], [])
+
+    # AC-3: exempt-pr path still leaves created==0
+    def test_ac3_exempt_pr_created_stays_zero(self):
+        """Confirm the exempt --pr path (run_post_exempt_pr) does NOT set pr_created."""
+        # This mirrors the existing test at ~:596-597 but calls lib directly
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        lib.write_json(lib.index_path(ws, repo_id), {"tickets": {}})
+        lib.update_metrics(ws, repo_id, pr_merged=True)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"].get("created", 0), 0)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [])
+
+    # AC-6: created_pr_numbers round-trips as a plain JSON list of ints
+    def test_ac6_created_pr_numbers_round_trips_as_json_list(self):
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        lib.write_json(lib.index_path(ws, repo_id), {"tickets": {}})
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=42)
+        lib.update_metrics(ws, repo_id, pr_created=True, pr_number=7)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        nums = m["prs"]["created_pr_numbers"]
+        self.assertIsInstance(nums, list)
+        self.assertEqual(nums, [7, 42])  # sorted
+        for n in nums:
+            self.assertIsInstance(n, int)
+
+
+class TestBackfillDistinctPRCount(AcsWorkspaceCase):
+    """AC-4: idempotent backfill of inflated prs.created."""
+
+    def _write_create_pr_state(self, ws, repo_id, ticket_id, pr_number, archived=False):
+        """Seed a create-pr-state.json for a ticket partition."""
+        if archived:
+            tdir = os.path.join(ws, repo_id, "archive", ticket_id)
+        else:
+            tdir = os.path.join(ws, repo_id, ticket_id)
+        os.makedirs(tdir, exist_ok=True)
+        state = {"runs": [], "states": {"pr": {"number": pr_number, "url": "https://example.com/pull/%d" % pr_number}}}
+        lib.write_json(lib.state_path(tdir, "create-pr"), state)
+        return tdir
+
+    def _seed_workspace(self):
+        """Build a workspace with two ticket partitions (one active, one archived)
+        and an inflated metrics.json (created=99).  Returns (ws, repo_id)."""
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        # tickets-index with two entries
+        lib.write_json(lib.index_path(ws, repo_id), {
+            "tickets": {
+                "SHOP-1": {"id": "SHOP-1", "status": "done", "type": "story"},
+                "SHOP-2": {"id": "SHOP-2", "status": "done", "type": "story"},
+            }
+        })
+        # active partition: SHOP-1 → PR 7
+        self._write_create_pr_state(ws, repo_id, "SHOP-1", pr_number=7, archived=False)
+        # archived partition: SHOP-2 → PR 8
+        self._write_create_pr_state(ws, repo_id, "SHOP-2", pr_number=8, archived=True)
+        # inflated metrics
+        lib.write_json(lib.metrics_path(ws, repo_id), {
+            "prs": {"created": 99, "merged": 3, "created_pr_numbers": []},
+            "tickets": {},
+            "totals": {},
+        })
+        return ws, repo_id
+
+    # AC-4: backfill heals inflated count
+    def test_ac4_backfill_heals_inflated_count(self):
+        ws, repo_id = self._seed_workspace()
+        lib.backfill_distinct_pr_count(ws, repo_id)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 2)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [7, 8])
+
+    # AC-4: double run is idempotent (R1 mitigation)
+    def test_ac4_backfill_idempotent_on_double_run(self):
+        ws, repo_id = self._seed_workspace()
+        lib.backfill_distinct_pr_count(ws, repo_id)
+        lib.backfill_distinct_pr_count(ws, repo_id)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 2)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [7, 8])
+
+    # AC-4: backfill reads only metrics.json as a write (other files untouched)
+    def test_ac4_backfill_writes_only_metrics_json(self):
+        ws, repo_id = self._seed_workspace()
+        # record mtimes before
+        repo_dir = os.path.join(ws, repo_id)
+        before = {}
+        for fname in os.listdir(repo_dir):
+            p = os.path.join(repo_dir, fname)
+            if os.path.isfile(p):
+                before[fname] = os.path.getmtime(p)
+        # slight delay so mtime change is detectable
+        import time as _time
+        _time.sleep(0.05)
+
+        lib.backfill_distinct_pr_count(ws, repo_id)
+
+        after = {}
+        for fname in os.listdir(repo_dir):
+            p = os.path.join(repo_dir, fname)
+            if os.path.isfile(p):
+                after[fname] = os.path.getmtime(p)
+
+        for fname, mtime in before.items():
+            if fname == "metrics.json":
+                continue  # this one IS allowed to change
+            if fname in after:
+                self.assertAlmostEqual(after[fname], mtime, places=1,
+                                       msg="unexpected write to %s" % fname)
+
+    # AC-4: ticket with no create-pr-state.json contributes 0 numbers
+    def test_ac4_backfill_skips_ticket_with_no_state(self):
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        # Only one ticket, no create-pr-state.json for it
+        lib.write_json(lib.index_path(ws, repo_id), {
+            "tickets": {"SHOP-1": {"id": "SHOP-1", "status": "done", "type": "story"}}
+        })
+        os.makedirs(os.path.join(ws, repo_id, "SHOP-1"), exist_ok=True)
+        lib.write_json(lib.metrics_path(ws, repo_id), {
+            "prs": {"created": 5, "merged": 0},
+        })
+        lib.backfill_distinct_pr_count(ws, repo_id)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 0)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [])
+
+    # AC-4: ticket with states.pr.number=null is skipped gracefully
+    def test_ac4_backfill_skips_null_pr_number(self):
+        ws = self.ws
+        repo_id = "acme-shop"
+        os.makedirs(os.path.join(ws, repo_id), exist_ok=True)
+        lib.write_json(lib.index_path(ws, repo_id), {
+            "tickets": {"SHOP-1": {"id": "SHOP-1", "status": "done", "type": "story"}}
+        })
+        tdir = os.path.join(ws, repo_id, "SHOP-1")
+        os.makedirs(tdir, exist_ok=True)
+        lib.write_json(lib.state_path(tdir, "create-pr"),
+                       {"runs": [], "states": {"pr": {"number": None}}})
+        lib.write_json(lib.metrics_path(ws, repo_id), {
+            "prs": {"created": 5, "merged": 0},
+        })
+        lib.backfill_distinct_pr_count(ws, repo_id)
+        m = lib.read_json(lib.metrics_path(ws, repo_id))
+        self.assertEqual(m["prs"]["created"], 0)
+        self.assertEqual(m["prs"]["created_pr_numbers"], [])
 
 
 if __name__ == "__main__":

@@ -87,6 +87,16 @@ step status comes from `pipeline-state.json` (`steps.<skill>.status`), counted i
 `completed`. The PR terminus comes from the repo-level `metrics.json.prs`
 (`created` / `merged`).
 
+**Distinct-PR counting (deliberate semantics).** `prs.created` reflects the number
+of **distinct PRs** created, not the number of completed `create-pr` skill runs.
+A single PR that triggers `create-pr` multiple times (re-runs on updates, forced CI
+re-entries) is counted once.  The distinct set is backed by the auditable
+`prs.created_pr_numbers` field — a sorted, de-duped list of the positive PR numbers
+recorded via `create-pr` completions.  `prs.created = len(prs.created_pr_numbers)`
+at all times; the two fields are kept consistent by a single write point in
+`update_metrics`.  Pre-fix history where no PR number was retained in partition state
+is unrecoverable and accepted (see ADR 0018).
+
 ### 3 — Cost + time per ticket by step
 
 Per-ticket cost and elapsed time, broken down by pipeline step. Time comes from

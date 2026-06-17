@@ -17,6 +17,20 @@ the notes.
 
 ### Added
 
+- **Distinct-PR counting via  + idempotent backfill (MAR-13 spec 01).**
+  `prs.created` in `metrics.json` now counts **distinct PRs** rather than completed
+  `create-pr` run invocations — a single PR re-triggered multiple times no longer
+  inflates the metric.  `update_metrics` gains an optional `pr_number` parameter;
+  when `pr_created` is truthy and `pr_number` is a positive integer not already
+  recorded, it is appended to a sorted de-duped `prs.created_pr_numbers` list and
+  `prs.created` is set to `len(created_pr_numbers)` (idempotent: re-runs with the
+  same number are a no-op).  A one-time idempotent `backfill_distinct_pr_count`
+  helper heals already-inflated history by recomputing `created_pr_numbers` from
+  the distinct positive `states.pr.number` values across all active and `archive/`
+  partitions; re-running it is safe and produces the same result.  The
+  `created_pr_numbers` field is additive on the `prs` object (no schema break); all
+  other metric paths (`tokens`, `cost_usd`, `prs.merged`, ticket counts) are
+  unchanged.  No new runtime dependency; no network call.
 - **Pipeline-default `CLAUDE.md` guidance + exempt non-ticket merge path (MAR-9).**
   Two changes that make the acs pipeline the *automatic* path in an installed
   repo and close the non-ticket dead end. (1) `/acs:init` gains an opt-in
