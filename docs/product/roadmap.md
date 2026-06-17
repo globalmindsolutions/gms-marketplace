@@ -1,9 +1,16 @@
-# Roadmap — acs
+# Roadmap — GMS Marketplace
 
 > Milestones map to intended epics; each epic fans out into child tickets that
 > ship through the pipeline. Maintained alongside the PRD via `/acs:create-prd`.
 
-## M1 — Foundation (v0.1.x) — *implemented*
+Each plugin has its own milestone track. M1/M2/M3 below are the **acs plugin**
+track (v0.2.0 shipped; v0.3.0 in progress). The **tabp plugin** track follows
+with T-M1 as the urgent next milestone. Future plugins add their own track here
+without restructuring the existing tracks.
+
+## acs plugin track
+
+### M1 — Foundation (v0.1.x) — *implemented*
 
 Epic-level scope (retrofit; built before dogfooding began):
 
@@ -14,7 +21,7 @@ Epic-level scope (retrofit; built before dogfooding began):
   size control, `docs_only`, e2e layer, living-architecture enforcement.
 - Test suites: deterministic-layer integration tests + prose contract tests; CI green.
 
-## M2 — Hardening (v0.2)
+### M2 — Hardening (v0.2)
 
 Sequenced, not flat: M1 proved only the deterministic layer (hooks, schemas,
 Python units). The agentic behavior of the 12 skills is still unverified in a
@@ -23,7 +30,7 @@ systematize as evals, then dogfood. Tracker-sync runs as an independent,
 lower-priority track. Goal references (G1–G6) point at
 [`prd.md`](prd.md#goals--success-metrics).
 
-### M2-0 — Validation spike *(prerequisite, ~1 session)*
+#### M2-0 — Validation spike *(prerequisite, ~1 session)*
 
 Traces G1, G2, G6. Install published v0.1.1 into a throwaway consumer repo; run
 `/acs:init` → `/acs:create-ticket` → `/acs:ship` on a trivial change. Assert
@@ -41,7 +48,7 @@ the docs. Step-by-step runbook with per-step assertions:
   defects). See the run record in
   [m2-0-validation-spike.md](spikes/m2-0-validation-spike.md#run-record).
 
-### Epic E1 — Behavioral eval harness *(M2 backbone)*
+#### Epic E1 — Behavioral eval harness *(M2 backbone)*
 
 Traces G1, G3, G4, G5. The regression net that makes dogfooding and every
 future change safe; built on what M2-0 learns by hand.
@@ -68,7 +75,7 @@ cleanup. Validated green against installed v0.1.2.
   dedicated eval CI workflow. (A 2026-06-14 CI dispatch had confirmed the full
   paid path runs green in CI before paid was moved local-only.)
 
-### Epic E2 — Tracker-sync depth *(parallel, lower priority)*
+#### Epic E2 — Tracker-sync depth *(parallel, lower priority)*
 
 Traces the "team on a shared repo" persona. Independent of E1/E3 — slot in once
 dogfooding is rolling.
@@ -76,7 +83,7 @@ dogfooding is rolling.
 - Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
   Projects.
 
-### Epic E5 — Convention enforcement & onboarding/repo hardening *(shipped in v0.2.0)*
+#### Epic E5 — Convention enforcement & onboarding/repo hardening *(shipped in v0.2.0)*
 
 Traces G9 (+ the Tech-lead persona). The v0.2.0 release that this roadmap entry
 records — what actually shipped under the M2 hardening banner. Delivers the PRD
@@ -122,7 +129,7 @@ features.
   Claude sessions to `/acs:ship` rather than a raw `gh pr create`. Pending merge in
   PR #50; targeted for a v0.2.x release.
 
-### Epic E3 — Dogfood acs on acs
+#### Epic E3 — Dogfood acs on acs
 
 Traces all goals (proof by usage). Starts once M2-0 is green and E1 provides a
 safety net.
@@ -134,7 +141,7 @@ safety net.
 - **E3.3** — `acs:metrics` skill delivery: implement the dashboard skill reading workspace artifacts; render the six panels (throughput, funnel, cost/time per step, coverage vs target, review iterations, token burn by role); ship as a new skill in the `acs` plugin. Traces G5, G7.
 - **E3.4** — Status-line refinement (dogfood-driven): both the prompt line and the reflection agent-panel compose with Claude Code's default status line and add acs state on top (default context + acs pipeline/subagent state) instead of replacing it; ships as a maturing refinement to the v0.1 Should-have status-line feature. Traces G7.
 
-### Epic E4 — `acs:metrics` dashboard *(gates on E1)*
+#### Epic E4 — `acs:metrics` dashboard *(gates on E1)*
 
 Traces G5, G7. Starts once E1 (eval harness) is green — behavioral evals for
 the `acs:metrics` skill land in E1 before the skill ships.
@@ -144,7 +151,7 @@ the `acs:metrics` skill land in E1 before the skill ships.
 - **E4.3** — Edge cases: empty workspace, tickets with missing state files, performance target (≤ 5 s for ≤ 50 tickets).
 - **E4.4** — Documentation: skill description, usage example in plugin README and `docs/`.
 
-### Sequence & exit
+#### Sequence & exit
 
 ```
 M2-0 spike ─▶ (v0.1.2 if needed) ─▶ E1 harness ─▶ E5 enforcement + hardening ─▶ v0.2.0
@@ -162,7 +169,7 @@ allowlist). *(Shipped.)*
 dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
 `acs:metrics` dashboard skill ships and passes evals (E4).
 
-## M3 — GA (v1.0)
+### M3 — GA (v1.0)
 
 - **Epic: onboarding polish** — `/acs:init` guided flows, repo-detection
   heuristics, template gallery for descriptions.
@@ -180,6 +187,46 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
   doc gaps/staleness across the graph and recommend adjustments in-session, no
   separate tooling ([ADR 0012](../adr/0012-design-time-doc-consistency.md)).
 - Semver stability promise for state-file schemas (migration notes per minor).
+
+## tabp plugin track
+
+### T-M1 — screen-cvs *(URGENT — next milestone)*
+
+Maps to PRD: [`prd.md`](prd.md#features-moscow)
+tabp Must-have screen-cvs feature and metrics T1–T5.
+
+Deliver the screen-cvs capability in Claude Cowork:
+
+- **JD parsing** — parse a job description into must-have vs nice-to-have requirements.
+- **Evidence-based scoring** — per requirement: Met/Partial/Missing determination with
+  explicit CV evidence cited for each judgment.
+- **Weighted match score** — 0–100 overall score; missing a must-have requirement caps
+  the result regardless of nice-to-have scores.
+- **Band + recommendation** — Strong/Moderate/Weak band with a Recommend/Hold/Reject
+  recommendation per CV.
+- **Output artifacts** — inline summary per CV + two-sheet Excel scorecard (one sheet
+  per-requirement breakdown, one sheet ranked summary for batch runs).
+- **Fairness guardrails** — job-relevant criteria only; decision-support framing
+  (tool assists, does not decide); bias-relevant JD flags surfaced.
+- **Batch fan-out** — one Sonnet subagent per CV with Opus synthesis for the final
+  ranked summary.
+- **Input handling** — reads CVs and JD from the Cowork project folder; falls back to
+  chat attachments.
+
+**Success exit (release gate + ongoing adoption):**
+
+| Metric | Gate type | Target |
+|--------|-----------|--------|
+| T1 — Speed | Adoption (1 month) | 20-CV batch ≥ 70% faster than manual |
+| T2 — Reproducibility | Release gate (per release) | ≥ 95% on fixed 10-CV set |
+| T3 — Evidence/auditability | Release gate (every run) | 100% judgments cite evidence + scorecard |
+| T4 — Fairness | Release gate (per release) | 0 protected/proxy criteria; 100% bias-relevant flags on ≥ 15-pair set |
+| T5 — Adoption | Ongoing (3 months) | ≥ 80% of new TABP role openings use screen-cvs |
+
+**Implementation note:** the tabp plugin build (plugin.json, screen-cvs skill,
+`marketplace.json` entry, CI version-coupling removal) is a **separate follow-up
+ticket** — this roadmap entry defines what to deliver and how to measure success;
+the implementation ticket carries the build work.
 
 ## Later / icebox
 
