@@ -40,14 +40,18 @@ newer `v<version>` tag:
 
 ### Releasing & updating
 
-The catalog and the `acs` plugin share **one version**. A release bumps
-`version` in both `.claude-plugin/marketplace.json` and
-`plugins/acs/.claude-plugin/plugin.json` to the same value (CI enforces they
-match), points the acs `git-subdir` `source.ref` at the new tag, and the Release
+The catalog (`marketplace.json`) version is a marketplace-level identifier
+(currently 0.2.0) and is not CI-coupled to any plugin's version. The `acs`
+`plugin.json` version governs how acs updates ship. A release bumps `version`
+in both `.claude-plugin/marketplace.json` and
+`plugins/acs/.claude-plugin/plugin.json` (by convention both are kept in sync),
+points the acs `git-subdir` `source.ref` at the new tag, and the Release
 workflow cuts a single immutable `v<version>` tag
 ([CHANGELOG](plugins/acs/CHANGELOG.md)). acs is fetched remotely from that
 pinned tag — individually updatable with `claude plugin update acs` — and
-resolves reproducibly regardless of which marketplace commit is fetched.
+resolves reproducibly regardless of which marketplace commit is fetched. The
+per-entry CI validator checks each entry's `name` (always) and `version` (only
+when the entry declares one) against the plugin's own `plugin.json`.
 
 **Before cutting a release** (before bumping `version`), run the behavioral eval
 suite locally as a release gate — including the **paid** tier that the pre-commit

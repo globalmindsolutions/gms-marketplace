@@ -25,7 +25,8 @@ checks in Step 6.
 ## Step 2 — Latest released version
 
 Prefer the GitHub release. The Release workflow tags `v<version>` on every
-version bump (the catalog and the acs plugin share one version). Older
+version bump (releases cut a single `v<version>` tag; the acs `plugin.json`
+version is the source of truth for the update check). Older
 `marketplace-v<version>` tags remain in history, so filter to `v<digit>` tags to
 get the latest release:
 

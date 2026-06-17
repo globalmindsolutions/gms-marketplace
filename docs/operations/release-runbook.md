@@ -6,7 +6,7 @@ the step-by-step the maintainer follows.
 
 ## Preconditions
 
-- `main` is green (tests 3.9 + 3.12, pre-commit, gitleaks, version consistency).
+- `main` is green (tests 3.9 + 3.12, pre-commit, gitleaks, per-entry name/version consistency).
 - Working tree clean; you're on a release branch off the latest `main`.
 
 ## Steps
@@ -21,8 +21,8 @@ the step-by-step the maintainer follows.
    via pre-commit; this adds the agentic G1–G4 + cleanup coverage.)
 2. **Bump the version** — set the same `version` in both
    `.claude-plugin/marketplace.json` and
-   `plugins/acs/.claude-plugin/plugin.json` (CI enforces they match), and point
-   the acs `git-subdir` `source.ref` at the new tag.
+   `plugins/acs/.claude-plugin/plugin.json` (by convention both are kept in
+   sync), and point the acs `git-subdir` `source.ref` at the new tag.
 3. **Update the changelog** — add the matching section to
    [`plugins/acs/CHANGELOG.md`](../../plugins/acs/CHANGELOG.md) (Keep a Changelog
    format); this becomes the release notes.
