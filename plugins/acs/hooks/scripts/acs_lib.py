@@ -880,13 +880,13 @@ def metrics_path(workspace, repo_id):
     return os.path.join(repo_dir(workspace, repo_id), "metrics.json")
 
 
-def update_metrics(workspace, repo_id, run_entry=None, pr_created=False, pr_merged=False):
+def update_metrics(workspace, repo_id, run_entry=None, pr_created=False, pr_merged=False, pr_number=None):
     """Repo-level aggregates: ticket counts recomputed from the index (idempotent),
     PR counts and run totals accumulated incrementally."""
     path = metrics_path(workspace, repo_id)
     data = read_json(path) or {}
     data.setdefault("tickets", {})
-    data.setdefault("prs", {"created": 0, "merged": 0})
+    data.setdefault("prs", {"created": 0, "merged": 0, "created_pr_numbers": []})
     data.setdefault("totals", {"runs": 0, "working_seconds": 0, "tokens": {"input": 0, "output": 0}, "cost_usd": 0.0})
 
     index = read_json(index_path(workspace, repo_id)) or {"tickets": {}}
@@ -898,7 +898,12 @@ def update_metrics(workspace, repo_id, run_entry=None, pr_created=False, pr_merg
     data["tickets"] = {"total": len(index.get("tickets", {})), "by_status": by_status, "by_type": by_type}
 
     if pr_created:
-        data["prs"]["created"] = int(data["prs"].get("created", 0)) + 1
+        numbers = data["prs"].setdefault("created_pr_numbers", [])
+        if isinstance(pr_number, int) and pr_number > 0 and pr_number not in numbers:
+            numbers.append(pr_number)
+            numbers.sort()
+            data["prs"]["created"] = len(numbers)
+        # else: leave both created and created_pr_numbers unchanged (idempotent)
     if pr_merged:
         data["prs"]["merged"] = int(data["prs"].get("merged", 0)) + 1
     if run_entry:
@@ -912,6 +917,47 @@ def update_metrics(workspace, repo_id, run_entry=None, pr_created=False, pr_merg
         totals["cost_usd"] = round(float(totals.get("cost_usd", 0.0)) + float(run_entry.get("cost_usd", 0.0) or 0.0), 4)
     data["updated_at"] = now_iso()
     write_json(path, data)
+    return data
+
+
+
+def backfill_distinct_pr_count(workspace, repo_id):
+    """One-time idempotent recompute of prs.created_pr_numbers from distinct
+    positive states.pr.number values across all active and archive/ ticket
+    partitions.  Sets prs.created = len(created_pr_numbers).
+
+    Read-only except the single metrics.json write.  Safe to re-run: the result
+    is always the recoverable distinct set from the current partition state; a
+    second run with unchanged partitions produces the identical output.
+
+    Per clarification C-1 (MAR-13 / MAR-8 design A1): pre-fix history without
+    a retained PR number is unrecoverable and accepted -- this is not a defect.
+    """
+    # Gather all ticket IDs from the index
+    idx = read_json(index_path(workspace, repo_id)) or {"tickets": {}}
+    ticket_ids = list(idx.get("tickets", {}).keys())
+
+    distinct_numbers = set()
+    for tid in ticket_ids:
+        tdir, _archived = find_ticket_partition(workspace, repo_id, tid)
+        sp = state_path(tdir, "create-pr")
+        state = read_json(sp)
+        if not isinstance(state, dict):
+            continue
+        pr_num = (state.get("states") or {}).get("pr", {})
+        if isinstance(pr_num, dict):
+            pr_num = pr_num.get("number")
+        if isinstance(pr_num, int) and pr_num > 0:
+            distinct_numbers.add(pr_num)
+
+    # Write back -- overwrite is what makes this idempotent
+    mpath = metrics_path(workspace, repo_id)
+    data = read_json(mpath) or {}
+    data.setdefault("prs", {"created": 0, "merged": 0, "created_pr_numbers": []})
+    recovered = sorted(distinct_numbers)
+    data["prs"]["created_pr_numbers"] = recovered
+    data["prs"]["created"] = len(recovered)
+    write_json(mpath, data)
     return data
 
 
@@ -1423,11 +1469,13 @@ def run_post(skill):
                 save_ticket(tdir, ticket)
         update_index(ctx["workspace"], ctx["repo_id"], ticket)
 
+    pr_number = ((result.get("states") or {}).get("pr") or {}).get("number")
     update_metrics(
         ctx["workspace"], ctx["repo_id"], run_entry=entry,
         pr_created=(status == "completed" and bool((result.get("states") or {}).get("pr"))
                     and skill in (["create-pr"] + PRODUCT_SKILLS)),
         pr_merged=(skill == "merge-pr" and status == "completed"),
+        pr_number=pr_number,
     )
 
     release_lock(tdir, cwd)

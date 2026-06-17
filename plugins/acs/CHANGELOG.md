@@ -17,6 +17,36 @@ the notes.
 
 ### Added
 
+- **Distinct-PR counting via `created_pr_numbers` + idempotent backfill (MAR-13 spec 01).**
+  `prs.created` in `metrics.json` now counts **distinct PRs** rather than completed
+  `create-pr` run invocations — a single PR re-triggered multiple times no longer
+  inflates the metric.  `update_metrics` gains an optional `pr_number` parameter;
+  when `pr_created` is truthy and `pr_number` is a positive integer not already
+  recorded, it is appended to a sorted de-duped `prs.created_pr_numbers` list and
+  `prs.created` is set to `len(created_pr_numbers)` (idempotent: re-runs with the
+  same number are a no-op).  A one-time idempotent `backfill_distinct_pr_count`
+  helper heals already-inflated history by recomputing `created_pr_numbers` from
+  the distinct positive `states.pr.number` values across all active and `archive/`
+  partitions; re-running it is safe and produces the same result.  The
+  `created_pr_numbers` field is additive on the `prs` object (no schema break); all
+  other metric paths (`tokens`, `cost_usd`, `prs.merged`, ticket counts) are
+  unchanged.  No new runtime dependency; no network call.
+- **Lead/cycle re-cycle hardening + per-ticket re-work count (MAR-13 spec 02).**
+  Panel 7 (`metrics_aggregate.py`) now carries an explicit overlap-safe guarantee:
+  `aggregate()` never raises when a ticket's `code.started_at` falls after its
+  `merge-pr.ended_at` (a re-cycled or overlapping step span) — the affected
+  `cycle_seconds` value renders as `"no data"` and a `meta.degraded` entry (panel 7)
+  is appended; one row per ticket is always returned; nothing is written.  This
+  guarantee is documented in the `_elapsed_seconds` and `_panel7_row` docstrings and
+  is now covered by a dedicated cycle-inversion test
+  (`test_cycle_inversion_yields_no_data`).  In addition, each Panel-7 per-ticket row
+  gains a new additive `rework_count` integer field (>= 0) equal to the count of
+  distinct positive PR numbers recoverable from that ticket's `create-pr-state.json`
+  in the resolved partition; 0 when the file is absent, malformed, or carries no
+  positive PR number.  `rework_count` is read-only (zero writes), stdlib-only, and
+  is not averaged at the panel level — it is per-ticket metadata next to
+  `lead_seconds` / `cycle_seconds`.  No schema break; no new config key; no network
+  call.
 - **Pipeline-default `CLAUDE.md` guidance + exempt non-ticket merge path (MAR-9).**
   Two changes that make the acs pipeline the *automatic* path in an installed
   repo and close the non-ticket dead end. (1) `/acs:init` gains an opt-in

@@ -87,6 +87,16 @@ step status comes from `pipeline-state.json` (`steps.<skill>.status`), counted i
 `completed`. The PR terminus comes from the repo-level `metrics.json.prs`
 (`created` / `merged`).
 
+**Distinct-PR counting (deliberate semantics).** `prs.created` reflects the number
+of **distinct PRs** created, not the number of completed `create-pr` skill runs.
+A single PR that triggers `create-pr` multiple times (re-runs on updates, forced CI
+re-entries) is counted once.  The distinct set is backed by the auditable
+`prs.created_pr_numbers` field — a sorted, de-duped list of the positive PR numbers
+recorded via `create-pr` completions.  `prs.created = len(prs.created_pr_numbers)`
+at all times; the two fields are kept consistent by a single write point in
+`update_metrics`.  Pre-fix history where no PR number was retained in partition state
+is unrecoverable and accepted (see ADR 0018).
+
 ### 3 — Cost + time per ticket by step
 
 Per-ticket cost and elapsed time, broken down by pipeline step. Time comes from
@@ -159,6 +169,28 @@ computes; a ticket with **no `created_at`** renders **"no data"** for lead. Ever
 such case appends a `meta.degraded` entry (`panel: 7`) — consistent with the
 degradation contract below. The "no data" cell is always present, never an
 omitted row.
+
+**Re-cycle / overlapping-span contract.** When a ticket is re-cycled (i.e. its
+`code.started_at` falls *after* its `merge-pr.ended_at` due to an overlapping or
+out-of-order step span), `aggregate()` never raises. The inverted cycle interval
+renders as `"no data"` for `cycle_seconds`; a `meta.degraded` entry is appended
+with `panel: 7`; one row per ticket is always returned; nothing is written to disk.
+The same overlap-safe guarantee applies to lead-time inversions
+(`merge-pr.ended_at` before `ticket.json.created_at`). Both cases are handled by
+the `_elapsed_seconds` guard in `metrics_aggregate.py` which returns `None` on any
+inverted interval (`not (end >= start)`), never raises, and is never rewritten
+around this guard — a guarantee, not a rewrite.
+
+**Per-ticket re-work count (`rework_count`).** Each Panel-7 row carries an
+additive integer field `rework_count` (>= 0) equal to the count of **distinct
+positive PR numbers** recoverable from `create-pr-state.json` in that ticket's
+resolved partition (active or `archive/`). It counts how many different PRs were
+associated with this ticket — a value > 1 indicates re-work (the ticket drove more
+than one PR, e.g. after a reverted merge). The field is `0` when the state file is
+absent, malformed, or carries no positive PR number. `rework_count` appears next to
+`lead_seconds` and `cycle_seconds` in the per-ticket row dict; it is **not**
+averaged at the panel level (it is a count, not a duration). The aggregator is
+read-only: computing `rework_count` reads one file per ticket, writes nothing.
 
 ## Degradation and the `meta` block
 

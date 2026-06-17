@@ -17,8 +17,17 @@
     "prs": {
       "type": "object",
       "properties": {
-        "created": {"type": "integer", "minimum": 0},
-        "merged": {"type": "integer", "minimum": 0}
+        "created": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of distinct PRs created; mirrors len(created_pr_numbers)."
+        },
+        "merged": {"type": "integer", "minimum": 0},
+        "created_pr_numbers": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1},
+          "description": "Sorted de-duped set of distinct PR numbers recorded via create-pr runs. Additive field; prs.created == len(created_pr_numbers) at all times."
+        }
       },
       "additionalProperties": true
     },
