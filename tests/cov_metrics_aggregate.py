@@ -187,6 +187,61 @@ def _drive():
     mod._safe_avg(10, True)         # bool denominator treated non-numeric
     mod._elapsed_seconds(None, None)  # both anchors missing -> None
 
+    # 6c) Spec 02 new branches — cycle-inversion + _rework_count present/absent/malformed.
+    #
+    # Cycle-inversion: exercises the `not (end >= start)` branch in _elapsed_seconds for the
+    # CYCLE computation specifically (code.started_at AFTER merge-pr.ended_at).  The lead path
+    # through the same branch is already traced via the negative-interval fixture above.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"INV": {"status": "done", "type": "task"}})
+        fx.write_ticket_json(ws, "INV", "2025-01-01T00:00:00Z")
+        fx.write_pipeline(ws, "INV", steps={
+            "code": {"started_at": "2025-06-01T12:00:00Z", "status": "completed",
+                     "ended_at": "2025-06-01T13:00:00Z"},
+            "merge-pr": {"started_at": "2025-04-30T00:00:00Z", "status": "completed",
+                         "ended_at": "2025-05-01T00:00:00Z"},
+        })
+        mod.aggregate(ws, REPO_ID)
+
+    # _rework_count — ticket WITH create-pr-state.json (states.pr.number + runs[].pr.number)
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"RC1": {"status": "done", "type": "task"}})
+        fx.write_ticket_json(ws, "RC1", "2025-01-01T00:00:00Z")
+        fx.write_pipeline(ws, "RC1", steps=_lc_steps("2025-02-01T10:00:00Z", "2025-03-01T10:00:00Z"))
+        tdir_rc1 = fx._ticket_dir(ws, "RC1")
+        fx._write_json(os.path.join(tdir_rc1, "create-pr-state.json"), {
+            "skill": "create-pr",
+            "ticket_id": "RC1",
+            "states": {"pr": {"number": 42}},
+            "runs": [{"pr": {"number": 42}}, {"pr": {"number": 43}}],
+        })
+        mod.aggregate(ws, REPO_ID)
+
+    # _rework_count — ticket WITHOUT create-pr-state.json (absent file -> OSError branch -> 0)
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"RC2": {"status": "done", "type": "task"}})
+        fx.write_ticket_json(ws, "RC2", "2025-01-01T00:00:00Z")
+        fx.write_pipeline(ws, "RC2", steps=_lc_steps("2025-02-01T10:00:00Z", "2025-03-01T10:00:00Z"))
+        # no create-pr-state.json -> OSError branch -> rework_count == 0
+        mod.aggregate(ws, REPO_ID)
+
+    # _rework_count — malformed JSON (JSONDecodeError branch -> 0)
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"RC3": {"status": "done", "type": "task"}})
+        fx.write_ticket_json(ws, "RC3", "2025-01-01T00:00:00Z")
+        fx.write_pipeline(ws, "RC3", steps=_lc_steps("2025-02-01T10:00:00Z", "2025-03-01T10:00:00Z"))
+        tdir_rc3 = fx._ticket_dir(ws, "RC3")
+        fx._write_text(os.path.join(tdir_rc3, "create-pr-state.json"), "not valid json {{{{")
+        mod.aggregate(ws, REPO_ID)
+
+    # _rework_count — states.pr.number is None (excluded from the set -> rework_count == 0)
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"RC4": {"status": "done", "type": "task"}})
+        fx.write_ticket_json(ws, "RC4", "2025-01-01T00:00:00Z")
+        fx.write_pipeline(ws, "RC4", steps=_lc_steps("2025-02-01T10:00:00Z", "2025-03-01T10:00:00Z"))
+        fx.write_create_pr_state(ws, "RC4", states={"pr": {"number": None}})
+        mod.aggregate(ws, REPO_ID)
+
     # 7) main() smoke path (build_context patched so the harness runs without git/settings).
     with tempfile.TemporaryDirectory() as ws:
         fx.write_index(ws, {})

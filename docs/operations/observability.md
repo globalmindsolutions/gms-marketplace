@@ -170,6 +170,28 @@ such case appends a `meta.degraded` entry (`panel: 7`) — consistent with the
 degradation contract below. The "no data" cell is always present, never an
 omitted row.
 
+**Re-cycle / overlapping-span contract.** When a ticket is re-cycled (i.e. its
+`code.started_at` falls *after* its `merge-pr.ended_at` due to an overlapping or
+out-of-order step span), `aggregate()` never raises. The inverted cycle interval
+renders as `"no data"` for `cycle_seconds`; a `meta.degraded` entry is appended
+with `panel: 7`; one row per ticket is always returned; nothing is written to disk.
+The same overlap-safe guarantee applies to lead-time inversions
+(`merge-pr.ended_at` before `ticket.json.created_at`). Both cases are handled by
+the `_elapsed_seconds` guard in `metrics_aggregate.py` which returns `None` on any
+inverted interval (`not (end >= start)`), never raises, and is never rewritten
+around this guard — a guarantee, not a rewrite.
+
+**Per-ticket re-work count (`rework_count`).** Each Panel-7 row carries an
+additive integer field `rework_count` (>= 0) equal to the count of **distinct
+positive PR numbers** recoverable from `create-pr-state.json` in that ticket's
+resolved partition (active or `archive/`). It counts how many different PRs were
+associated with this ticket — a value > 1 indicates re-work (the ticket drove more
+than one PR, e.g. after a reverted merge). The field is `0` when the state file is
+absent, malformed, or carries no positive PR number. `rework_count` appears next to
+`lead_seconds` and `cycle_seconds` in the per-ticket row dict; it is **not**
+averaged at the panel level (it is a count, not a duration). The aggregator is
+read-only: computing `rework_count` reads one file per ticket, writes nothing.
+
 ## Degradation and the `meta` block
 
 Alongside the seven panels the dashboard carries a `meta` block:

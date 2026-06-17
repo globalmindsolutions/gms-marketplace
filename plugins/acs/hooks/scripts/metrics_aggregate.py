@@ -93,6 +93,15 @@ def _elapsed_seconds(start_iso, end_iso):
     Mirrors acs_lib.run_seconds but returns value-or-None (not 0), so a missing/invalid anchor
     or a negative interval is distinguishable from a true zero-length interval. Total function:
     parse_iso returns None on bad/missing input, so this never raises.
+
+    Overlap-safe guarantee (spec 02 / design B1): an inverted interval (start > end, i.e.
+    `not (end >= start)`) returns None rather than raising or returning a negative value.
+    Callers (_panel7_row) map None to the string "no data" and append a meta.degraded entry;
+    aggregate() writes nothing in any case. This guarantee covers both the lead-inversion case
+    (merge-pr.ended_at < ticket.created_at) and the cycle-inversion case
+    (code.started_at > merge-pr.ended_at, e.g. a re-cycled ticket). The production guard on
+    line `end >= start` below is intentionally NOT a rewrite — it is the minimal total-function
+    property (design Decision B1: "a guarantee + test, not a rewrite").
     """
     start, end = acs_lib.parse_iso(start_iso), acs_lib.parse_iso(end_iso)
     if start and end and end >= start:
@@ -259,6 +268,53 @@ def _panel5_row(ticket_id, tdir, code_state, degrade):
     return {"ticket_id": ticket_id, "iterations": "no data"}
 
 
+def _rework_count(tdir):
+    """Count distinct positive PR numbers from create-pr-state.json in the resolved partition.
+
+    Reads `state_path(tdir, 'create-pr')` (i.e. <tdir>/create-pr-state.json) and collects
+    distinct positive integers from:
+      - data["states"]["pr"]["number"] (the current/latest PR number)
+      - data["runs"][i]["pr"]["number"] for each run entry (historical PR numbers)
+
+    Returns len({n for n in numbers if isinstance(n, int) and n > 0}).
+    Returns 0 on any error: missing file, missing keys, malformed JSON — consistent with the
+    B1 "missing input -> no data, never crash" invariant (design.md lines 89-97).
+    This function is read-only: it never writes to disk.
+    """
+    path = acs_lib.state_path(tdir, "create-pr")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return 0
+
+    if not isinstance(data, dict):
+        return 0
+
+    numbers = set()
+
+    # Collect from states.pr.number (current PR)
+    try:
+        n = data["states"]["pr"]["number"]
+        if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+            numbers.add(n)
+    except (KeyError, TypeError):
+        pass
+
+    # Collect from runs[i].pr.number (historical PRs across all runs)
+    runs = data.get("runs")
+    if isinstance(runs, list):
+        for run in runs:
+            try:
+                n = run["pr"]["number"]
+                if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+                    numbers.add(n)
+            except (KeyError, TypeError):
+                pass
+
+    return len(numbers)
+
+
 def _panel7_row(ticket_id, tdir, pipeline, degrade):
     """Per-ticket lead/cycle wall-clock seconds (AC-2). Reads ticket.json.created_at (read-only).
 
@@ -266,6 +322,16 @@ def _panel7_row(ticket_id, tdir, pipeline, degrade):
     cycle = merge-pr.ended_at - code.started_at
     End anchor is merge-pr (NOT create-pr); value is wall-clock elapsed (NOT working_seconds).
     A value that cannot be computed is the string "no data" plus a panel-7 meta.degraded entry.
+
+    Overlap-safe guarantee (spec 02 / design B1): aggregate() never raises on overlapping or
+    re-cycled spans. When code.started_at falls after merge-pr.ended_at (cycle inversion) or
+    ticket.created_at falls after merge-pr.ended_at (lead inversion), _elapsed_seconds returns
+    None, cycle_seconds / lead_seconds is set to "no data", and the ticket id is appended to
+    meta.degraded (panel 7). One row is always returned per ticket; nothing is written.
+
+    rework_count (spec 02 AC-8): per-ticket count of distinct positive PR numbers recoverable
+    from create-pr-state.json in the resolved partition (tdir). Additive field; always an int
+    >= 0; not averaged. Never raises: missing or malformed state files contribute 0.
     """
     ticket = acs_lib.read_json(os.path.join(tdir, "ticket.json"))
     created_at = ticket.get("created_at") if isinstance(ticket, dict) else None
@@ -294,11 +360,16 @@ def _panel7_row(ticket_id, tdir, pipeline, degrade):
         "ticket_id": ticket_id,
         "lead_seconds": lead if lead is not None else "no data",
         "cycle_seconds": cycle if cycle is not None else "no data",
+        "rework_count": _rework_count(tdir),
     }
 
 
 def _panel7(p7_rows):
-    """Assemble panel 7: per-ticket rows plus averages over the subset with a numeric value."""
+    """Assemble panel 7: per-ticket rows plus averages over the subset with a numeric value.
+
+    rework_count is a per-ticket count field, not a duration — it is not averaged here.
+    Only lead_seconds and cycle_seconds contribute to the panel-level averages.
+    """
     leads = [r["lead_seconds"] for r in p7_rows if _is_number(r["lead_seconds"])]
     cycles = [r["cycle_seconds"] for r in p7_rows if _is_number(r["cycle_seconds"])]
     return {
