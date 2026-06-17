@@ -17,7 +17,7 @@ import sys
 import tempfile
 import unittest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RUNNER = os.path.join(REPO_ROOT, "plugins", "acs", "templates", "ci", "run-tests.py")
 
 

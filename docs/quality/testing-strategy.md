@@ -14,8 +14,8 @@ deterministic at the base, most expensive and least deterministic at the top.
 
 | # | Layer | What it verifies | Cost / determinism | Where | Runs |
 |---|-------|------------------|--------------------|-------|------|
-| 1 | Structural / contract | every skill & agent is wired right — frontmatter, lifecycle-script calls, completion reports, tool restrictions, grounding, phase artifacts | free, deterministic | [tests/test_skill_contracts.py](../../tests/test_skill_contracts.py) | every PR |
-| 2 | Deterministic layer | gates block/advance, state/locks/counters/metrics, helper CLIs | free, deterministic | [tests/test_acs_plugin.py](../../tests/test_acs_plugin.py) | every PR |
+| 1 | Structural / contract | every skill & agent is wired right — frontmatter, lifecycle-script calls, completion reports, tool restrictions, grounding, phase artifacts | free, deterministic | [tests/test_skill_contracts.py](../../tests/acs/test_skill_contracts.py) | every PR |
+| 2 | Deterministic layer | gates block/advance, state/locks/counters/metrics, helper CLIs | free, deterministic | [tests/test_acs_plugin.py](../../tests/acs/test_acs_plugin.py) | every PR |
 | 3 | Static validation | JSON / JSON-Schema / XSD parse, byte-compile, version consistency | free, deterministic | [ci.yml](../../.github/workflows/ci.yml) | every PR |
 | 4 | Free eval smoke | the *shipped build* still installs & gates; SessionEnd cleanup | free, deterministic | `evals/` (`install_gate_smoke`, `session_end_safety_net`) | pre-commit + CI |
 | 5 | Trigger evals | the *right skill fires* for a natural-language request | paid (cheap), ~deterministic w/ re-probe | `evals/skill_triggers` | on-demand |
