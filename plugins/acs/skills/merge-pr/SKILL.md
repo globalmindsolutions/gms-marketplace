@@ -1,7 +1,7 @@
 ---
 name: merge-pr
 description: Review a ticket PR's readiness (CI, approvals, conflicts, branch protections) via gh and, when ready, merge it with the configured strategy, then clean up branches, worktree, and tracker status. Use only when the user explicitly asks to merge, after they have reviewed the PR themselves.
-argument-hint: "[ticket-id]"
+argument-hint: "[ticket-id] | --pr PRNUMBER"
 disable-model-invocation: true
 disallowed-tools: Edit, NotebookEdit
 ---
@@ -29,6 +29,74 @@ must run /acs:merge-pr themselves.
 A failed readiness check is REPORT-ONLY: record what blocks, tell the user,
 stop. NEVER route fixes back to /acs:code automatically, never push commits to
 the PR branch, never amend the PR to make it mergeable.
+
+## Exempt non-ticket PR mode
+
+`/acs:merge-pr --pr <PRNUMBER>` (also `#N` or a PR URL) merges a **legitimate
+one-off non-ticket PR** — a hotfix, a chore, a doc tweak that never went
+through the pipeline — without inventing a ticket for it. It is the sanctioned
+counterpart to the convention-enforcement gate's `exempt_label` /
+`exempt_branches` escape hatch: instead of a raw `gh pr merge` (which the gate
+fights), the user labels the PR with the exempt label and merges it here. Like
+the ticket path it is **user-invoked only** — it inherits the "User action
+only" invariant above; if you are ever spawned as a `/acs:ship` step, refuse
+exactly as the ticket path does.
+
+The Start step below already passes `--args "$ARGUMENTS"`; for the exempt form
+the same command resolves the mode. Run it and read the printed context JSON:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/skill-start.py" --skill merge-pr --pr "<PRNUMBER>"
+```
+
+If `skill-start.py` exits non-zero (the PR is not OPEN, is a draft, is not a
+sanctioned exempt PR, or is ticket-backed) STOP and surface its stderr
+verbatim — including its `/acs:merge-pr <TICKET-ID>` redirect when the PR looks
+ticket-backed. Do not improvise a workaround. On success it prints a context
+JSON with `mode: "exempt-pr"`, the resolved `pr` (`number`, `url`, `branch`,
+`base`, `labels`), `exempt_reason`, `settings`, and `post_hook` — and it
+resolves **no** ticket and writes **no** partition, lock, pointer, or state.
+
+When `mode` is `exempt-pr`, run this trimmed flow yourself (no
+planner/executor/verifier subagents — there is no partition to persist phase
+artifacts to):
+
+1. **Readiness review** — judge the SAME four dimensions as the ticket path
+   (`ci`, `approvals`, `conflicts`, `protections`) against `pr.number`, using
+   the same `gh pr view` / `gh pr checks --required` reads described under
+   "Plan — readiness review". A failing dimension is the same REPORT-ONLY stop:
+   do not merge, tell the user exactly what blocks, stop.
+2. **Merge (only when all four pass)** — merge with the configured strategy and
+   delete the remote branch:
+
+   ```bash
+   gh pr merge <pr.number> --<settings.merge_strategy> --delete-branch
+   ```
+
+   Never re-merge a PR `gh pr view` already reports `MERGED`.
+3. **Cleanup** — from the main checkout (resolve it via
+   `git rev-parse --git-common-dir`), remove the worktree if one holds
+   `pr.branch` (`git worktree remove <path>`) and delete the local branch if it
+   still exists (`git branch -D <pr.branch>`).
+4. **Post step — metrics only** — run the post-hook in its exempt form, which
+   bumps ONLY the repo `pr_merged` metric and writes no ticket state, index,
+   pipeline, or archive:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-merge-pr.py" --pr <pr.number>
+   ```
+
+   Surface its stderr verbatim if it exits non-zero; on success it prints
+   `{"ok": true, "mode": "exempt-pr", "pr_merged": true}`.
+
+**Explicitly NOT done in exempt mode** (there is no ticket): NO partition
+artifacts (no phase files, no `result.json` — there is no partition), NO
+tracker sync (no `ticket.external`), NO ticket archiving, NO ticket status
+flip, NO epic auto-done. Contrast with the ticket path's
+`post-merge-pr.py --ticket … --result-file …` (Finish, below). Report a compact
+summary to the user — merged or blocked (per dimension), strategy used, branch
+and worktree cleanup performed — then stop.
+
 
 ## Start
 

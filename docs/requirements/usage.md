@@ -100,6 +100,20 @@ Interrupted or handed-off tickets resume the same way — the coordinator
 reconciles recorded progress (re-runs tests for specs marked implemented)
 before continuing.
 
+## Merge a one-off non-ticket PR
+
+For a legitimate change that never went through the pipeline (a hotfix, a
+chore), label the PR `acs-exempt` and land it with the sanctioned exempt-merge
+path instead of a raw `gh pr merge`:
+
+```text
+/merge-pr --pr 42      # (or #42 / a PR URL) readiness check → merge →
+                       #   delete branch; no ticket, no tracker, no archive
+```
+
+It refuses and points you back to `/merge-pr <ticket-id>` if the PR is actually
+ticket-backed.
+
 ## Parallel tickets with worktrees
 
 ```text

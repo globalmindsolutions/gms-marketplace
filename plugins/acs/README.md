@@ -93,7 +93,7 @@ name.
 
 | Skill | Gated by | What it does |
 |-------|----------|--------------|
-| `/acs:init` | — (bootstrap) | Generates `.acs/settings.json` (user or project scope): workspace path, ticket prefix, coverage target, formats, tracker. Re-runs update in place. |
+| `/acs:init` | — (bootstrap) | Generates `.acs/settings.json` (user or project scope): workspace path, ticket prefix, coverage target, formats, tracker. Opt-in (default-on) writes a pipeline-default `CLAUDE.md` managed block so sessions ship via `/acs:ship`, not raw `gh pr create`. Re-runs update in place. |
 | `/acs:ship` | Each step's own gate | Umbrella: drives create-ticket → design → spec → code → create-pr end to end, resumable from the first incomplete step. Never merges. |
 | `/acs:handoff` | — (utility) | Flushes in-flight work and decisions to the ticket partition, marks the run `handed_off`, releases the lock, prints the command to continue in a fresh session. |
 | `/acs:update` | — (utility, user-invoked only) | Upgrade assistant: installed-vs-latest version check, CHANGELOG delta with breaking-change callouts, marketplace refresh, post-update migration checks (settings, status-line paths). Reloading stays your action. |
@@ -107,7 +107,7 @@ name.
 | `/acs:create-spec` | `/acs:create-ticket` completed; design completed when required | Decomposes the ticket into one or more implementation specs (scope, approach, API/data changes, test plan), conformant to the design. |
 | `/acs:code` | `/acs:create-spec` completed; specs exist | TDD implementation on a ticket branch against the coverage target; updates affected docs and the architecture doc set; verifier review loop (max 3 iterations). |
 | `/acs:create-pr` | `/acs:code` completed **and** its verifier passed | Pushes the ticket branch and opens the PR (configured title/description formats, `ACS` label) against the default branch. |
-| `/acs:merge-pr` | PR reference recorded; **user-invoked only** | Readiness check (CI, approvals, conflicts, protections), merge per `merge_strategy`, delete branch, mark ticket done, archive the partition. |
+| `/acs:merge-pr` | PR reference recorded; **user-invoked only** | Readiness check (CI, approvals, conflicts, protections), merge per `merge_strategy`, delete branch, mark ticket done, archive the partition. Also `/acs:merge-pr --pr <n>` (or `#n` / PR URL) to land a legitimate non-ticket **`acs-exempt`** PR — same readiness + cleanup, no ticket/partition/tracker. |
 
 ## How gating works
 

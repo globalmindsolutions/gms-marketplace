@@ -47,10 +47,11 @@ class AcsWorkspaceCase(unittest.TestCase):
         with open(os.path.join(self.repo, ".acs", "settings.json"), "w") as fh:
             json.dump(data, fh)
 
-    def run_script(self, script, *args, stdin=None, cwd=None):
+    def run_script(self, script, *args, stdin=None, cwd=None, env=None):
         return subprocess.run(
             [sys.executable, os.path.join(SCRIPTS, script)] + list(args),
             input=stdin, capture_output=True, text=True, cwd=cwd or self.repo,
+            env=env,
         )
 
     def pre(self, skill, args_text="", cwd=None):
@@ -377,6 +378,370 @@ class ToolchainTests(unittest.TestCase):
         self.assertNotIn("xmllint", missing)  # optional, never offered by default
         for name in missing:
             self.assertIn(name, {"gh", "pre-commit"})
+
+
+# ---------------------------------------------------------------------------
+# MAR-9 — pipeline-default CLAUDE.md guidance + exempt non-ticket merge-pr --pr
+# ---------------------------------------------------------------------------
+
+TEMPLATE_DIR = os.path.join(REPO_ROOT, "plugins", "acs", "templates")
+
+
+class TestManagedBlock(unittest.TestCase):
+    """Spec 01 — the pure CLAUDE.md managed-block helpers in acs_lib (no fixture
+    needed; these are pure string functions)."""
+
+    def test_fresh_write_appends_block_and_preserves_user_prose(self):
+        # (a) Fresh write into surrounding user content.
+        existing = "# My project\n\nSome user notes.\n"
+        body = "Ship via /acs:ship."
+        out = lib.upsert_managed_block(existing, body)
+        self.assertIn(lib.ACS_BLOCK_BEGIN, out)
+        self.assertIn(lib.ACS_BLOCK_END, out)
+        self.assertIn(body, out)
+        # the original user prose survives byte-for-byte as a prefix
+        self.assertTrue(out.startswith(existing))
+        # exactly one blank line separates prior content from the BEGIN marker
+        before_marker = out.split(lib.ACS_BLOCK_BEGIN, 1)[0]
+        self.assertTrue(before_marker.endswith("\n\n"))
+        self.assertFalse(before_marker.endswith("\n\n\n"))
+
+    def test_idempotent_rerun_byte_identical(self):
+        # (b) AC-2 run-twice property.
+        existing = "# My project\n\nSome user notes.\n"
+        body = "Ship via /acs:ship."
+        first = lib.upsert_managed_block(existing, body)
+        second = lib.upsert_managed_block(first, body)
+        self.assertEqual(first, second)
+
+    def test_replace_changed_block_leaves_surrounding_bytes_intact(self):
+        # (c) Replace with a changed block; only the marker span changes.
+        prefix = "# Top\n\nintro prose\n"
+        suffix = "\n\n## Footer\n\ntrailing user text\n"
+        first = lib.upsert_managed_block(prefix, "label acs-exempt")
+        # add user content AFTER the block, then re-upsert with a different body
+        with_suffix = first + suffix
+        replaced = lib.upsert_managed_block(with_suffix, "label custom-exempt")
+        # surrounding content (before BEGIN and after END) is byte-identical
+        self.assertEqual(replaced.split(lib.ACS_BLOCK_BEGIN, 1)[0],
+                         with_suffix.split(lib.ACS_BLOCK_BEGIN, 1)[0])
+        self.assertEqual(replaced.split(lib.ACS_BLOCK_END, 1)[1],
+                         with_suffix.split(lib.ACS_BLOCK_END, 1)[1])
+        # the new body replaced the old one inside the span
+        self.assertIn("label custom-exempt", replaced)
+        self.assertNotIn("label acs-exempt", replaced)
+
+    def test_empty_existing_emits_just_block(self):
+        out = lib.upsert_managed_block("", "body text")
+        self.assertTrue(out.startswith(lib.ACS_BLOCK_BEGIN))
+        self.assertIn("body text", out)
+
+    def test_render_substitutes_both_placeholders(self):
+        # (d) render_managed_block fills {ticket_prefix} + {exempt_label}.
+        template = "prefix {ticket_prefix} and label {exempt_label} done"
+        rendered = lib.render_managed_block(template, "SHOP", "acs-exempt")
+        self.assertIn("SHOP", rendered)
+        self.assertIn("acs-exempt", rendered)
+        self.assertNotIn("{ticket_prefix}", rendered)
+        self.assertNotIn("{exempt_label}", rendered)
+
+    def test_template_exists_with_markers_and_placeholders(self):
+        # (e) AC-1 — template file content assertion.
+        path = os.path.join(TEMPLATE_DIR, "CLAUDE.acs.md")
+        self.assertTrue(os.path.isfile(path), path)
+        with open(path) as fh:
+            text = fh.read()
+        self.assertIn(lib.ACS_BLOCK_BEGIN, text)
+        self.assertIn(lib.ACS_BLOCK_END, text)
+        self.assertIn("{ticket_prefix}", text)
+        self.assertIn("{exempt_label}", text)
+        # guidance content: steer everyday work to /acs:ship and exempt PRs to --pr
+        self.assertIn("/acs:ship", text)
+        self.assertIn("/acs:merge-pr --pr", text)
+
+
+class TestExemptPrMerge(AcsWorkspaceCase):
+    """Spec 02 + 03 — exempt non-ticket merge-pr --pr path: the classifier, the
+    gate_merge_pr short-circuit, skill-start --pr mode (gh STUBBED), and the
+    post-merge-pr --pr metrics-only bump."""
+
+    # ---- spec 02: classifier --------------------------------------------
+
+    def test_classifier_table_ac4(self):
+        # (a) AC-4 — the exact five cases.
+        self.assertEqual(lib.classify_merge_pr_arg("--pr 87"), ("exempt-pr", "87"))
+        self.assertEqual(lib.classify_merge_pr_arg("#87"), ("exempt-pr", "87"))
+        self.assertEqual(
+            lib.classify_merge_pr_arg("https://github.com/acme/shop/pull/87"),
+            ("exempt-pr", "87"))
+        self.assertEqual(lib.classify_merge_pr_arg("87", ticket_resolves=False),
+                         ("exempt-pr", "87"))
+        self.assertEqual(lib.classify_merge_pr_arg("MAR-9", ticket_prefix="MAR"),
+                         ("ticket", None))
+
+    def test_classifier_bare_number_disambiguation_c3(self):
+        # (b) C-3 — bare integer prefers ticket when one resolves.
+        self.assertEqual(lib.classify_merge_pr_arg("87", ticket_resolves=True),
+                         ("ticket", None))
+        self.assertEqual(lib.classify_merge_pr_arg("87", ticket_resolves=False),
+                         ("exempt-pr", "87"))
+
+    def test_classifier_explicit_forms_always_exempt(self):
+        # explicit forms are exempt even when a ticket would resolve.
+        self.assertEqual(lib.classify_merge_pr_arg("--pr 87", ticket_resolves=True),
+                         ("exempt-pr", "87"))
+        self.assertEqual(lib.classify_merge_pr_arg("#87", ticket_resolves=True),
+                         ("exempt-pr", "87"))
+        self.assertEqual(
+            lib.classify_merge_pr_arg("https://github.com/acme/shop/pull/87",
+                                      ticket_resolves=True),
+            ("exempt-pr", "87"))
+
+    def test_classifier_ticket_id_default_prefix(self):
+        # a ticket-shaped token is ticket-backed even without an explicit prefix.
+        self.assertEqual(lib.classify_merge_pr_arg("SHOP-1"), ("ticket", None))
+
+    def test_classifier_empty_or_unrecognized_is_ticket(self):
+        self.assertEqual(lib.classify_merge_pr_arg(""), ("ticket", None))
+        self.assertEqual(lib.classify_merge_pr_arg("garbage text"), ("ticket", None))
+
+    def test_pr_labels_normalizes_dicts_and_strings(self):
+        # gh emits [{"name": ...}]; tolerate bare strings too.
+        self.assertEqual(
+            lib._pr_labels({"labels": [{"name": "acs-exempt"}, "ACS", {"x": 1}]}),
+            ["acs-exempt", "ACS"])
+        self.assertEqual(lib._pr_labels({}), [])
+
+    def test_merge_pr_arg_text_defaults_empty(self):
+        # no args/arguments/argument key -> empty string (the ticket gate then
+        # produces its own "could not resolve" error).
+        self.assertEqual(lib._merge_pr_arg_text({}), "")
+        self.assertEqual(lib._merge_pr_arg_text({"tool_input": {"other": 1}}), "")
+        self.assertEqual(lib._merge_pr_arg_text({"tool_input": {"arguments": "#9"}}), "#9")
+
+    # ---- spec 02: gate short-circuit ------------------------------------
+
+    def test_gate_exempt_pr_flag_passes_through(self):
+        # (c) AC-3 — --pr 87 allows where a ticket arg would block.
+        result = self.pre("merge-pr", "--pr 87")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_gate_exempt_hash_and_url_pass_through(self):
+        # (d) explicit #N and PR-URL forms always allowed.
+        self.assertEqual(self.pre("merge-pr", "#87").returncode, 0)
+        self.assertEqual(
+            self.pre("merge-pr", "https://github.com/acme/shop/pull/87").returncode, 0)
+
+    def test_gate_ticket_arg_still_blocks_unchanged(self):
+        # (e) AC-3/AC-8 regression — a ticket arg with no partition still blocks.
+        result = self.pre("merge-pr", "SHOP-1")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("SHOP-1", result.stderr)
+
+    # ---- spec 03: a fake gh on PATH (never the real GitHub) -------------
+
+    def _gh_env(self, gh_body):
+        """Return an env dict whose PATH carries a fake `gh` shim emitting gh_body.
+
+        gh_body is the shell after the shebang; for the `pr view` path it should
+        echo a JSON object and exit 0, or write to stderr and exit non-zero to
+        simulate an error. The shim dir is PREPENDED to a real PATH so `git` (used
+        by build_context) still resolves while our fake `gh` shadows any real one.
+        `gh_body is None` means: provide NO gh at all (simulate the binary being
+        absent) — PATH is set to the system dirs that hold git but not gh, so the
+        script hits FileNotFoundError."""
+        bindir = tempfile.mkdtemp(prefix="acs-fakebin-", dir=self.tmp)
+        # A minimal real PATH that has git (/usr/bin) + sh (/bin) but NOT gh
+        # (which lives in /opt/homebrew/bin or /usr/local/bin on dev machines).
+        base_path = "/usr/bin:/bin"
+        env = dict(os.environ)
+        if gh_body is None:
+            env["PATH"] = base_path
+            return env
+        gh = os.path.join(bindir, "gh")
+        with open(gh, "w") as fh:
+            fh.write("#!/bin/sh\n" + gh_body + "\n")
+        os.chmod(gh, 0o755)
+        env["PATH"] = bindir + os.pathsep + base_path
+        return env
+
+    def _pr_json(self, **over):
+        data = {"number": 87, "state": "OPEN", "headRefName": "chore/cleanup",
+                "baseRefName": "main", "labels": [{"name": "acs-exempt"}],
+                "isDraft": False, "url": "https://github.com/acme/shop/pull/87"}
+        data.update(over)
+        return json.dumps(data)
+
+    def _ws_untouched(self):
+        """No ticket dir, no sessions pointer, no lock, no index, no pipeline were
+        written by an exempt-pr --pr run."""
+        repo_root = lib.repo_dir(self.ws, "acme-shop")
+        self.assertFalse(os.path.isdir(lib.sessions_dir(self.ws, "acme-shop")))
+        if os.path.isdir(repo_root):
+            for name in os.listdir(repo_root):
+                # only metrics.json may appear (post-merge-pr --pr bumps it)
+                self.assertIn(name, {"metrics.json"}, name)
+
+    # ---- spec 03: post-merge-pr --pr metrics-only ----------------------
+
+    def test_post_merge_pr_flag_bumps_metrics_only(self):
+        # (a) AC-7 — prs.merged += 1, no ticket state/index/pipeline/archive.
+        out = self.run_script("post-merge-pr.py", "--pr", "87")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        payload = json.loads(out.stdout)
+        self.assertEqual(payload["mode"], "exempt-pr")
+        self.assertTrue(payload["pr_merged"])
+        with open(lib.metrics_path(self.ws, "acme-shop")) as fh:
+            metrics = json.load(fh)
+        self.assertEqual(metrics["prs"]["merged"], 1)
+        self.assertEqual(metrics["prs"].get("created", 0), 0)
+        self.assertEqual(metrics.get("totals", {}).get("runs", 0), 0)
+        # no ticket index entry was written
+        self.assertFalse(os.path.isfile(lib.index_path(self.ws, "acme-shop")))
+        self._ws_untouched()
+
+    def test_post_merge_pr_flag_increments_each_call(self):
+        self.run_script("post-merge-pr.py", "--pr", "87")
+        self.run_script("post-merge-pr.py", "--pr", "88")
+        with open(lib.metrics_path(self.ws, "acme-shop")) as fh:
+            self.assertEqual(json.load(fh)["prs"]["merged"], 2)
+
+    # ---- spec 03: skill-start --pr exempt-pr mode (gh STUBBED) ----------
+
+    def test_skill_start_pr_exempt_mode_prints_context(self):
+        # (b) AC-5 — OPEN exempt PR → mode exempt-pr JSON, no state written.
+        env = self._gh_env("echo '%s'" % self._pr_json())
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        ctx = json.loads(out.stdout)
+        self.assertEqual(ctx["mode"], "exempt-pr")
+        self.assertNotIn("ticket_id", ctx)
+        self.assertNotIn("partition", ctx)
+        self.assertNotIn("pipeline", ctx)
+        self.assertEqual(ctx["pr"]["number"], 87)
+        self.assertEqual(ctx["pr"]["url"], "https://github.com/acme/shop/pull/87")
+        self.assertEqual(ctx["pr"]["branch"], "chore/cleanup")
+        self.assertEqual(ctx["pr"]["base"], "main")
+        self.assertIn("acs-exempt", ctx["pr"]["labels"])
+        self._ws_untouched()
+
+    def test_skill_start_pr_accepts_exempt_branch_without_label(self):
+        # exempt by branch glob (release/*) even with no exempt label.
+        body = self._pr_json(headRefName="release/1.2", labels=[])
+        env = self._gh_env("echo '%s'" % body)
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)["mode"], "exempt-pr")
+
+    def test_skill_start_pr_rejected_for_non_merge_pr_skill(self):
+        # (c) --pr only valid with --skill merge-pr.
+        env = self._gh_env("echo '%s'" % self._pr_json())
+        out = self.run_script("skill-start.py", "--skill", "code",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertTrue(out.stderr.strip())
+        self.assertNotIn("Traceback", out.stderr)
+        self._ws_untouched()
+
+    def test_skill_start_pr_missing_gh_clean_exit(self):
+        # (d-i) gh absent → clean exit 2, no traceback.
+        env = self._gh_env(None)
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertIn("gh", out.stderr)
+        self._ws_untouched()
+
+    def test_skill_start_pr_non_open_rejected(self):
+        # (d-ii) non-OPEN PR → clean exit 2 naming the state.
+        env = self._gh_env("echo '%s'" % self._pr_json(state="MERGED"))
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertIn("MERGED", out.stderr)
+        self._ws_untouched()
+
+    def test_skill_start_pr_draft_rejected(self):
+        env = self._gh_env("echo '%s'" % self._pr_json(isDraft=True))
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+
+    def test_skill_start_pr_ticket_backed_label_redirects(self):
+        # (d-iii) PR carrying the require_label (ACS) → refuse + redirect.
+        body = self._pr_json(labels=[{"name": "ACS"}])
+        env = self._gh_env("echo '%s'" % body)
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertIn("/acs:merge-pr", out.stderr)
+        self._ws_untouched()
+
+    def test_skill_start_pr_ticket_backed_branch_redirects(self):
+        # (d-iii) PR whose branch embeds a ticket id → refuse + redirect with id.
+        body = self._pr_json(headRefName="story/SHOP-42-x", labels=[])
+        env = self._gh_env("echo '%s'" % body)
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertIn("SHOP-42", out.stderr)
+        self._ws_untouched()
+
+    def test_skill_start_pr_non_exempt_non_ticket_rejected(self):
+        # an OPEN PR that is neither exempt-labelled nor exempt-branch nor
+        # ticket-backed → refuse + redirect to the ticket path.
+        body = self._pr_json(headRefName="feature/whatever", labels=[])
+        env = self._gh_env("echo '%s'" % body)
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertIn("/acs:merge-pr", out.stderr)
+        self._ws_untouched()
+
+    def test_skill_start_pr_not_found_clean_exit(self):
+        # gh exits non-zero (PR not found / API error) → clean exit 2.
+        env = self._gh_env("echo 'no pull requests found' 1>&2; exit 1")
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "999", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+        self._ws_untouched()
+
+    def test_skill_start_pr_non_json_output_clean_exit(self):
+        # gh exits 0 but emits non-JSON → clean exit 2 (no traceback).
+        env = self._gh_env("echo 'not json at all'")
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "87", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+        self._ws_untouched()
+
+    def test_skill_start_pr_unparseable_ref_clean_exit(self):
+        # --pr with a value that is not a PR reference → clean exit 2; gh never run.
+        env = self._gh_env("echo '%s'" % self._pr_json())
+        out = self.run_script("skill-start.py", "--skill", "merge-pr",
+                              "--pr", "not-a-pr", env=env)
+        self.assertEqual(out.returncode, 2)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertIn("PR reference", out.stderr)
+        self._ws_untouched()
+
+    def test_post_merge_pr_flag_outside_acs_repo_clean_exit(self):
+        # build_context fails (no .acs settings) → clean exit 1, no traceback.
+        plain = os.path.join(self.tmp, "plain")
+        os.makedirs(plain)
+        subprocess.run(["git", "init", "-q", plain], check=True)
+        out = self.run_script("post-merge-pr.py", "--pr", "1", cwd=plain)
+        self.assertEqual(out.returncode, 1)
+        self.assertNotIn("Traceback", out.stderr)
 
 
 if __name__ == "__main__":

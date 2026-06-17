@@ -206,5 +206,47 @@ class TestCrossReferences(unittest.TestCase):
                 self.assertTrue(os.path.isfile(target), "%s -> %s-default" % (path, name))
 
 
+class TestExemptPrDocs(unittest.TestCase):
+    """MAR-9 (spec 04): the exempt --pr merge path and the /acs:init CLAUDE.md
+    managed block must stay surfaced in the merge-pr skill prose and the docs.
+    Additive existence/section assertions only — they pin the new prose so a
+    later edit that drops it fails CI. No existing assertion is modified."""
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def doc_path(self, *parts):
+        return os.path.join(PLUGIN, *parts)
+
+    def test_merge_pr_argument_hint_includes_pr_form(self):
+        fm, _ = frontmatter(read(self.skill_path("merge-pr")), "merge-pr")
+        self.assertRegex(
+            fm, r'(?m)^argument-hint: "\[ticket-id\] \| --pr PRNUMBER"$')
+
+    def test_merge_pr_has_exempt_mode_section(self):
+        body = read(self.skill_path("merge-pr"))
+        self.assertIn("Exempt non-ticket PR mode", body)
+
+    def test_init_documents_claude_md_managed_block(self):
+        body = read(self.skill_path("init"))
+        self.assertIn("CLAUDE.acs.md", body)
+        self.assertIn("upsert_managed_block", body)
+
+    def test_internals_mentions_exempt_pr_merge(self):
+        body = read(self.doc_path("docs", "INTERNALS.md"))
+        self.assertIn("--pr", body)
+        self.assertIn("CLAUDE.acs.md", body)
+
+    def test_readme_mentions_exempt_pr_merge(self):
+        body = read(self.doc_path("README.md"))
+        self.assertIn("--pr", body)
+        self.assertIn("CLAUDE.md", body)
+
+    def test_changelog_mentions_exempt_pr_merge(self):
+        body = read(self.doc_path("CHANGELOG.md"))
+        self.assertIn("(MAR-9)", body)
+        self.assertIn("--pr", body)
+
+
 if __name__ == "__main__":
     unittest.main()

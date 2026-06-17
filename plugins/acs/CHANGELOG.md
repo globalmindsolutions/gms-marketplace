@@ -17,6 +17,21 @@ the notes.
 
 ### Added
 
+- **Pipeline-default `CLAUDE.md` guidance + exempt non-ticket merge path (MAR-9).**
+  Two changes that make the acs pipeline the *automatic* path in an installed
+  repo and close the non-ticket dead end. (1) `/acs:init` gains an opt-in
+  (default-on) step that writes an idempotent, marker-delimited **acs-managed
+  block** into the repo's `CLAUDE.md` (from the new `templates/CLAUDE.acs.md`),
+  steering every Claude session to ship via `/acs:ship` instead of a raw
+  `gh pr create` — re-runs replace only the block, never the surrounding
+  content. (2) `/acs:merge-pr --pr <n>` (also `#n` or a PR URL) lands a
+  legitimate one-off **exempt** PR: it runs the same four readiness checks and
+  branch/worktree cleanup as the ticket path but resolves no ticket, writes no
+  partition/state, and skips tracker sync and archiving (bumping only the repo
+  `pr_merged` metric). `skill-start.py --pr` validates the PR carries the
+  configured `exempt_label` (or an `exempt_branches` head) and refuses +
+  redirects to `/acs:merge-pr <ticket-id>` when the PR looks ticket-backed. The
+  existing ticket-backed merge flow and every other gate are unchanged.
 - **`/acs:metrics` — read-only delivery dashboard (MAR-5).** A new
   model-invocable utility skill that renders six panels for the current repo —
   throughput by status/type, pipeline funnel, cost and time per ticket by step,

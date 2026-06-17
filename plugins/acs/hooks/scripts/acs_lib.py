@@ -22,6 +22,7 @@ Hook event binding (resolves the open question in docs/requirements/hooks.md):
     `interrupted` and releases its lock, so abnormal endings still write state.
 """
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -84,6 +85,21 @@ DEFAULT_SETTINGS = {
         },
     },
 }
+
+# Enforcement defaults — mirror schemas/settings.schema.json + the consumer-side
+# templates/ci/check-conventions.py, used only when a key is absent from settings
+# so /acs:merge-pr --pr behaves predictably on a repo with no enforcement block.
+ENFORCEMENT_DEFAULTS = {
+    "exempt_branches": ["release/*", "dependabot/*", "renovate/*"],
+    "exempt_label": "acs-exempt",
+    "require_label": "ACS",
+}
+
+
+def enforcement_value(settings, key):
+    """Resolve enforcement.<key> from settings, defaulting per ENFORCEMENT_DEFAULTS."""
+    return ((settings or {}).get("enforcement") or {}).get(key, ENFORCEMENT_DEFAULTS[key])
+
 
 TICKET_ID_RE = re.compile(r"\b([A-Z][A-Z0-9]*-\d+)\b")
 
@@ -455,6 +471,163 @@ def ticket_id_from_text(text, prefix=None):
         return None
     match = TICKET_ID_RE.search(text)
     return match.group(1) if match else None
+
+
+# ---------------------------------------------------------------------------
+# CLAUDE.md managed-block helpers (written/refreshed by /acs:init). Pure string
+# functions so the splice and the placeholder substitution are unit-testable.
+# The markers MUST match templates/CLAUDE.acs.md exactly.
+# ---------------------------------------------------------------------------
+
+ACS_BLOCK_BEGIN = "<!-- BEGIN acs-managed (do not edit inside this block) -->"
+ACS_BLOCK_END = "<!-- END acs-managed -->"
+
+
+def render_managed_block(template_text, ticket_prefix, exempt_label):
+    """Substitute the {ticket_prefix} and {exempt_label} placeholders in the
+    CLAUDE.acs.md template text. Pure str.replace so a literal '{' elsewhere in
+    the template is never treated as a format field."""
+    return (template_text
+            .replace("{ticket_prefix}", ticket_prefix or "")
+            .replace("{exempt_label}", exempt_label or ""))
+
+
+def upsert_managed_block(existing_text, block_body):
+    """Return existing_text with the acs-managed block inserted or replaced.
+
+    The block is ACS_BLOCK_BEGIN + newline + block_body + newline + ACS_BLOCK_END.
+    When both markers are already present (in order), replace ONLY the inclusive
+    BEGIN..END span, preserving everything before and after byte for byte. When
+    absent, append the block to the end separated by exactly one blank line; an
+    empty existing_text yields just the block. Idempotent: a second call with the
+    same block_body yields output byte-identical to the first."""
+    block = "%s\n%s\n%s" % (ACS_BLOCK_BEGIN, block_body, ACS_BLOCK_END)
+    begin = existing_text.find(ACS_BLOCK_BEGIN)
+    end = existing_text.find(ACS_BLOCK_END)
+    if begin != -1 and end != -1 and end > begin:
+        before = existing_text[:begin]
+        after = existing_text[end + len(ACS_BLOCK_END):]
+        return before + block + after
+    if not existing_text:
+        return block
+    # Append, separated from preceding content by exactly one blank line.
+    return existing_text.rstrip("\n") + "\n\n" + block
+
+
+# ---------------------------------------------------------------------------
+# Exempt non-ticket /acs:merge-pr argument classifier (MAR-9, clarification C-3).
+# Pure: given the raw arg string it decides ticket-backed vs exempt-pr and parses
+# the PR ref for the exempt case. The caller supplies ticket_resolves (whether a
+# pointer/branch already yields a ticket) to disambiguate a bare integer.
+# ---------------------------------------------------------------------------
+
+_PR_URL_RE = re.compile(r"/pull/(\d+)\b")
+_PR_FLAG_RE = re.compile(r"--pr[=\s]+(\d+)\b")
+_PR_HASH_RE = re.compile(r"#(\d+)\b")
+_BARE_INT_RE = re.compile(r"^\s*(\d+)\s*$")
+
+
+def classify_merge_pr_arg(args_text, ticket_prefix=None, ticket_resolves=False):
+    """Classify a /acs:merge-pr argument string.
+
+    Returns (kind, pr_ref):
+      ("exempt-pr", "<n>") for the non-ticket merge forms — an explicit
+        --pr <n> flag, a #<n> token, a PR URL (.../pull/<n>), or a bare integer
+        that is NOT a ticket id AND no ticket already resolves from pointer/branch.
+      ("ticket", None) for a ticket-id-shaped token (the ticket gate always wins),
+        a bare integer when a ticket resolves (prefer ticket when ambiguous), and
+        any empty/unrecognized input (let the existing ticket gate produce its
+        existing error). Per clarification C-3."""
+    text = args_text or ""
+    # A ticket-id-shaped token always wins — preserves AC-8.
+    if ticket_id_from_text(text, ticket_prefix):
+        return ("ticket", None)
+    # Explicit forms are ALWAYS exempt (C-3), regardless of ticket_resolves.
+    m = _PR_FLAG_RE.search(text)
+    if m:
+        return ("exempt-pr", m.group(1))
+    m = _PR_URL_RE.search(text)
+    if m:
+        return ("exempt-pr", m.group(1))
+    m = _PR_HASH_RE.search(text)
+    if m:
+        return ("exempt-pr", m.group(1))
+    # A bare integer is exempt only when no ticket resolves (C-3: prefer ticket).
+    m = _BARE_INT_RE.match(text)
+    if m and not ticket_resolves:
+        return ("exempt-pr", m.group(1))
+    return ("ticket", None)
+
+
+def _pr_labels(pr):
+    """gh pr view --json labels yields [{"name": ...}, ...]; normalize to names."""
+    out = []
+    for label in pr.get("labels") or []:
+        if isinstance(label, dict) and label.get("name"):
+            out.append(label["name"])
+        elif isinstance(label, str):
+            out.append(label)
+    return out
+
+
+def validate_exempt_pr(pr, settings):
+    """Validate a PR (the parsed `gh pr view` JSON object) for the exempt-pr merge
+    path. Returns (ok, message): ok True means the PR is a sanctioned exempt PR;
+    ok False means refuse, and `message` is the user-facing reason (already
+    carrying the /acs:merge-pr <ticket> redirect when the PR looks ticket-backed).
+    Mirrors templates/ci/check-conventions.py is_exempt (label first, then branch
+    glob) and the C-3 ticket-backed refusal."""
+    branch = pr.get("headRefName") or ""
+    labels = _pr_labels(pr)
+    exempt_label = enforcement_value(settings, "exempt_label")
+    require_label = enforcement_value(settings, "require_label")
+    exempt_branches = enforcement_value(settings, "exempt_branches") or []
+    prefix = (settings or {}).get("ticket_prefix")
+
+    # OPEN + not draft.
+    state = (pr.get("state") or "").upper()
+    if state != "OPEN":
+        return (False, "PR #%s is %s, not OPEN — only an open PR can be merged."
+                % (pr.get("number"), state or "in an unknown state"))
+    if pr.get("isDraft"):
+        return (False, "PR #%s is a draft — mark it ready for review before merging."
+                % pr.get("number"))
+
+    # Ticket-backed → refuse + redirect (C-3). Checked before the exempt grant so
+    # a PR that is BOTH ticket-labelled and exempt-labelled still routes to the
+    # ticket path.
+    embedded = ticket_id_from_text(branch, prefix)
+    if require_label in labels or embedded:
+        target = embedded or "<TICKET-ID>"
+        return (False,
+                "PR #%s looks ticket-backed (%s) — merge it through the ticket "
+                "path: /acs:merge-pr %s, not the exempt --pr path."
+                % (pr.get("number"),
+                   "carries the '%s' label" % require_label if require_label in labels
+                   else "branch '%s' embeds %s" % (branch, embedded),
+                   target))
+
+    # Exempt grant: label first, then branch glob.
+    if exempt_label and exempt_label in labels:
+        return (True, "label '%s' present" % exempt_label)
+    for pattern in exempt_branches:
+        if branch and fnmatch.fnmatch(branch, pattern):
+            return (True, "branch matches exempt pattern '%s'" % pattern)
+
+    return (False,
+            "PR #%s is not a sanctioned exempt PR — label it '%s' (or use an "
+            "exempt branch) for the --pr path, or merge it through a ticket: "
+            "/acs:merge-pr <TICKET-ID>." % (pr.get("number"), exempt_label))
+
+
+def run_post_exempt_pr(cwd):
+    """Metrics-only post-hook for /acs:merge-pr --pr: bump the repo pr_merged
+    metric via the existing update_metrics pr_merged path and touch nothing else —
+    no ticket state, index write, pipeline, archive, lock, or pointer. Returns the
+    confirmation dict; raises GateError if the context cannot be built."""
+    ctx = build_context(cwd)
+    update_metrics(ctx["workspace"], ctx["repo_id"], pr_merged=True)
+    return {"ok": True, "mode": "exempt-pr", "pr_merged": True}
 
 
 def resolve_ticket_id(cwd, settings, workspace, repo_id, explicit=None, args_text=None):
@@ -974,7 +1147,29 @@ def gate_create_pr(ctx, payload):
     return ticket_id
 
 
+def _merge_pr_arg_text(payload):
+    """Raw arg string the same way _resolve_ticket_for_gate reads it."""
+    tool_input = payload.get("tool_input") or {}
+    for key in ("args", "arguments", "argument"):
+        if isinstance(tool_input.get(key), str):
+            return tool_input[key]
+    return ""
+
+
 def gate_merge_pr(ctx, payload):
+    # MAR-9 (C-3): the exempt non-ticket PR forms (--pr N / #N / PR URL / a bare
+    # integer that is not a ticket id and no ticket resolves) short-circuit to
+    # pass-through BEFORE the ticket gate runs. Every other input falls through to
+    # the existing ticket gate verbatim (AC-8). The pre-hook dispatcher treats a
+    # plain return (no GateError) as "allow", so returning None here = allow.
+    args_text = _merge_pr_arg_text(payload)
+    _resolved, _src = resolve_ticket_id(ctx["cwd"], ctx["settings"], ctx["workspace"],
+                                        ctx["repo_id"], args_text=args_text)
+    ticket_resolves = _src in ("pointer", "branch")
+    kind, _pr_ref = classify_merge_pr_arg(
+        args_text, ctx["settings"].get("ticket_prefix"), ticket_resolves=ticket_resolves)
+    if kind == "exempt-pr":
+        return None
     ticket_id, tdir, _ticket = _resolve_ticket_for_gate(ctx, payload, "merge-pr")
     pipeline = load_pipeline(tdir, ticket_id)
     candidates = ["create-pr"] + PRODUCT_SKILLS if pipeline.get("flow") != "product" else PRODUCT_SKILLS + ["create-pr"]

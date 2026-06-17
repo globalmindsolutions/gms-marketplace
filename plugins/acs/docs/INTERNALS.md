@@ -185,6 +185,11 @@ The next skill reads these — keep the names exact:
 On failure, keep whatever is true (e.g. `/code` coverage hard-fail records
 `verifier_passed: false`, achieved coverage, and the reason in `stop_reason`).
 
+The exempt non-ticket merge path (`/acs:merge-pr --pr <n>`) has **no** result
+document and writes **none** of the merge-pr ticket states above — there is no
+partition. It bumps only the repo-level `pr_merged` metric via
+`post-merge-pr.py --pr <n>` and touches no ticket index, pipeline, or archive.
+
 ## XML messaging
 
 All coordinator <-> subagent communication uses the three message shapes in
@@ -398,6 +403,16 @@ sanctioned way to keep children shippable when a slice alone would break.
   The CI check is necessary-but-not-sufficient (workspace proof lives off-repo),
   so the real gate is a required status check on a protected default branch;
   `exempt_branches`/`exempt_label` are the escape hatch for non-ticket PRs.
+  The sanctioned way to LAND such a PR is `/acs:merge-pr --pr <n>` (also `#n` or
+  a PR URL): a non-ticket mode that runs the same four readiness dimensions and
+  branch/worktree cleanup as the ticket path but resolves no ticket, writes no
+  partition/state, and skips tracker sync and archiving — `skill-start.py --pr`
+  validates the PR carries the `exempt_label` (or an `exempt_branches` head) and
+  refuses + redirects to `/acs:merge-pr <ticket-id>` when the PR looks
+  ticket-backed. `/acs:init` Step 7e renders the `templates/CLAUDE.acs.md`
+  managed block into the repo's `CLAUDE.md` (idempotent, marker-delimited) to
+  steer everyday changes onto `/acs:ship` so the pipeline is the default, not
+  just the available, path.
   The same checker runs three modes off one config: `--mode pr` (CI: branch,
   commit, pr_title, acs_label, pr_description), `--mode pre-push` (local hook:
   branch + commit subjects of the push range), `--mode commit-msg` (local hook:
