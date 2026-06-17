@@ -17,7 +17,7 @@ the notes.
 
 ### Added
 
-- **Distinct-PR counting via  + idempotent backfill (MAR-13 spec 01).**
+- **Distinct-PR counting via `created_pr_numbers` + idempotent backfill (MAR-13 spec 01).**
   `prs.created` in `metrics.json` now counts **distinct PRs** rather than completed
   `create-pr` run invocations — a single PR re-triggered multiple times no longer
   inflates the metric.  `update_metrics` gains an optional `pr_number` parameter;
