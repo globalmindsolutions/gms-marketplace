@@ -746,3 +746,821 @@ class DocsPresence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ===========================================================================
+# MAR-14 spec 02 tests — renderer two-view entrypoints (TDD-first)
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Fixture builders for the new panels
+# ---------------------------------------------------------------------------
+
+def _full_workspace_data_with_new_panels():
+    """Aggregate with all new panels populated (uses a workspace that exercises spec-01 code)."""
+    with TemporaryDirectory() as ws:
+        fx.write_index(ws, {
+            "MAR-1": {"status": "done", "type": "epic", "title": "Epic One",
+                      "children": ["MAR-2", "MAR-3"]},
+            "MAR-2": {"status": "done", "type": "story", "title": "Story Alpha",
+                      "parent": "MAR-1"},
+            "MAR-3": {"status": "in_progress", "type": "task", "title": "Task Beta",
+                      "parent": "MAR-1"},
+        })
+        fx.write_metrics(ws, {
+            "tickets": {"by_status": {"done": 2, "in_progress": 1},
+                        "by_type": {"epic": 1, "story": 1, "task": 1}},
+            "prs": {"created": 3, "merged": 2},
+            "totals": {"runs": 10, "working_seconds": 7200,
+                       "tokens": {"input": 500000, "output": 100000}, "cost_usd": 5.0},
+        })
+        # MAR-2 fully merged (gives us burn_up data + lead/cycle)
+        fx.write_ticket_json(ws, "MAR-2", "2026-06-15T10:00:00Z", archived=True)
+        fx.write_pipeline(ws, "MAR-2",
+                          steps=fx._lead_cycle_steps("2026-06-15T10:30:00Z",
+                                                     "2026-06-15T13:00:00Z"),
+                          totals={"runs": 5, "working_seconds": 3600,
+                                  "tokens": {"input": 300000, "output": 60000},
+                                  "cost_usd": 3.0}, archived=True)
+        fx.write_code_state(ws, "MAR-2",
+                            {"tests": {"coverage_percent": 95.0, "coverage_target": 90},
+                             "verifier_passed": True, "review": {"iterations": 1}},
+                            archived=True)
+        fx.write_result_xml(ws, "MAR-2", "code", "plan", 1, ti=50000, to=10000, cost=0.5, archived=True)
+        fx.write_result_xml(ws, "MAR-2", "code", "execute", 1, ti=200000, to=40000, cost=2.0, archived=True)
+        fx.write_result_xml(ws, "MAR-2", "code", "verify", 1, ti=50000, to=10000, cost=0.5,
+                            reorder=True, archived=True)
+        return metrics_aggregate.aggregate(ws, REPO_ID)
+
+
+def _pm_sentinel_data():
+    """Aggregate where PM-only panels have sentinel strings in their data."""
+    with TemporaryDirectory() as ws:
+        fx.write_index(ws, {"MAR-SENTINEL": {"status": "done", "type": "task",
+                                              "title": "PMSENTINEL_TITLE"}})
+        fx.write_metrics(ws, {
+            "tickets": {"by_status": {"done": 1}, "by_type": {"task": 1}},
+            "prs": {"created": 1, "merged": 1},
+            "totals": {"runs": 1, "working_seconds": 100,
+                       "tokens": {"input": 1000, "output": 200}, "cost_usd": 0.1},
+        })
+        return metrics_aggregate.aggregate(ws, REPO_ID)
+
+
+# ---------------------------------------------------------------------------
+# AC-5 partition test
+# ---------------------------------------------------------------------------
+
+class TestViewPartition(unittest.TestCase):
+    """AC-5: PM ∪ usage = full panel set; PM ∩ usage = ∅."""
+
+    def test_pm_and_usage_disjoint(self):
+        """PM ∩ usage is empty — no panel appears in both allowlists."""
+        self.assertEqual(set(metrics_render._PM_PANELS) & set(metrics_render._USAGE_PANELS),
+                         set())
+
+    def test_pm_union_usage_equals_full_set(self):
+        """PM ∪ usage covers the full rendered panel set (AC-5)."""
+        expected = frozenset({
+            "delivery_summary", "1", "2", "issues", "progress",
+            "deadline", "4", "5", "7", "usage_summary", "3", "6"
+        })
+        self.assertEqual(
+            set(metrics_render._PM_PANELS) | set(metrics_render._USAGE_PANELS),
+            expected
+        )
+
+    def test_no_panel_appears_in_both(self):
+        """Explicit duplicate check across the concatenated list."""
+        combined = list(metrics_render._PM_PANELS) + list(metrics_render._USAGE_PANELS)
+        self.assertEqual(len(combined), len(set(combined)),
+                         "A panel key appears in both _PM_PANELS and _USAGE_PANELS")
+
+
+# ---------------------------------------------------------------------------
+# AC-4 entrypoint signature tests
+# ---------------------------------------------------------------------------
+
+class TestViewEntrypointSignatures(unittest.TestCase):
+    """AC-4: four new entrypoints exist, are callable, return str."""
+
+    def test_all_four_entrypoints_callable(self):
+        self.assertTrue(callable(metrics_render.render_pm_terminal))
+        self.assertTrue(callable(metrics_render.render_pm_html))
+        self.assertTrue(callable(metrics_render.render_usage_terminal))
+        self.assertTrue(callable(metrics_render.render_usage_html))
+
+    def test_all_four_return_str(self):
+        data = _full_workspace_data_with_new_panels()
+        self.assertIsInstance(metrics_render.render_pm_terminal(data), str)
+        self.assertIsInstance(metrics_render.render_pm_html(data), str)
+        self.assertIsInstance(metrics_render.render_usage_terminal(data), str)
+        self.assertIsInstance(metrics_render.render_usage_html(data), str)
+
+    def test_existing_entrypoints_still_callable(self):
+        """Back-compat guard: render_terminal and render_html still exist."""
+        self.assertTrue(callable(metrics_render.render_terminal))
+        self.assertTrue(callable(metrics_render.render_html))
+
+
+# ---------------------------------------------------------------------------
+# AC-2 / AC-3 panel isolation tests
+# ---------------------------------------------------------------------------
+
+class TestPMViewPanelIsolation(unittest.TestCase):
+    """PM view must not render usage-only panels; usage view must not render PM-only panels."""
+
+    def test_pm_terminal_excludes_usage_panels(self):
+        """PM terminal does NOT include usage-only panel content (sentinels for panels 3, 6, usage_summary)."""
+        data = _full_workspace_data_with_new_panels()
+        # Inject distinct sentinels into usage-only panels
+        data["panels"]["3"] = {"USAGE_SENTINEL_3": True, "tickets": []}
+        data["panels"]["6"] = {"USAGE_SENTINEL_6": True, "planner": {}, "executor": {}, "verifier": {}}
+        data["panels"]["usage_summary"] = {"USAGE_SENTINEL_US": True}
+        out = metrics_render.render_pm_terminal(data)
+        self.assertNotIn("USAGE_SENTINEL_3", out)
+        self.assertNotIn("USAGE_SENTINEL_6", out)
+        self.assertNotIn("USAGE_SENTINEL_US", out)
+
+    def test_pm_html_excludes_usage_panels(self):
+        """PM HTML does NOT include usage-only panel content."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["3"] = {"USAGE_SENTINEL_3": True, "tickets": []}
+        data["panels"]["6"] = {"USAGE_SENTINEL_6": True, "planner": {}, "executor": {}, "verifier": {}}
+        data["panels"]["usage_summary"] = {"USAGE_SENTINEL_US": True}
+        out = metrics_render.render_pm_html(data)
+        self.assertNotIn("USAGE_SENTINEL_3", out)
+        self.assertNotIn("USAGE_SENTINEL_6", out)
+        self.assertNotIn("USAGE_SENTINEL_US", out)
+
+    def test_usage_terminal_excludes_pm_only_panels(self):
+        """Usage terminal does NOT include PM-only panel content."""
+        data = _full_workspace_data_with_new_panels()
+        # Inject sentinels into PM-only panels
+        data["panels"]["delivery_summary"] = {"PM_SENTINEL_DS": True}
+        data["panels"]["issues"] = [{"id": "PM_SENTINEL_ISSUE", "title": "", "status": "",
+                                      "type": "", "external_key": None}]
+        data["panels"]["progress"] = {"PM_SENTINEL_PROG": True,
+                                       "overall": {"done": 0, "total": 0},
+                                       "per_epic": [], "burn_up": []}
+        data["panels"]["deadline"] = {"PM_SENTINEL_DL": True, "status": "not set",
+                                       "due_date": None, "message": ""}
+        out = metrics_render.render_usage_terminal(data)
+        self.assertNotIn("PM_SENTINEL_DS", out)
+        self.assertNotIn("PM_SENTINEL_ISSUE", out)
+        self.assertNotIn("PM_SENTINEL_PROG", out)
+        self.assertNotIn("PM_SENTINEL_DL", out)
+
+    def test_usage_html_excludes_pm_only_panels(self):
+        """Usage HTML does NOT include PM-only panel content."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["delivery_summary"] = {"PM_SENTINEL_DS": True}
+        data["panels"]["issues"] = [{"id": "PM_SENTINEL_ISSUE", "title": "", "status": "",
+                                      "type": "", "external_key": None}]
+        data["panels"]["progress"] = {"PM_SENTINEL_PROG": True,
+                                       "overall": {"done": 0, "total": 0},
+                                       "per_epic": [], "burn_up": []}
+        data["panels"]["deadline"] = {"PM_SENTINEL_DL": True, "status": "not set",
+                                       "due_date": None, "message": ""}
+        out = metrics_render.render_usage_html(data)
+        self.assertNotIn("PM_SENTINEL_DS", out)
+        self.assertNotIn("PM_SENTINEL_ISSUE", out)
+        self.assertNotIn("PM_SENTINEL_PROG", out)
+        self.assertNotIn("PM_SENTINEL_DL", out)
+
+
+# ---------------------------------------------------------------------------
+# AC-7 / B1 per-view tests
+# ---------------------------------------------------------------------------
+
+# Panel headings we expect in each view
+_PM_PANEL_HEADINGS = (
+    "delivery_summary",  # or "Delivery Summary"
+    "Panel 1",
+    "Panel 2",
+    "Issues",
+    "Progress",
+    "Deadline",
+    "Panel 4",
+    "Panel 5",
+    "Panel 7",
+)
+
+_USAGE_PANEL_HEADINGS = (
+    "Usage Summary",
+    "Panel 3",
+    "Panel 6",
+)
+
+
+class TestPMViewB1(unittest.TestCase):
+    """B1: every PM panel frame is always present; missing input -> 'no data', never omitted."""
+
+    def test_pm_terminal_happy_path_all_panels_present(self):
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_pm_terminal(data)
+        self.assertIsInstance(out, str)
+        self.assertTrue(len(out) > 0)
+        # Core panel markers that must appear
+        self.assertIn("Panel 1", out)
+        self.assertIn("Panel 2", out)
+        self.assertIn("Panel 4", out)
+        self.assertIn("Panel 5", out)
+        self.assertIn("Panel 7", out)
+
+    def test_pm_html_happy_path_all_panels_present(self):
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_pm_html(data)
+        self.assertIsInstance(out, str)
+        self.assertIn("Panel 1", out)
+        self.assertIn("Panel 2", out)
+        self.assertIn("Panel 4", out)
+        self.assertIn("Panel 5", out)
+        self.assertIn("Panel 7", out)
+
+    def test_pm_terminal_no_data_delivery_summary_frame_present(self):
+        """B1: delivery_summary = 'no data' — frame still present."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["delivery_summary"] = "no data"
+        out = metrics_render.render_pm_terminal(data)
+        self.assertIn("no data", out)
+        # Other PM panels still present
+        self.assertIn("Panel 1", out)
+
+    def test_pm_html_no_data_delivery_summary_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["delivery_summary"] = "no data"
+        out = metrics_render.render_pm_html(data)
+        self.assertIn("no data", out)
+        self.assertIn("Panel 1", out)
+
+    def test_pm_terminal_no_data_issues_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["issues"] = "no data"
+        out = metrics_render.render_pm_terminal(data)
+        self.assertIn("no data", out)
+
+    def test_pm_terminal_no_data_progress_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["progress"] = "no data"
+        out = metrics_render.render_pm_terminal(data)
+        self.assertIn("no data", out)
+
+    def test_pm_terminal_no_data_deadline_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = "no data"
+        out = metrics_render.render_pm_terminal(data)
+        self.assertIn("no data", out)
+
+    def test_pm_html_no_data_issues_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["issues"] = "no data"
+        out = metrics_render.render_pm_html(data)
+        self.assertIn("no data", out)
+
+    def test_pm_html_no_data_progress_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["progress"] = "no data"
+        out = metrics_render.render_pm_html(data)
+        self.assertIn("no data", out)
+
+    def test_pm_html_no_data_deadline_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = "no data"
+        out = metrics_render.render_pm_html(data)
+        self.assertIn("no data", out)
+
+
+class TestUsageViewB1(unittest.TestCase):
+    """B1: every usage panel frame always present; missing input -> 'no data', never omitted."""
+
+    def test_usage_terminal_happy_path_all_panels_present(self):
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_usage_terminal(data)
+        self.assertIsInstance(out, str)
+        self.assertTrue(len(out) > 0)
+        self.assertIn("Panel 3", out)
+        self.assertIn("Panel 6", out)
+
+    def test_usage_html_happy_path_all_panels_present(self):
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_usage_html(data)
+        self.assertIsInstance(out, str)
+        self.assertIn("Panel 3", out)
+        self.assertIn("Panel 6", out)
+
+    def test_usage_terminal_no_data_usage_summary_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["usage_summary"] = "no data"
+        out = metrics_render.render_usage_terminal(data)
+        self.assertIn("no data", out)
+        self.assertIn("Panel 3", out)
+
+    def test_usage_html_no_data_usage_summary_frame_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["usage_summary"] = "no data"
+        out = metrics_render.render_usage_html(data)
+        self.assertIn("no data", out)
+        self.assertIn("Panel 3", out)
+
+
+# ---------------------------------------------------------------------------
+# AC-7 / Determinism tests
+# ---------------------------------------------------------------------------
+
+class TestViewDeterminism(unittest.TestCase):
+    """Byte-identical output on two calls with the same input."""
+
+    def test_pm_terminal_byte_identical(self):
+        data = _full_workspace_data_with_new_panels()
+        self.assertEqual(metrics_render.render_pm_terminal(data),
+                         metrics_render.render_pm_terminal(data))
+
+    def test_pm_html_byte_identical(self):
+        data = _full_workspace_data_with_new_panels()
+        self.assertEqual(metrics_render.render_pm_html(data),
+                         metrics_render.render_pm_html(data))
+
+    def test_usage_terminal_byte_identical(self):
+        data = _full_workspace_data_with_new_panels()
+        self.assertEqual(metrics_render.render_usage_terminal(data),
+                         metrics_render.render_usage_terminal(data))
+
+    def test_usage_html_byte_identical(self):
+        data = _full_workspace_data_with_new_panels()
+        self.assertEqual(metrics_render.render_usage_html(data),
+                         metrics_render.render_usage_html(data))
+
+    def test_determinism_across_new_panel_orderings(self):
+        """Fixed input order for issues and per_epic yields identical output (no hash randomization)."""
+        data = _full_workspace_data_with_new_panels()
+        out1 = metrics_render.render_pm_terminal(data)
+        out2 = metrics_render.render_pm_terminal(data)
+        self.assertEqual(out1, out2)
+
+
+# ---------------------------------------------------------------------------
+# AC-7 / Humanization + money tests
+# ---------------------------------------------------------------------------
+
+class TestViewHumanizationAndMoney(unittest.TestCase):
+    """delivery_summary and usage_summary humanized values."""
+
+    def _make_data_with_delivery(self, avg_lead=3723.0, avg_cycle=3600.0):
+        data = _full_workspace_data_with_new_panels()
+        if isinstance(data["panels"].get("delivery_summary"), dict):
+            data["panels"]["delivery_summary"]["avg_lead_seconds"] = avg_lead
+            data["panels"]["delivery_summary"]["avg_cycle_seconds"] = avg_cycle
+        else:
+            data["panels"]["delivery_summary"] = {
+                "tickets_done_over_total": "1/1",
+                "prs_merged": 1,
+                "avg_lead_seconds": avg_lead,
+                "avg_cycle_seconds": avg_cycle,
+                "coverage_pass_rate": "1/1",
+            }
+        return data
+
+    def _make_data_with_usage(self, **kwargs):
+        data = _full_workspace_data_with_new_panels()
+        us = {
+            "total_cost_usd": kwargs.get("total_cost_usd", 1.5),
+            "total_tokens_input": kwargs.get("total_tokens_input", 1000),
+            "total_tokens_output": kwargs.get("total_tokens_output", 200),
+            "total_runs": kwargs.get("total_runs", 5),
+            "total_working_seconds": kwargs.get("total_working_seconds", 7200),
+            "prs_merged": kwargs.get("prs_merged", 2),
+            "avg_working_seconds_per_ticket": kwargs.get("avg_working_seconds_per_ticket", 3600.0),
+            "avg_working_seconds_per_pr": kwargs.get("avg_working_seconds_per_pr", 3600.0),
+            "avg_cost_per_ticket": kwargs.get("avg_cost_per_ticket", 0.75),
+            "avg_cost_per_pr": kwargs.get("avg_cost_per_pr", 0.75),
+        }
+        data["panels"]["usage_summary"] = us
+        return data
+
+    def test_avg_lead_humanized_pm_terminal(self):
+        data = self._make_data_with_delivery(avg_lead=3723.0)
+        out = metrics_render.render_pm_terminal(data)
+        # 3723 = 1h 2m 3s -> "1h 2m"
+        self.assertTrue("1h" in out, "Expected humanized lead time in pm terminal: %s" % out[:500])
+
+    def test_avg_cycle_humanized_pm_html(self):
+        data = self._make_data_with_delivery(avg_cycle=3600.0)
+        out = metrics_render.render_pm_html(data)
+        # 3600 = 1h -> "1h"
+        self.assertIn("1h", out)
+
+    def test_avg_lead_no_data_renders_no_data(self):
+        data = self._make_data_with_delivery(avg_lead="no data", avg_cycle="no data")
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("no data", term)
+        self.assertIn("no data", html)
+
+    def test_total_cost_usd_two_decimal_usage_terminal(self):
+        data = self._make_data_with_usage(total_cost_usd=1.5)
+        out = metrics_render.render_usage_terminal(data)
+        self.assertIn("1.50", out)
+
+    def test_avg_cost_per_ticket_two_decimal_usage_html(self):
+        data = self._make_data_with_usage(avg_cost_per_ticket=0.123)
+        out = metrics_render.render_usage_html(data)
+        # _fmt_money(0.123) = "0.12"
+        self.assertIn("0.12", out)
+
+    def test_total_working_seconds_humanized_both_surfaces(self):
+        data = self._make_data_with_usage(total_working_seconds=7200)
+        term = metrics_render.render_usage_terminal(data)
+        html = metrics_render.render_usage_html(data)
+        # 7200 = 2h
+        self.assertIn("2h", term)
+        self.assertIn("2h", html)
+
+    def test_averages_no_data_render_as_no_data(self):
+        data = self._make_data_with_usage(
+            avg_working_seconds_per_ticket="no data",
+            avg_working_seconds_per_pr="no data",
+            avg_cost_per_ticket="no data",
+            avg_cost_per_pr="no data",
+        )
+        term = metrics_render.render_usage_terminal(data)
+        html = metrics_render.render_usage_html(data)
+        self.assertIn("no data", term)
+        self.assertIn("no data", html)
+
+
+# ---------------------------------------------------------------------------
+# --view CLI flag tests
+# ---------------------------------------------------------------------------
+
+class TestViewCLIFlag(unittest.TestCase):
+    """--view {pm,usage,all} dispatch; default is pm (C-2 deviation)."""
+
+    def _run_main(self, argv, stdin_text):
+        orig_argv, orig_stdin, orig_stdout = sys.argv, sys.stdin, sys.stdout
+        sys.argv = argv
+        sys.stdin = io.StringIO(stdin_text)
+        sys.stdout = io.StringIO()
+        try:
+            rc = metrics_render.main()
+            return rc, sys.stdout.getvalue()
+        finally:
+            sys.argv, sys.stdin, sys.stdout = orig_argv, orig_stdin, orig_stdout
+
+    def _data_json(self):
+        return json.dumps(_full_workspace_data_with_new_panels())
+
+    def test_view_pm_selects_pm_terminal(self):
+        """--view pm selects PM view (not full-panel)."""
+        data = _full_workspace_data_with_new_panels()
+        djson = json.dumps(data)
+        rc, out = self._run_main(["metrics_render.py", "--view", "pm"], djson)
+        self.assertEqual(rc, 0)
+        # PM view has Panel 1 but NOT Panel 3 or 6 headers at top-level view scope
+        self.assertIn("Panel 1", out)
+        # usage-only panels not present in PM view terminal output
+        self.assertNotIn("Panel 3 —", out)
+
+    def test_no_view_flag_defaults_to_pm(self):
+        """No --view flag defaults to PM view (C-2 deviation from design:687-689)."""
+        data = _full_workspace_data_with_new_panels()
+        djson = json.dumps(data)
+        rc, out_no_flag = self._run_main(["metrics_render.py"], djson)
+        rc2, out_pm = self._run_main(["metrics_render.py", "--view", "pm"], djson)
+        self.assertEqual(rc, 0)
+        # Both should produce the same output (default == pm)
+        self.assertEqual(out_no_flag, out_pm)
+
+    def test_view_usage_selects_usage_terminal(self):
+        """--view usage selects usage view."""
+        data = _full_workspace_data_with_new_panels()
+        djson = json.dumps(data)
+        rc, out = self._run_main(["metrics_render.py", "--view", "usage"], djson)
+        self.assertEqual(rc, 0)
+        self.assertIn("Panel 3", out)
+        self.assertNotIn("Panel 1 —", out)
+
+    def test_view_all_selects_full_panel_terminal(self):
+        """--view all selects full-panel (back-compat: same as render_terminal)."""
+        data = _full_workspace_data_with_new_panels()
+        djson = json.dumps(data)
+        rc, out = self._run_main(["metrics_render.py", "--view", "all"], djson)
+        self.assertEqual(rc, 0)
+        expected = metrics_render.render_terminal(data)
+        self.assertEqual(out.rstrip("\n"), expected.rstrip("\n"))
+
+    def test_view_pm_html(self):
+        """--view pm --html selects PM HTML."""
+        data = _full_workspace_data_with_new_panels()
+        djson = json.dumps(data)
+        rc, out = self._run_main(["metrics_render.py", "--view", "pm", "--html"], djson)
+        self.assertEqual(rc, 0)
+        self.assertIn("<style", out)
+        self.assertIn("Panel 1", out)
+        self.assertNotIn("Panel 3 —", out)
+
+    def test_view_usage_html(self):
+        """--view usage --html selects usage HTML."""
+        data = _full_workspace_data_with_new_panels()
+        djson = json.dumps(data)
+        rc, out = self._run_main(["metrics_render.py", "--view", "usage", "--html"], djson)
+        self.assertEqual(rc, 0)
+        self.assertIn("<style", out)
+        self.assertIn("Panel 3", out)
+
+    def test_view_all_html(self):
+        """--view all --html selects full-panel HTML."""
+        data = _full_workspace_data_with_new_panels()
+        djson = json.dumps(data)
+        rc, out = self._run_main(["metrics_render.py", "--view", "all", "--html"], djson)
+        self.assertEqual(rc, 0)
+        expected = metrics_render.render_html(data)
+        self.assertEqual(out.rstrip("\n"), expected.rstrip("\n"))
+
+    def test_invalid_view_exits_nonzero(self):
+        """Invalid --view value exits with SystemExit (argparse)."""
+        data = _full_workspace_data_with_new_panels()
+        djson = json.dumps(data)
+        with self.assertRaises(SystemExit) as cm:
+            self._run_main(["metrics_render.py", "--view", "invalid"], djson)
+        self.assertNotEqual(cm.exception.code, 0)
+
+
+# ---------------------------------------------------------------------------
+# Golden output tests
+# ---------------------------------------------------------------------------
+
+class TestPMViewGolden(unittest.TestCase):
+    """PM view golden output tests."""
+
+    def test_pm_terminal_is_str_nonempty(self):
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_pm_terminal(data)
+        self.assertIsInstance(out, str)
+        self.assertGreater(len(out), 100)
+
+    def test_pm_html_self_contained(self):
+        """PM HTML is self-contained: has <style>, no external refs."""
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_pm_html(data)
+        self.assertIn("<style", out)
+        self.assertNotIn("http://", out)
+        self.assertNotIn("https://", out)
+        self.assertNotIn("<script src", out)
+        self.assertNotIn("<link", out)
+
+    def test_pm_terminal_contains_known_values(self):
+        """PM terminal output contains ticket IDs from the workspace fixture."""
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_pm_terminal(data)
+        # The fixture has ticket MAR-2 in issues
+        self.assertIn("MAR-2", out)
+
+    def test_pm_html_contains_panel_headings(self):
+        """PM HTML contains core panel headings."""
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_pm_html(data)
+        self.assertIn("Panel 1", out)
+        self.assertIn("Panel 2", out)
+        self.assertIn("Panel 4", out)
+
+
+class TestUsageViewGolden(unittest.TestCase):
+    """Usage view golden output tests."""
+
+    def test_usage_terminal_is_str_nonempty(self):
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_usage_terminal(data)
+        self.assertIsInstance(out, str)
+        self.assertGreater(len(out), 50)
+
+    def test_usage_html_self_contained(self):
+        """Usage HTML is self-contained: has <style>, no external refs."""
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_usage_html(data)
+        self.assertIn("<style", out)
+        self.assertNotIn("http://", out)
+        self.assertNotIn("https://", out)
+        self.assertNotIn("<script src", out)
+        self.assertNotIn("<link", out)
+
+    def test_usage_terminal_contains_role_names(self):
+        """Usage terminal includes Panel 6 role names."""
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_usage_terminal(data)
+        self.assertIn("planner", out)
+
+    def test_usage_html_contains_panel_headings(self):
+        """Usage HTML contains Panel 3 and Panel 6 headings."""
+        data = _full_workspace_data_with_new_panels()
+        out = metrics_render.render_usage_html(data)
+        self.assertIn("Panel 3", out)
+        self.assertIn("Panel 6", out)
+
+
+# ---------------------------------------------------------------------------
+# _esc routing / XSS tests
+# ---------------------------------------------------------------------------
+
+class TestEscRouting(unittest.TestCase):
+    """All user-visible string values routed through _esc in new panel renderers."""
+
+    def test_xss_in_issue_title_escaped_html(self):
+        """XSS sentinel in issue title is escaped in PM HTML output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["issues"] = [
+            {"id": "T-1", "title": "<script>alert(1)</script>",
+             "status": "open", "type": "story", "external_key": None}
+        ]
+        out = metrics_render.render_pm_html(data)
+        self.assertNotIn("<script>alert(1)</script>", out)
+        self.assertIn("&lt;script&gt;", out)
+
+    def test_xss_in_deadline_message_escaped_html(self):
+        """XSS sentinel in deadline message is escaped in PM HTML output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = {
+            "status": "not set",
+            "due_date": None,
+            "message": "<b>test</b>",
+        }
+        out = metrics_render.render_pm_html(data)
+        self.assertNotIn("<b>test</b>", out)
+        self.assertIn("&lt;b&gt;", out)
+
+    def test_float_cost_cannot_inject_angle_brackets(self):
+        """Float values (total_cost_usd etc.) never contain < or >; static assertion."""
+        # _fmt_money formats floats as "%.2f" — the repr never contains angle brackets.
+        for value in (0.0, 1.5, 999.99, -1.0):
+            formatted = metrics_render._fmt_money(value)
+            self.assertNotIn("<", formatted)
+            self.assertNotIn(">", formatted)
+
+
+# ---------------------------------------------------------------------------
+# New panel renderer specific behaviour tests
+# ---------------------------------------------------------------------------
+
+class TestIssuesPanelRendering(unittest.TestCase):
+    """Specific tests for the issues panel renderers."""
+
+    def test_empty_issues_list_renders_placeholder(self):
+        """issues == [] renders a placeholder, not an error."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["issues"] = []
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        # Must not raise; must produce non-empty output
+        self.assertIsInstance(term, str)
+        self.assertIsInstance(html, str)
+
+    def test_issues_list_renders_id_and_title(self):
+        """Issues with data render id and title."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["issues"] = [
+            {"id": "T-99", "title": "A task", "status": "open",
+             "type": "task", "external_key": None}
+        ]
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("T-99", term)
+        self.assertIn("T-99", html)
+        self.assertIn("A task", term)
+        self.assertIn("A task", html)
+
+    def test_issues_external_key_rendered_when_present(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["issues"] = [
+            {"id": "T-1", "title": "x", "status": "done",
+             "type": "task", "external_key": "JIRA-42"}
+        ]
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("JIRA-42", term)
+        self.assertIn("JIRA-42", html)
+
+
+class TestProgressPanelRendering(unittest.TestCase):
+    """Specific tests for the progress panel renderers."""
+
+    def test_burn_up_no_data_renders_degraded_note(self):
+        """progress.burn_up == 'no data' renders a degraded note (B1 — frame still present)."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["progress"] = {
+            "overall": {"done": 1, "total": 2},
+            "per_epic": [],
+            "burn_up": "no data",
+        }
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("no data", term)
+        self.assertIn("no data", html)
+
+    def test_burn_up_empty_list_renders_placeholder(self):
+        """progress.burn_up == [] renders an empty placeholder (B1)."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["progress"] = {
+            "overall": {"done": 0, "total": 2},
+            "per_epic": [],
+            "burn_up": [],
+        }
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        self.assertIsInstance(term, str)
+        self.assertIsInstance(html, str)
+
+    def test_burn_up_populated_renders_dates_and_counts(self):
+        """progress.burn_up with data renders date + cumulative."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["progress"] = {
+            "overall": {"done": 2, "total": 3},
+            "per_epic": [
+                {"epic_id": "E-1", "title": "Epic", "done": 1, "total": 2}
+            ],
+            "burn_up": [
+                {"date": "2026-06-01", "completed_cumulative": 1, "total": 3},
+                {"date": "2026-06-10", "completed_cumulative": 2, "total": 3},
+            ],
+        }
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("2026-06-01", term)
+        self.assertIn("2026-06-01", html)
+        self.assertIn("E-1", term)
+        self.assertIn("E-1", html)
+
+
+class TestDeadlinePanelRendering(unittest.TestCase):
+    """Specific tests for the deadline panel renderers."""
+
+    def test_deadline_not_set_frame_present(self):
+        """Deadline 'not set' frame renders on both surfaces."""
+        data = _full_workspace_data_with_new_panels()
+        # The aggregator always emits the degraded frame
+        deadline = data["panels"].get("deadline")
+        if not isinstance(deadline, dict):
+            data["panels"]["deadline"] = {
+                "status": "not set",
+                "due_date": None,
+                "message": "No due date configured.",
+            }
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("not set", term)
+        self.assertIn("not set", html)
+
+    def test_deadline_message_rendered(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = {
+            "status": "not set",
+            "due_date": None,
+            "message": "DeadlineMessage42",
+        }
+        term = metrics_render.render_pm_terminal(data)
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("DeadlineMessage42", term)
+        self.assertIn("DeadlineMessage42", html)
+
+
+class TestUsageSummaryPanelRendering(unittest.TestCase):
+    """Specific tests for the usage_summary panel renderers."""
+
+    def test_usage_summary_cost_formatted(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["usage_summary"] = {
+            "total_cost_usd": 12.345,
+            "total_tokens_input": 500000,
+            "total_tokens_output": 100000,
+            "total_runs": 10,
+            "total_working_seconds": 3600,
+            "prs_merged": 2,
+            "avg_working_seconds_per_ticket": 1800.0,
+            "avg_working_seconds_per_pr": 1800.0,
+            "avg_cost_per_ticket": 6.17,
+            "avg_cost_per_pr": 6.17,
+        }
+        term = metrics_render.render_usage_terminal(data)
+        html = metrics_render.render_usage_html(data)
+        self.assertIn("12.35", term)  # _fmt_money(12.345) = "12.35" (rounds)
+        self.assertIn("12.35", html)
+        self.assertIn("500000", term)
+        self.assertIn("500000", html)
+
+    def test_usage_summary_none_working_seconds_renders_no_data(self):
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["usage_summary"] = {
+            "total_cost_usd": 1.0,
+            "total_tokens_input": 100,
+            "total_tokens_output": 20,
+            "total_runs": 1,
+            "total_working_seconds": None,
+            "prs_merged": 1,
+            "avg_working_seconds_per_ticket": "no data",
+            "avg_working_seconds_per_pr": "no data",
+            "avg_cost_per_ticket": "no data",
+            "avg_cost_per_pr": "no data",
+        }
+        term = metrics_render.render_usage_terminal(data)
+        html = metrics_render.render_usage_html(data)
+        self.assertIn("no data", term)
+        self.assertIn("no data", html)
