@@ -19,7 +19,7 @@ import unittest
 from tempfile import TemporaryDirectory
 
 _SCRIPTS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "plugins", "acs", "hooks", "scripts",
 )
 if _SCRIPTS_DIR not in sys.path:

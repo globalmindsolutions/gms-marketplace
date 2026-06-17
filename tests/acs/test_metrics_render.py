@@ -22,7 +22,7 @@ from tempfile import TemporaryDirectory
 
 _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SCRIPTS_DIR = os.path.join(
-    os.path.dirname(_TESTS_DIR),
+    os.path.dirname(os.path.dirname(_TESTS_DIR)),
     "plugins", "acs", "hooks", "scripts",
 )
 if _SCRIPTS_DIR not in sys.path:
@@ -725,7 +725,7 @@ class FlowMetricsReadOnly(unittest.TestCase):
 
 class DocsPresence(unittest.TestCase):
     def _read(self, *parts):
-        path = os.path.join(os.path.dirname(_TESTS_DIR), *parts)
+        path = os.path.join(os.path.dirname(os.path.dirname(_TESTS_DIR)), *parts)
         with open(path, "r", encoding="utf-8") as fh:
             return fh.read()
 

@@ -12,7 +12,7 @@ import importlib.util
 import os
 import unittest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHECKER = os.path.join(REPO_ROOT, "plugins", "acs", "templates", "ci", "check-conventions.py")
 
 _spec = importlib.util.spec_from_file_location("acs_check_conventions", CHECKER)

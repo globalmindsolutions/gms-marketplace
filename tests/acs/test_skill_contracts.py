@@ -13,7 +13,7 @@ import os
 import re
 import unittest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PLUGIN = os.path.join(REPO_ROOT, "plugins", "acs")
 
 HOOKED_SKILLS = ["create-prd", "create-architecture", "create-project",

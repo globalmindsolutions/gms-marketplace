@@ -30,7 +30,7 @@ import trace
 GATE = 90.0
 
 _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(_TESTS_DIR)
+_REPO_ROOT = os.path.dirname(os.path.dirname(_TESTS_DIR))
 _SCRIPTS_DIR = os.path.join(_REPO_ROOT, "plugins", "acs", "hooks", "scripts")
 _TARGET = os.path.join(_SCRIPTS_DIR, "metrics_aggregate.py")
 

@@ -1,24 +1,41 @@
-# PRD — acs (Autonomous Coding Skills)
+# PRD — GMS Marketplace
 
 > Bootstrapped as the dogfood baseline, derived from the requirements set
 > (`docs/requirements/`) and the implemented plugin. Amendments go through
 > `/acs:create-prd` re-runs — each amendment is its own delivery ticket and
-> docs PR.
+> docs PR. This PRD covers the GMS Marketplace product and its plugin features
+> (acs, tabp, and future plugins); each plugin is a distinct capability delivered
+> and updated through one marketplace.
 
 ## Vision
 
-Every software change — from product definition to merged PR — driven through
-one auditable, resumable, hook-enforced agentic pipeline, on any consumer
-repository, with the human owning exactly two things: requirement decisions
-and the merge button.
+The GMS Marketplace is a curated catalog of Global Mind Solution Claude plugins,
+each plugin a distinct team capability — coding delivery, talent screening, and
+future capabilities — delivered and kept current through one marketplace. Teams
+adopt exactly the plugins they need; the marketplace ensures versioning,
+discoverability, and consistent quality across all plugins.
+
+The **acs** feature delivers: every software change — from product definition to
+merged PR — driven through one auditable, resumable, hook-enforced agentic
+pipeline, on any consumer repository, with the human owning exactly two things:
+requirement decisions and the merge button.
 
 ## Problem
 
-Agentic coding today loses state between sessions, skips steps when the model
+GMS teams need a single curated source of vetted, versioned Claude plugins that
+each solve a distinct team problem — coding delivery via acs, talent screening
+via tabp — instead of ad-hoc one-off tools with no shared versioning, quality
+bar, or discoverability.
+
+**acs feature problem:** Agentic coding today loses state between sessions, skips steps when the model
 forgets, mixes planning with implementation in one context, and leaves no
 audit trail of what was decided, built, verified, and why. Teams cannot trust
 a pipeline whose ordering depends on model goodwill, and cannot resume or
 parallelize work that lives in a conversation window.
+
+**tabp feature problem:** Manual CV-vs-JD screening is slow, inconsistent, and hard to audit for
+fairness — hiring managers cannot reproduce scoring decisions or demonstrate
+that protected characteristics played no role.
 
 ## Target users & personas
 
@@ -27,8 +44,11 @@ parallelize work that lives in a conversation window.
 | **Solo developer** | Ship features end-to-end with one command (`/acs:ship`), trust the gates instead of self-discipline, resume after any interruption. |
 | **Tech lead** | Enforce a delivery process (design gates, TDD, review dimensions, PR size) uniformly across repos and teammates; inspect any ticket's full audit trail. |
 | **Team on a shared repo** | Parallel tickets in worktrees without state collisions; team-shared settings; tracker sync to Jira / GitHub Projects. |
+| **TABP recruiter / hiring team** | Screen one CV or a batch against a job description in Claude Cowork, receive evidence-based and reproducible Recommend/Hold/Reject recommendations with a downloadable scorecard, and demonstrate fairness to auditors. |
 
 ## Goals & success metrics
+
+### acs feature — goals & success metrics
 
 | Goal | Measurable success metric |
 |------|---------------------------|
@@ -42,7 +62,23 @@ parallelize work that lives in a conversation window.
 | G8 — Skill quality coverage | Structure, gating, and routing covered for 100% of skills (free, every PR); every critical-path skill has behavioral (artifact-level) eval coverage; no new skill ships without ≥ a trigger eval (CI guardrail). |
 | G9 — Enforceable conventions | The configured branch/PR/commit formats are enforceable as a required merge gate on the consumer repo, blocking non-exempt violating PRs even when they bypassed `/acs:create-pr` (escape hatch: the `acs-exempt` label / release-branch allowlist). MAR-9 (PR #50, pending merge) completes the consumer side of that escape hatch: a legitimate non-ticket exempt PR lands via the sanctioned `/acs:merge-pr --pr` path (same readiness + branch/worktree cleanup as the ticket path, no ticket/partition/tracker/archive; it refuses and redirects ticket-backed PRs), and `/acs:init` Step 7e writes an idempotent `CLAUDE.md` acs-managed block that makes the pipeline the *default* for in-repo agent sessions (steering changes through `/acs:ship` rather than ad-hoc PRs). The gate itself is existence-proven by the live required-check ruleset on this repo's own `main` (ruleset 17602044, `active`; "Branch / PR / commit conventions" is a required status-check context). |
 
+### tabp feature — success metrics
+
+| Metric | Measurable success metric |
+|--------|---------------------------|
+| T1 — Speed | Screen a 20-CV batch ≥ 70% faster than manual screening, measured within 1 month of the feature's first use. |
+| T2 — Reproducibility | ≥ 95% reproducible band/recommendation on a fixed 10-CV regression set, per release. |
+| T3 — Evidence & auditability | 100% of judgments cite evidence and produce a scorecard, every run — no recommendation without a traceable rationale. |
+| T4 — Fairness | 0 protected/proxy criteria used AND 100% of bias-relevant JD requirements flagged, measured on a ≥ 15-pair test set, per release. |
+| T5 — Adoption | ≥ 80% of new TABP role openings use screen-cvs within 3 months of the feature's first use. |
+
 ## Features (MoSCoW)
+
+The GMS Marketplace currently delivers two plugin features — **acs** and **tabp** —
+each prioritized internally via MoSCoW. Future plugins will be added as additional
+feature sections here.
+
+### Feature: acs (Autonomous Coding Skills)
 
 **Must have** *(shipped in v0.1)*
 - Claude Code plugin marketplace (this repo) with the `acs` plugin.
@@ -69,10 +105,33 @@ parallelize work that lives in a conversation window.
 - Scheduled background tracker sync; cross-machine handoff (shared workspace); additional description templates.
 - acs maintains the `quality/` and `operations/` doc sets for consumers (test strategy + release/ops runbooks) via `/acs:create-quality` and `/acs:create-operations`, plus `/acs:test` — a schedulable regression runner that triages failures and opens a ticket per regression (closed loop). *(Proposed — see [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md).)*
 
-**Won't have (now)**
-- Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes; plugins other than `acs`.
+**Won't have (now)** *(acs feature scope)*
+- Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes for the acs pipeline.
+
+### Feature: tabp (recruiting/talent toolkit for the TABP team — screen-cvs)
+
+Runs in **Claude Cowork** (not Claude Code). This feature targets Cowork skills format.
+
+**Must have** *(urgent — next delivery)*
+- **screen-cvs** — screen one CV or a batch against a job description; parse the JD
+  into must-have vs nice-to-have requirements; produce evidence-based Met/Partial/Missing
+  per requirement; compute a weighted 0–100 match score where missing a must-have
+  requirement caps the result; assign a Strong/Moderate/Weak band with a
+  Recommend/Hold/Reject recommendation; output an inline summary and a two-sheet Excel
+  scorecard; apply fairness guardrails (job-relevant criteria only, decision-support
+  framing); batch screening fans out one Sonnet subagent per CV with Opus synthesis;
+  inputs read from the Cowork project folder, falling back to chat attachments.
+  Traces T1, T2, T3, T4, T5.
+
+**Won't have (now)** *(tabp feature scope)*
+- Integrations with ATS platforms; automated hiring decisions (screen-cvs is
+  decision-support only, not a hiring authority); Claude Code runtime (tabp targets
+  Claude Cowork).
 
 ## Product-level NFRs
+
+These NFRs apply across all marketplace features. Each feature realizes them through
+its own mechanisms (acs via stdlib Python + hooks; tabp via Cowork skills format).
 
 - **Determinism where possible**: ordering, gating, state writes, id allocation are scripts, never prose; gates fail closed.
 - **Portability**: hooks and helpers are stdlib-only Python ≥ 3.9; no network dependencies of their own. `/acs:init` Step 0b runs a toolchain preflight — it detects and offers to install the tools acs leans on (`git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli`) so onboarding fails up front with consent rather than mid-pipeline; the convention checker stays stdlib-only so no acs install is needed on the CI runner.
@@ -82,11 +141,19 @@ parallelize work that lives in a conversation window.
 
 ## Constraints & assumptions
 
-- Claude Code plugin API (skills/agents/hooks as documented) is the only runtime.
+- **acs feature:** Claude Code plugin API (skills/agents/hooks as documented) is the runtime for the acs pipeline. Different features may target different Claude runtimes — acs targets Claude Code; tabp targets Claude Cowork.
 - Delivery is git + GitHub PRs (`gh` assumed); correctness must be checkable by automated tests for the strong-fit domains (see `docs/requirements/overview.md`).
 - Subagents cannot interact with the user — all user interaction happens in coordinators (drives the `needs_input` handoff design).
+- **tabp feature:** screen-cvs runs in Claude Cowork; inputs are read from the Cowork project folder, falling back to chat attachments; batch screening uses one Sonnet subagent per CV with Opus synthesis; outputs include a two-sheet Excel scorecard.
 
 ## Out of scope
 
 Visual/UX-judged work without an automatable test strategy, hardware-in-the-loop
 testing, model training pipelines, registry distribution beyond the GitHub URL.
+
+Per-plugin separate PRDs and per-plugin acs configuration are out of scope — this
+single `prd.md` covers the GMS Marketplace product and all its plugin features. The
+MAR-17 restructure (separate per-plugin PRDs) was abandoned. The tabp plugin
+implementation (plugin.json, screen-cvs skill, marketplace.json entry, CI
+version-coupling removal) is a separate follow-up ticket — this PRD defines the
+feature; the build is out of scope here.
