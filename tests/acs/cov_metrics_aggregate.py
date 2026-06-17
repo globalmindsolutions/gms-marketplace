@@ -258,6 +258,128 @@ def _drive():
     # and _read_text's OSError branch (a path that cannot be opened)
     mod._read_text(os.path.join(tempfile.gettempdir(), "acs-nonexistent-dir-xyz", "missing.xml"))
 
+    # --- MAR-14 spec 01: new panel branch coverage ---
+
+    # 8a) delivery_summary: happy path (coverage_pass_rate "<passed>/<measured>") and
+    #     prs_merged bool -> 0 branch (L294); also drives L304 (row.cell != "no data" continue).
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {
+            "DS1": {"status": "done", "type": "story"},
+            "DS2": {"status": "in_progress", "type": "story"},
+        })
+        fx.write_metrics(ws, {
+            "prs": {"created": 2, "merged": True},  # bool merged -> prs_merged = 0 branch
+            "totals": {"runs": 5, "working_seconds": 3600, "cost_usd": 5.0,
+                       "tokens": {"input": 1000, "output": 200}},
+        })
+        fx.write_ticket_json(ws, "DS1", "2026-06-01T10:00:00Z")
+        fx.write_pipeline(ws, "DS1", steps={
+            "code": {"started_at": "2026-06-05T10:00:00Z", "status": "completed",
+                     "ended_at": "2026-06-05T11:00:00Z"},
+            "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
+                         "ended_at": "2026-06-10T12:00:00Z"},
+        })
+        # DS1 has numeric coverage (cell != "no data") + passed=True -> measured=1, passed=1
+        fx.write_code_state(ws, "DS1", {"tests": {"coverage_percent": 91.0, "coverage_target": 90},
+                                        "verifier_passed": True})
+        mod.aggregate(ws, REPO_ID)
+
+    # 8b) delivery_summary: coverage_pass_rate "no data" + meta.degraded (measured == 0).
+    #     All p4_rows have cell == "no data" -> the continue branch + degrade.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"DS3": {"status": "done", "type": "story"}})
+        fx.write_ticket_json(ws, "DS3", "2026-06-01T10:00:00Z")
+        # No code-state -> p4_row has cell="no data" -> measured=0 -> "no data" + degrade
+        mod.aggregate(ws, REPO_ID)
+
+    # 8c) issues: external_key extraction from external["key"] (present); entry-not-a-dict path.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {
+            "ISS1": {"status": "done", "type": "story", "title": "A",
+                     "external": {"provider": "github", "key": "99"}},
+            "ISS2": "not-a-dict",  # not a dict -> entry = {} branch
+        })
+        mod.aggregate(ws, REPO_ID)
+
+    # 8d) progress: per_epic branch with children (epic_id loop, child_done, per_epic.append)
+    #     + burn_up fallback to ticket.json.updated_at when no merge-pr.ended_at.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {
+            "EP1": {"status": "open", "type": "epic", "title": "Big Epic",
+                    "children": ["CH1", "CH2", "MISSING_KID"]},
+            "CH1": {"status": "done", "type": "story"},
+            "CH2": {"status": "in_progress", "type": "story"},
+            # MISSING_KID not in index -> counted in total only
+        })
+        # CH1 done with no merge-pr but ticket.json has updated_at -> burn_up fallback branch
+        fx.write_ticket_json_full(ws, "CH1",
+                                  created_at="2026-06-01T10:00:00Z",
+                                  updated_at="2026-06-15T09:00:00Z")
+        mod.aggregate(ws, REPO_ID)
+
+    # 8e) progress: burn_up "no data" branch (done ticket exists but no timestamps recoverable).
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"BU1": {"status": "done", "type": "story"}})
+        # No ticket.json, no pipeline-state.json -> no timestamps -> burn_up "no data" + degrade
+        mod.aggregate(ws, REPO_ID)
+
+    # 8f) progress: burn_up [] branch (no done tickets; empty series).
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"OP1": {"status": "in_progress", "type": "story"}})
+        mod.aggregate(ws, REPO_ID)
+
+    # 8g) deadline: always-degraded path exercises _deadline_panel body.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"DL1": {"status": "done", "type": "story"}})
+        mod.aggregate(ws, REPO_ID)
+
+    # 8h) usage_summary: non-numeric/bool branches for total_cost_usd, tokens, runs, prs_merged.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"US1": {"status": "done", "type": "story"}})
+        fx.write_metrics(ws, {
+            "prs": {"created": 1, "merged": True},  # bool -> prs_merged = 0 branch
+            "totals": {
+                "runs": "bad",        # non-int -> total_runs = 0 branch
+                "cost_usd": "bad",    # non-numeric -> total_cost_usd = 0.0 branch
+                "tokens": {
+                    "input": True,    # bool int -> total_tokens_input = 0 branch
+                    "output": True,   # bool int -> total_tokens_output = 0 branch
+                },
+            },
+        })
+        mod.aggregate(ws, REPO_ID)
+
+    # 8i) usage_summary: no metrics.json -> zero defaults + "no data" averages.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"US2": {"status": "done", "type": "story"}})
+        # No metrics.json -> prs default, totals empty
+        mod.aggregate(ws, REPO_ID)
+
+    # 8j) Direct helper invocations for hard-to-reach branches:
+    #     L304 (row not a dict in _delivery_summary), L539 (_accumulate_funnel steps not a dict),
+    #     L609 (_rework_count data not a dict), L618/619 and L629/630 (KeyError/TypeError handlers).
+
+    # L304: p4_rows entry that is not a dict (call _delivery_summary directly)
+    _dummy_degrade = lambda tid, panel, reason: None
+    _dummy_p7 = {"avg_lead_seconds": "no data", "avg_cycle_seconds": "no data"}
+    mod._delivery_summary({"T1": {"status": "done"}}, {}, _dummy_p7, ["not-a-dict"], _dummy_degrade)
+
+    # L539: _accumulate_funnel with steps not a dict (call directly with non-dict steps)
+    mod._accumulate_funnel({}, {"steps": ["not", "a", "dict"]})
+
+    # L609: _rework_count with file containing JSON null (data is None, not a dict -> return 0)
+    with tempfile.TemporaryDirectory() as _td:
+        _sp = os.path.join(_td, "create-pr-state.json")
+        fx._write_text(_sp, "null")
+        mod._rework_count(_td)
+
+    # L618/619: states.pr key missing (KeyError in try block for states.pr.number)
+    # L629/630: run has no "pr" key (KeyError in try block for run["pr"]["number"])
+    with tempfile.TemporaryDirectory() as _td:
+        _sp = os.path.join(_td, "create-pr-state.json")
+        fx._write_json(_sp, {"states": {}, "runs": [{"not_pr": 1}]})
+        mod._rework_count(_td)
+
 
 def _count_from_cover(cover_path):
     """Parse a trace .cover file: count executed/total executable lines and collect misses."""

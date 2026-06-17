@@ -1,25 +1,39 @@
 #!/usr/bin/env python3
-"""metrics_aggregate.py — read-only six-panel dashboard aggregator for /acs:metrics (MAR-5).
+"""metrics_aggregate.py — read-only seven-panel dashboard aggregator for /acs:metrics (MAR-5).
 
 Stdlib-only (Python 3.9+, no pip). Reads the current repo's workspace artifacts and prints ONE
 aggregate JSON object to stdout:
 
     {
-      "panels": {"1": {...}, "2": {...}, "3": {...}, "4": {...}, "5": {...}, "6": {...}},
+      "panels": {
+        "1": {...}, "2": {...}, "3": {...}, "4": {...}, "5": {...}, "6": {...}, "7": {...},
+        "delivery_summary": {...}, "issues": [...], "progress": {...},
+        "deadline": {...}, "usage_summary": {...}
+      },
       "meta": {"generated_at": "<ISO8601>", "repo_id": "...", "ticket_count": <int>,
-               "degraded": [{"ticket_id": "...", "panel": <int>, "reason": "..."}, ...]}
+               "degraded": [{"ticket_id": "...", "panel": <int|str>, "reason": "..."}, ...]}
     }
 
 Design A1 (helper emits aggregate JSON; the SKILL renders show_widget — ZERO show_widget
-dependency here), B1 (every panel key "1".."6" is ALWAYS present; degradation is a "no data"
-marker inside the panel plus a meta.degraded entry, never a missing key), C1 (panel 6 token-burn
-buckets plan->planner / execute->executor / verify->verifier from the <metrics> element, the
-`coordinate` phase EXCLUDED from all three buckets per ledger C-5; panel 5 review iterations from
-code-state states.review.iterations authoritative with the max verify-XML-iteration fallback),
-D1 (bounded single pass: enumerate tickets from tickets-index.json, resolve each partition
-active-then-archive, read the four state files once each, glob phases/*/iter-*-*.xml and extract
-<metrics> with a compiled attribute-order-INDEPENDENT regex; xml.etree is a documented reserved
-fallback, not used by default).
+dependency here), B1 (every panel key "1".."7" PLUS the five new string keys is ALWAYS present;
+degradation is a "no data" marker inside the panel plus a meta.degraded entry, never a missing
+key), C1 (panel 6 token-burn buckets plan->planner / execute->executor / verify->verifier from
+the <metrics> element, the `coordinate` phase EXCLUDED from all three buckets per ledger C-5;
+panel 5 review iterations from code-state states.review.iterations authoritative with the max
+verify-XML-iteration fallback), D1 (bounded single pass: enumerate tickets from
+tickets-index.json, resolve each partition active-then-archive, read the four state files once
+each, glob phases/*/iter-*-*.xml and extract <metrics> with a compiled attribute-order-INDEPENDENT
+regex; xml.etree is a documented reserved fallback, not used by default).
+
+New panel keys (MAR-14 spec 01):
+  "delivery_summary" — PM KPIs: done/total, prs_merged, avg lead/cycle, coverage_pass_rate.
+  "issues"           — sorted list of all index entries with id, title, status, type, external_key.
+  "progress"         — overall done/total, per_epic breakdown, burn_up date series.
+  "deadline"         — always degraded "not set" frame (Child 3 / MAR-15 wires real data).
+  "usage_summary"    — totals + four averages from panel3; mirrors usage view data needs.
+
+Existing panel keys "1".."7" and their shapes are UNCHANGED (A1 contract). New keys are additive.
+meta.degraded entries for new panels use string panel names; entries for "1".."7" use integers.
 
 The helper is READ-ONLY: zero acs_lib.write_json calls; it mutates no workspace file.
 
@@ -39,6 +53,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acs_lib  # noqa: E402
 
 PANEL_KEYS = ("1", "2", "3", "4", "5", "6", "7")
+
+# New additive panel keys (MAR-14 spec 01). Not added to PANEL_KEYS (A1 contract preserved).
+_NEW_PANEL_KEYS = ("delivery_summary", "issues", "progress", "deadline", "usage_summary")
 
 # phase attribute -> role bucket (panel 6). `coordinate` maps to no bucket (ledger C-5):
 # the role IS the phase; we invent no `role` attribute and add no fourth bucket.
@@ -114,6 +131,11 @@ def aggregate(workspace, repo_id):
 
     Never raises on missing/partial state — each absent source becomes a "no data" marker plus a
     meta.degraded entry. No git, no settings, no stdout, no writes.
+
+    Returns the 7 existing panel keys ("1".."7") PLUS 5 new string keys
+    ("delivery_summary", "issues", "progress", "deadline", "usage_summary")
+    all at the same nesting level inside "panels". The new keys are additive; the existing
+    panel shapes are UNCHANGED (A1 contract, MAR-8/design.md:88,456-458).
     """
     degraded = []
 
@@ -136,7 +158,8 @@ def aggregate(workspace, repo_id):
 
     # Empty workspace (no tickets enumerated): every panel "no data", exit-0 path. B1 keeps all keys.
     if not tickets:
-        return {"panels": {k: "no data" for k in PANEL_KEYS}, "meta": meta}
+        all_keys = list(PANEL_KEYS) + list(_NEW_PANEL_KEYS)
+        return {"panels": {k: "no data" for k in all_keys}, "meta": meta}
 
     # Panel 1 — throughput by status/type (repo metrics primary; recompute fallback from the index).
     panel1 = _panel1(tickets, repo_metrics)
@@ -149,6 +172,13 @@ def aggregate(workspace, repo_id):
     p7_rows = []
     burn = {role: {"input": 0, "output": 0, "cost": 0.0} for role in ("planner", "executor", "verifier")}
 
+    # Per-ticket extra data collected for the new panels (no additional file reads — reuses
+    # the ticket.json and pipeline-state.json already opened below; spec 01:44-49).
+    # _ticket_updated_at: {ticket_id -> updated_at str or None} for burn_up fallback (spec 01:198-202)
+    _ticket_updated_at = {}
+    # _merge_ended_at: {ticket_id -> ended_at str or None} for burn_up primary date (spec 01:193-197)
+    _merge_ended_at = {}
+
     for ticket_id in tickets:
         tdir, _archived = acs_lib.find_ticket_partition(workspace, repo_id, ticket_id)
 
@@ -160,6 +190,12 @@ def aggregate(workspace, repo_id):
             degrade(ticket_id, 2, "pipeline-state.json absent — ticket omitted from the funnel")
             degrade(ticket_id, 3, "pipeline-state.json absent — no cost/time row")
 
+        # Collect merge-pr.ended_at for burn_up (primary date source; spec 01:193-197).
+        steps = pipeline.get("steps") if isinstance(pipeline, dict) else None
+        steps = steps if isinstance(steps, dict) else {}
+        merge_step = steps.get("merge-pr")
+        _merge_ended_at[ticket_id] = merge_step.get("ended_at") if isinstance(merge_step, dict) else None
+
         code_state = acs_lib.read_json(acs_lib.state_path(tdir, "code"))
         p4_rows.append(_panel4_row(ticket_id, code_state, degrade))
         p5_rows.append(_panel5_row(ticket_id, tdir, code_state, degrade))
@@ -167,6 +203,13 @@ def aggregate(workspace, repo_id):
         p7_rows.append(_panel7_row(ticket_id, tdir, pipeline, degrade))
 
         _accumulate_burn(burn, tdir)
+
+        # Collect ticket.json.updated_at for burn_up fallback (spec 01:198-202).
+        # ticket.json is already opened in _panel7_row (read-only, no extra I/O cost).
+        ticket_json = acs_lib.read_json(os.path.join(tdir, "ticket.json"))
+        _ticket_updated_at[ticket_id] = (
+            ticket_json.get("updated_at") if isinstance(ticket_json, dict) else None
+        )
 
     prs = (repo_metrics or {}).get("prs", {"created": 0, "merged": 0})
     totals = (repo_metrics or {}).get("totals", {})
@@ -191,10 +234,284 @@ def aggregate(workspace, repo_id):
     panel6 = burn
     panel7 = _panel7(p7_rows)
 
-    panels = {"1": panel1, "2": panel2, "3": panel3, "4": panel4, "5": panel5,
-              "6": panel6, "7": panel7}
+    # ---- New panels (MAR-14 spec 01) ----
+
+    # delivery_summary: 5 PM KPIs (clarification C-1; spec 01:92-127)
+    delivery_summary = _delivery_summary(
+        tickets, prs, panel7, p4_rows, degrade
+    )
+
+    # issues: sorted list of all index entries (spec 01:129-149)
+    issues = _issues_panel(tickets)
+
+    # progress: overall, per_epic, burn_up date series (spec 01:151-229)
+    progress = _progress_panel(
+        tickets, _merge_ended_at, _ticket_updated_at, degrade
+    )
+
+    # deadline: always degraded "not set" frame (spec 01:231-249; Child 3 wires real data)
+    deadline = _deadline_panel(degrade)
+
+    # usage_summary: totals + four averages (spec 01:251-269)
+    usage_summary = _usage_summary_panel(totals, prs, panel3["averages"])
+
+    panels = {
+        "1": panel1, "2": panel2, "3": panel3, "4": panel4, "5": panel5,
+        "6": panel6, "7": panel7,
+        "delivery_summary": delivery_summary,
+        "issues": issues,
+        "progress": progress,
+        "deadline": deadline,
+        "usage_summary": usage_summary,
+    }
     return {"panels": panels, "meta": meta}
 
+
+# ---------------------------------------------------------------------------
+# New panel builders (MAR-14 spec 01) — read-only, no writes, stdlib-only
+# ---------------------------------------------------------------------------
+
+def _delivery_summary(tickets, prs, panel7, p4_rows, degrade):
+    """Compute the delivery_summary panel (5 PM KPIs) from already-resolved data.
+
+    Keys (spec 01:92-127):
+      tickets_done_over_total  — "<done>/<total>" string; always present.
+      prs_merged               — int from prs.merged (or 0 when absent).
+      avg_lead_seconds         — float or "no data" from panel7["avg_lead_seconds"].
+      avg_cycle_seconds        — float or "no data" from panel7["avg_cycle_seconds"].
+      coverage_pass_rate       — "<passed>/<measured>" or "no data"; measured from p4_rows where
+                                  cell != "no data"; passed where also passed==True.
+
+    meta.degraded entry added only when measured == 0 (coverage_pass_rate unavailable).
+    """
+    done_count = sum(1 for t in tickets.values()
+                     if isinstance(t, dict) and t.get("status") == "done")
+    total_count = len(tickets)
+    tickets_done_over_total = "%d/%d" % (done_count, total_count)
+
+    prs_merged = prs.get("merged", 0) if isinstance(prs, dict) else 0
+    if not isinstance(prs_merged, int) or isinstance(prs_merged, bool):
+        prs_merged = 0
+
+    avg_lead_seconds = panel7.get("avg_lead_seconds", "no data")
+    avg_cycle_seconds = panel7.get("avg_cycle_seconds", "no data")
+
+    # coverage_pass_rate: count rows where cell != "no data" (measured) and passed==True (passed).
+    measured = 0
+    passed = 0
+    for row in p4_rows:
+        if not isinstance(row, dict):
+            continue
+        cell = row.get("cell")
+        if cell == "no data":
+            continue  # this row does not contribute to measured
+        measured += 1
+        if row.get("passed") is True:
+            passed += 1
+
+    if measured == 0:
+        coverage_pass_rate = "no data"
+        degrade(None, "delivery_summary",
+                "no coverage data — coverage_pass_rate unavailable")
+    else:
+        coverage_pass_rate = "%d/%d" % (passed, measured)
+
+    return {
+        "tickets_done_over_total": tickets_done_over_total,
+        "prs_merged": prs_merged,
+        "avg_lead_seconds": avg_lead_seconds,
+        "avg_cycle_seconds": avg_cycle_seconds,
+        "coverage_pass_rate": coverage_pass_rate,
+    }
+
+
+def _issues_panel(tickets):
+    """Build the issues list: one object per ticket, sorted by id (spec 01:129-149).
+
+    Fields per object: id, title, status, type, external_key.
+    external_key: index entry external["key"] when external is a dict with a "key"; else None.
+    When index is empty, returns [] (never "no data"). No meta.degraded entry.
+    """
+    result = []
+    for ticket_id in sorted(tickets.keys()):
+        entry = tickets[ticket_id]
+        if not isinstance(entry, dict):
+            entry = {}
+        external = entry.get("external")
+        if isinstance(external, dict) and "key" in external:
+            external_key = external["key"]
+        else:
+            external_key = None
+        result.append({
+            "id": ticket_id,
+            "title": entry.get("title"),
+            "status": entry.get("status"),
+            "type": entry.get("type"),
+            "external_key": external_key,
+        })
+    return result
+
+
+def _progress_panel(tickets, merge_ended_at, ticket_updated_at, degrade):
+    """Build the progress panel: overall, per_epic, burn_up (spec 01:151-229).
+
+    overall: {"done": <int>, "total": <int>} — always present.
+    per_epic: list sorted by epic_id — each entry covers one epic-type ticket.
+    burn_up: date-ordered cumulative series, or [] (no done tickets), or "no data" +
+             meta.degraded (done tickets exist but no timestamps recoverable for ANY of them).
+    """
+    # overall
+    done_count = sum(1 for t in tickets.values()
+                     if isinstance(t, dict) and t.get("status") == "done")
+    total_count = len(tickets)
+    overall = {"done": done_count, "total": total_count}
+
+    # per_epic: tickets with type == "epic", sorted by epic_id
+    per_epic = []
+    for epic_id in sorted(k for k, v in tickets.items()
+                          if isinstance(v, dict) and v.get("type") == "epic"):
+        epic_entry = tickets[epic_id]
+        children_ids = epic_entry.get("children") if isinstance(epic_entry, dict) else None
+        children_ids = children_ids if isinstance(children_ids, list) else []
+        child_done = 0
+        child_total = len(children_ids)
+        for child_id in children_ids:
+            child_entry = tickets.get(child_id)
+            if isinstance(child_entry, dict) and child_entry.get("status") == "done":
+                child_done += 1
+            # Children not found in index are counted in total only (spec 01:186-189)
+        per_epic.append({
+            "epic_id": epic_id,
+            "title": epic_entry.get("title") if isinstance(epic_entry, dict) else None,
+            "done": child_done,
+            "total": child_total,
+        })
+
+    # burn_up: collect (date_str, ticket_id) pairs for done tickets with a recoverable date.
+    # Priority: merge-pr.ended_at, then ticket.json.updated_at (spec 01:193-202).
+    done_ticket_ids = [tid for tid, t in tickets.items()
+                       if isinstance(t, dict) and t.get("status") == "done"]
+    if not done_ticket_ids:
+        burn_up = []
+    else:
+        date_pairs = []  # list of (date_str, ticket_id)
+        for tid in done_ticket_ids:
+            ended = merge_ended_at.get(tid)
+            date_str = None
+            if ended and acs_lib.parse_iso(ended) is not None:
+                date_str = ended[:10]  # ISO date portion YYYY-MM-DD
+            else:
+                updated = ticket_updated_at.get(tid)
+                if updated and acs_lib.parse_iso(updated) is not None:
+                    date_str = updated[:10]
+            if date_str is not None:
+                date_pairs.append((date_str, tid))
+
+        if not date_pairs:
+            # All done tickets lack a recoverable date (spec 01:220-224)
+            burn_up = "no data"
+            degrade(None, "progress",
+                    "no completion timestamps recoverable — burn_up unavailable")
+        else:
+            # Sort by (date, ticket_id) for determinism (spec 01:213-215)
+            date_pairs.sort(key=lambda p: (p[0], p[1]))
+            # Accumulate cumulative; collapse same-date pairs to the final cumulative (spec 01:216-220)
+            cumulative = 0
+            by_date = {}  # date_str -> highest cumulative for that date
+            for date_str, _tid in date_pairs:
+                cumulative += 1
+                by_date[date_str] = cumulative
+            # Emit one point per unique date in sorted order
+            burn_up = [
+                {"date": d, "completed_cumulative": by_date[d], "total": total_count}
+                for d in sorted(by_date.keys())
+            ]
+
+    return {
+        "overall": overall,
+        "per_epic": per_epic,
+        "burn_up": burn_up,
+    }
+
+
+def _deadline_panel(degrade):
+    """Build the deadline panel: always a degraded 'not set' frame (spec 01:231-249).
+
+    Child 3 / MAR-15 will wire real due_date data. This function always returns the
+    fixed degraded frame and always adds a meta.degraded entry (B1 invariant).
+    """
+    degrade(None, "deadline",
+            "deadline not configured — due_date not set (Child 3)")
+    return {
+        "status": "not set",
+        "due_date": None,
+        "message": "No due date configured. Set due_date on the ticket (Child 3 / MAR-15).",
+    }
+
+
+def _usage_summary_panel(totals, prs, panel3_averages):
+    """Build the usage_summary panel from already-computed totals and panel3 averages (spec 01:251-269).
+
+    Keys:
+      total_cost_usd                  — float from totals.cost_usd (or 0.0).
+      total_tokens_input               — int from totals.tokens.input (or 0).
+      total_tokens_output              — int from totals.tokens.output (or 0).
+      total_runs                       — int from totals.runs (or 0).
+      total_working_seconds            — int/float/None from totals.working_seconds (pass-through).
+      prs_merged                       — int from prs.merged (or 0).
+      avg_working_seconds_per_ticket   — from panel3_averages (float or "no data").
+      avg_working_seconds_per_pr       — from panel3_averages (float or "no data").
+      avg_cost_per_ticket              — from panel3_averages (float or "no data").
+      avg_cost_per_pr                  — from panel3_averages (float or "no data").
+
+    No meta.degraded entry (degrades to zeros, never absent).
+    """
+    t = totals if isinstance(totals, dict) else {}
+    tokens = t.get("tokens", {})
+    tokens = tokens if isinstance(tokens, dict) else {}
+
+    total_cost_usd = t.get("cost_usd", 0.0)
+    if not _is_number(total_cost_usd):
+        total_cost_usd = 0.0
+
+    total_tokens_input = tokens.get("input", 0)
+    if not isinstance(total_tokens_input, int) or isinstance(total_tokens_input, bool):
+        total_tokens_input = 0
+
+    total_tokens_output = tokens.get("output", 0)
+    if not isinstance(total_tokens_output, int) or isinstance(total_tokens_output, bool):
+        total_tokens_output = 0
+
+    total_runs = t.get("runs", 0)
+    if not isinstance(total_runs, int) or isinstance(total_runs, bool):
+        total_runs = 0
+
+    # total_working_seconds: pass-through as-is (may be None when absent; spec 01:262)
+    total_working_seconds = t.get("working_seconds")
+
+    prs_merged = prs.get("merged", 0) if isinstance(prs, dict) else 0
+    if not isinstance(prs_merged, int) or isinstance(prs_merged, bool):
+        prs_merged = 0
+
+    avgs = panel3_averages if isinstance(panel3_averages, dict) else {}
+
+    return {
+        "total_cost_usd": total_cost_usd,
+        "total_tokens_input": total_tokens_input,
+        "total_tokens_output": total_tokens_output,
+        "total_runs": total_runs,
+        "total_working_seconds": total_working_seconds,
+        "prs_merged": prs_merged,
+        "avg_working_seconds_per_ticket": avgs.get("avg_working_seconds_per_ticket", "no data"),
+        "avg_working_seconds_per_pr": avgs.get("avg_working_seconds_per_pr", "no data"),
+        "avg_cost_per_ticket": avgs.get("avg_cost_per_ticket", "no data"),
+        "avg_cost_per_pr": avgs.get("avg_cost_per_pr", "no data"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Existing panel builders (unchanged)
+# ---------------------------------------------------------------------------
 
 def _panel1(tickets, repo_metrics):
     """Throughput by status/type: prefer metrics.json.tickets; recompute from the index otherwise."""

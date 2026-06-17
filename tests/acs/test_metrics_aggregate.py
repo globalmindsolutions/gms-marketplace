@@ -882,3 +882,584 @@ class ReadOnly(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# MAR-14 spec 01 — new panel key tests (TestDeliverySummary, TestIssues,
+# TestProgress, TestDeadline, TestUsageSummary, TestNewPanelKeyPresence,
+# TestAggregatorDeterminism extension)
+# ---------------------------------------------------------------------------
+
+# Helper: write a ticket.json with both created_at and updated_at
+def write_ticket_json_full(ws, tid, created_at, updated_at=None, archived=False):
+    """Write <partition>/ticket.json carrying created_at and optional updated_at."""
+    tdir = _ticket_dir(ws, tid, archived)
+    data = {"id": tid, "created_at": created_at}
+    if updated_at is not None:
+        data["updated_at"] = updated_at
+    _write_json(os.path.join(tdir, "ticket.json"), data)
+
+
+class TestDeliverySummary(unittest.TestCase):
+    """MAR-14 spec 01 §Test plan: delivery_summary (5 KPI panel)."""
+
+    def test_happy_path_all_five_kpis(self):
+        """5 KPIs populated: tickets_done_over_total, prs_merged, avg_lead, avg_cycle, coverage_pass_rate."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "done", "type": "story"},
+                "T3": {"status": "in_progress", "type": "story"},
+            })
+            write_metrics(ws, {
+                "prs": {"created": 3, "merged": 2},
+                "totals": {"runs": 5, "working_seconds": 3600, "cost_usd": 5.0,
+                           "tokens": {"input": 1000, "output": 200}},
+            })
+            # T1 and T2 are done with merge-pr timestamps
+            merge_ended_t1 = "2026-06-10T12:00:00Z"
+            merge_ended_t2 = "2026-06-11T12:00:00Z"
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            write_pipeline(ws, "T1", steps={
+                "code": {"started_at": "2026-06-05T10:00:00Z", "status": "completed",
+                         "ended_at": "2026-06-05T11:00:00Z"},
+                "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
+                             "ended_at": merge_ended_t1},
+            })
+            write_ticket_json(ws, "T2", "2026-06-02T10:00:00Z")
+            write_pipeline(ws, "T2", steps={
+                "code": {"started_at": "2026-06-06T10:00:00Z", "status": "completed",
+                         "ended_at": "2026-06-06T11:00:00Z"},
+                "merge-pr": {"started_at": "2026-06-11T11:00:00Z", "status": "completed",
+                             "ended_at": merge_ended_t2},
+            })
+            write_pipeline(ws, "T3", steps={
+                "code": {"started_at": "2026-06-12T10:00:00Z", "status": "in_progress",
+                         "ended_at": None},
+            })
+            # coverage: T1 passes, T2 passes, T3 no data
+            write_code_state(ws, "T1", {"tests": {"coverage_percent": 91.0, "coverage_target": 90},
+                                        "verifier_passed": True})
+            write_code_state(ws, "T2", {"tests": {"coverage_percent": 92.0, "coverage_target": 90},
+                                        "verifier_passed": True})
+            # T3 code-state missing -> will degrade for p4 but not delivery_summary pass rate
+
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            ds = out["panels"]["delivery_summary"]
+            self.assertEqual(ds["tickets_done_over_total"], "2/3")
+            self.assertEqual(ds["prs_merged"], 2)
+            self.assertIsInstance(ds["avg_lead_seconds"], float)
+            self.assertGreater(ds["avg_lead_seconds"], 0)
+            self.assertIsInstance(ds["avg_cycle_seconds"], float)
+            self.assertGreater(ds["avg_cycle_seconds"], 0)
+            # coverage: T1 passes True, T2 passes True, T3 "no data" -> measured=2, passed=2
+            self.assertEqual(ds["coverage_pass_rate"], "2/2")
+
+    def test_no_data_averages_no_merge_pr(self):
+        """No merge-pr step -> avg_lead_seconds and avg_cycle_seconds are 'no data'."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "in_progress", "type": "story"}})
+            write_pipeline(ws, "T1", steps={
+                "code": {"started_at": "2026-06-05T10:00:00Z", "status": "in_progress",
+                         "ended_at": None},
+            })
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            ds = out["panels"]["delivery_summary"]
+            self.assertEqual(ds["avg_lead_seconds"], "no data")
+            self.assertEqual(ds["avg_cycle_seconds"], "no data")
+
+    def test_no_coverage_data_measured_zero_degrades(self):
+        """No coverage rows (measured == 0) -> coverage_pass_rate == 'no data' + meta.degraded."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            write_pipeline(ws, "T1", steps={
+                "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
+                             "ended_at": "2026-06-10T12:00:00Z"},
+            })
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            # No code-state.json -> p4_row will have cell="no data" -> measured == 0
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            ds = out["panels"]["delivery_summary"]
+            self.assertEqual(ds["coverage_pass_rate"], "no data")
+            self.assertTrue(any(
+                d["ticket_id"] is None and d["panel"] == "delivery_summary"
+                for d in out["meta"]["degraded"]
+            ))
+
+    def test_empty_workspace_delivery_summary_no_data(self):
+        """Empty workspace early-return path -> panels['delivery_summary'] == 'no data'."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out["panels"]["delivery_summary"], "no data")
+
+    def test_prs_merged_absent_metrics_json_missing(self):
+        """metrics.json missing -> prs_merged == 0."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            write_pipeline(ws, "T1", steps={
+                "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
+                             "ended_at": "2026-06-10T12:00:00Z"},
+            })
+            # No metrics.json on disk
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            ds = out["panels"]["delivery_summary"]
+            self.assertEqual(ds["prs_merged"], 0)
+
+    def test_coverage_pass_rate_format_passed_over_measured(self):
+        """coverage_pass_rate string is '<passed>/<measured>' with correct counts."""
+        with TemporaryDirectory() as ws:
+            # T1: passes, T2: fails (verifier_passed=False), T3: no data
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "done", "type": "story"},
+                "T3": {"status": "in_progress", "type": "story"},
+            })
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            write_code_state(ws, "T1", {"tests": {"coverage_percent": 91.0, "coverage_target": 90},
+                                        "verifier_passed": True})
+            write_ticket_json(ws, "T2", "2026-06-02T10:00:00Z")
+            write_code_state(ws, "T2", {"tests": {"coverage_percent": 85.0, "coverage_target": 90},
+                                        "verifier_passed": False})
+            write_ticket_json(ws, "T3", "2026-06-03T10:00:00Z")
+            # T3: no code-state -> p4_row cell="no data" -> not counted in measured
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            ds = out["panels"]["delivery_summary"]
+            # measured=2 (T1 and T2 have numeric coverage), passed=1 (T1 passes)
+            self.assertEqual(ds["coverage_pass_rate"], "1/2")
+
+
+class TestIssues(unittest.TestCase):
+    """MAR-14 spec 01 §Test plan: issues panel."""
+
+    def test_populated_list_field_by_field(self):
+        """Populated list with external variants: external_key from dict, None from None, None from {}."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "MAR-1": {"status": "done", "type": "story", "title": "First story",
+                          "external": {"provider": "github", "key": "42"}},
+                "MAR-2": {"status": "in_progress", "type": "task", "title": "Second task",
+                          "external": None},
+                "MAR-3": {"status": "open", "type": "epic", "title": "Epic one",
+                          "external": {}},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            issues = out["panels"]["issues"]
+            self.assertIsInstance(issues, list)
+            self.assertEqual(len(issues), 3)
+            # Sorted ascending by id (string sort)
+            ids = [i["id"] for i in issues]
+            self.assertEqual(ids, sorted(ids))
+            # external_key extraction
+            i1 = next(i for i in issues if i["id"] == "MAR-1")
+            self.assertEqual(i1["external_key"], "42")
+            i2 = next(i for i in issues if i["id"] == "MAR-2")
+            self.assertIsNone(i2["external_key"])
+            i3 = next(i for i in issues if i["id"] == "MAR-3")
+            self.assertIsNone(i3["external_key"])
+            # Exact keys
+            for item in issues:
+                self.assertEqual(set(item.keys()), {"id", "title", "status", "type", "external_key"})
+
+    def test_empty_index_issues_empty_list(self):
+        """Empty index -> issues == []."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out["panels"]["issues"], "no data")  # empty-workspace early-return
+
+    def test_single_ticket_empty_issues_is_list(self):
+        """Non-empty workspace with 1 ticket -> issues is a list."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"MAR-1": {"status": "done", "type": "task", "title": "Task"}})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertIsInstance(out["panels"]["issues"], list)
+            self.assertEqual(len(out["panels"]["issues"]), 1)
+
+    def test_determinism(self):
+        """Same workspace yields identical issues list on two calls."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "MAR-3": {"status": "done", "type": "story"},
+                "MAR-1": {"status": "open", "type": "task"},
+                "MAR-2": {"status": "in_progress", "type": "epic"},
+            })
+            out1 = metrics_aggregate.aggregate(ws, REPO_ID)
+            out2 = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out1["panels"]["issues"], out2["panels"]["issues"])
+
+
+class TestProgress(unittest.TestCase):
+    """MAR-14 spec 01 §Test plan: progress panel."""
+
+    def test_overall_counts(self):
+        """overall.done and overall.total count correctly."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "done", "type": "story"},
+                "T3": {"status": "done", "type": "story"},
+                "T4": {"status": "in_progress", "type": "story"},
+                "T5": {"status": "open", "type": "story"},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out["panels"]["progress"]["overall"], {"done": 3, "total": 5})
+
+    def test_per_epic_populated(self):
+        """per_epic with 1 epic and 3 children (2 done, 1 open)."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "EP-1": {"status": "in_progress", "type": "epic", "title": "Epic title",
+                         "children": ["S1", "S2", "S3"]},
+                "S1": {"status": "done", "type": "story"},
+                "S2": {"status": "done", "type": "story"},
+                "S3": {"status": "in_progress", "type": "story"},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            per_epic = out["panels"]["progress"]["per_epic"]
+            self.assertEqual(len(per_epic), 1)
+            ep = per_epic[0]
+            self.assertEqual(ep["epic_id"], "EP-1")
+            self.assertEqual(ep["title"], "Epic title")
+            self.assertEqual(ep["done"], 2)
+            self.assertEqual(ep["total"], 3)
+
+    def test_per_epic_sorted_ascending(self):
+        """per_epic sorted ascending by epic_id."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "EP-2": {"status": "open", "type": "epic", "title": "B", "children": []},
+                "EP-1": {"status": "open", "type": "epic", "title": "A", "children": []},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            per_epic = out["panels"]["progress"]["per_epic"]
+            self.assertEqual([ep["epic_id"] for ep in per_epic], ["EP-1", "EP-2"])
+
+    def test_per_epic_child_not_in_index(self):
+        """Child id not in index is counted in total only (not in done)."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "EP-1": {"status": "open", "type": "epic", "title": "E",
+                         "children": ["S1", "S2", "MISSING"]},
+                "S1": {"status": "done", "type": "story"},
+                "S2": {"status": "in_progress", "type": "story"},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            ep = out["panels"]["progress"]["per_epic"][0]
+            self.assertEqual(ep["done"], 1)
+            self.assertEqual(ep["total"], 3)
+
+    def test_no_epics_per_epic_empty(self):
+        """No epics in workspace -> per_epic == []."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "open", "type": "task"},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out["panels"]["progress"]["per_epic"], [])
+
+    def test_burn_up_populated_series(self):
+        """burn_up: 2 done tickets with merge-pr.ended_at -> sorted date series, monotonic cumulative."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "done", "type": "story"},
+                "T3": {"status": "in_progress", "type": "story"},
+            })
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            write_pipeline(ws, "T1", steps={
+                "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
+                             "ended_at": "2026-06-10T12:00:00Z"},
+            })
+            write_ticket_json(ws, "T2", "2026-06-02T10:00:00Z")
+            write_pipeline(ws, "T2", steps={
+                "merge-pr": {"started_at": "2026-06-11T11:00:00Z", "status": "completed",
+                             "ended_at": "2026-06-11T12:00:00Z"},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            burn = out["panels"]["progress"]["burn_up"]
+            self.assertIsInstance(burn, list)
+            self.assertGreater(len(burn), 0)
+            dates = [pt["date"] for pt in burn]
+            self.assertEqual(dates, sorted(dates))
+            cumulatives = [pt["completed_cumulative"] for pt in burn]
+            self.assertEqual(cumulatives, sorted(cumulatives))
+            for pt in burn:
+                self.assertEqual(pt["total"], 3)
+            # Determinism
+            out2 = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out["panels"]["progress"]["burn_up"],
+                             out2["panels"]["progress"]["burn_up"])
+
+    def test_burn_up_fallback_to_updated_at(self):
+        """Done ticket with no merge-pr but with ticket.json.updated_at -> point emitted."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            write_ticket_json_full(ws, "T1", created_at="2026-06-01T10:00:00Z",
+                                   updated_at="2026-06-15T09:00:00Z")
+            # pipeline exists but has no merge-pr step
+            write_pipeline(ws, "T1", steps={
+                "code": {"started_at": "2026-06-05T10:00:00Z", "status": "completed",
+                         "ended_at": "2026-06-05T11:00:00Z"},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            burn = out["panels"]["progress"]["burn_up"]
+            self.assertIsInstance(burn, list)
+            self.assertEqual(len(burn), 1)
+            self.assertEqual(burn[0]["date"], "2026-06-15")
+            self.assertEqual(burn[0]["completed_cumulative"], 1)
+
+    def test_burn_up_no_data_done_ticket_no_timestamps(self):
+        """Done ticket with no merge-pr and no readable ticket.json -> burn_up == 'no data' + meta.degraded."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            # No ticket.json, no pipeline-state.json -> no timestamps recoverable
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            burn = out["panels"]["progress"]["burn_up"]
+            self.assertEqual(burn, "no data")
+            self.assertTrue(any(
+                d["ticket_id"] is None and d["panel"] == "progress"
+                for d in out["meta"]["degraded"]
+            ))
+
+    def test_burn_up_empty_no_done_tickets(self):
+        """All tickets open -> burn_up == [] (empty series, valid)."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "T1": {"status": "in_progress", "type": "story"},
+                "T2": {"status": "open", "type": "story"},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out["panels"]["progress"]["burn_up"], [])
+
+    def test_burn_up_same_date_multiple_tickets(self):
+        """Two done tickets on same date -> single point with completed_cumulative == 2."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "done", "type": "story"},
+            })
+            same_ended = "2026-06-10T12:00:00Z"
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            write_pipeline(ws, "T1", steps={
+                "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
+                             "ended_at": same_ended},
+            })
+            write_ticket_json(ws, "T2", "2026-06-02T10:00:00Z")
+            write_pipeline(ws, "T2", steps={
+                "merge-pr": {"started_at": "2026-06-10T11:30:00Z", "status": "completed",
+                             "ended_at": same_ended},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            burn = out["panels"]["progress"]["burn_up"]
+            self.assertIsInstance(burn, list)
+            self.assertEqual(len(burn), 1)
+            self.assertEqual(burn[0]["date"], "2026-06-10")
+            self.assertEqual(burn[0]["completed_cumulative"], 2)
+            # Deterministic
+            out2 = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(burn, out2["panels"]["progress"]["burn_up"])
+
+    def test_burn_up_done_ticket_updated_at_absent_but_ticket_json_present(self):
+        """Done ticket with ticket.json but no updated_at and no merge-pr -> excluded, series empty -> no data only if all done tickets fail."""
+        with TemporaryDirectory() as ws:
+            # T1 done but only ticket.json has no updated_at; T2 done with updated_at
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "done", "type": "story"},
+            })
+            # T1: ticket.json with no updated_at, no pipeline merge-pr
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            # T2: ticket.json with updated_at
+            write_ticket_json_full(ws, "T2", created_at="2026-06-02T10:00:00Z",
+                                   updated_at="2026-06-20T09:00:00Z")
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            burn = out["panels"]["progress"]["burn_up"]
+            # T2 produces a point, T1 is excluded silently
+            self.assertIsInstance(burn, list)
+            self.assertGreater(len(burn), 0)
+            self.assertEqual(burn[-1]["completed_cumulative"], 1)
+
+
+class TestDeadline(unittest.TestCase):
+    """MAR-14 spec 01 §Test plan: deadline panel."""
+
+    def test_always_not_set(self):
+        """Any workspace -> deadline is 'not set' + meta.degraded."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            dl = out["panels"]["deadline"]
+            self.assertEqual(dl["status"], "not set")
+            self.assertIsNone(dl["due_date"])
+            self.assertIsInstance(dl["message"], str)
+            self.assertTrue(dl["message"])
+            self.assertTrue(any(d["panel"] == "deadline" for d in out["meta"]["degraded"]))
+
+    def test_populated_workspace_also_not_set(self):
+        """Populated workspace: deadline does not vary with workspace content."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "in_progress", "type": "task"},
+            })
+            write_pipeline(ws, "T1", steps={
+                "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
+                             "ended_at": "2026-06-10T12:00:00Z"},
+            })
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            dl = out["panels"]["deadline"]
+            self.assertEqual(dl["status"], "not set")
+            self.assertIsNone(dl["due_date"])
+            self.assertTrue(any(d["panel"] == "deadline" for d in out["meta"]["degraded"]))
+
+    def test_empty_workspace_deadline_no_data(self):
+        """Empty workspace early-return path -> panels['deadline'] == 'no data'."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out["panels"]["deadline"], "no data")
+
+
+class TestUsageSummary(unittest.TestCase):
+    """MAR-14 spec 01 §Test plan: usage_summary panel."""
+
+    def test_happy_path_all_fields(self):
+        """Full metrics.json -> all 8 keys present with expected types."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "T1": {"status": "done", "type": "story"},
+                "T2": {"status": "done", "type": "story"},
+                "T3": {"status": "in_progress", "type": "story"},
+            })
+            write_metrics(ws, {
+                "prs": {"created": 3, "merged": 3},
+                "totals": {"runs": 10, "working_seconds": 7200,
+                           "tokens": {"input": 50000, "output": 10000}, "cost_usd": 12.50},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            us = out["panels"]["usage_summary"]
+            self.assertAlmostEqual(us["total_cost_usd"], 12.50)
+            self.assertEqual(us["total_tokens_input"], 50000)
+            self.assertEqual(us["total_tokens_output"], 10000)
+            self.assertEqual(us["total_runs"], 10)
+            self.assertEqual(us["total_working_seconds"], 7200)
+            self.assertEqual(us["prs_merged"], 3)
+            # averages from panel3
+            self.assertIsInstance(us["avg_working_seconds_per_ticket"], float)
+            self.assertIsInstance(us["avg_working_seconds_per_pr"], float)
+            self.assertIsInstance(us["avg_cost_per_ticket"], float)
+            self.assertIsInstance(us["avg_cost_per_pr"], float)
+
+    def test_missing_metrics_json_zero_defaults(self):
+        """No metrics.json -> integer/float totals default to 0/0.0; averages are 'no data'."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            # No metrics.json
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            us = out["panels"]["usage_summary"]
+            self.assertEqual(us["total_cost_usd"], 0.0)
+            self.assertEqual(us["total_tokens_input"], 0)
+            self.assertEqual(us["total_tokens_output"], 0)
+            self.assertEqual(us["total_runs"], 0)
+            self.assertEqual(us["prs_merged"], 0)
+            # averages: no totals data -> "no data"
+            self.assertEqual(us["avg_working_seconds_per_ticket"], "no data")
+            self.assertEqual(us["avg_working_seconds_per_pr"], "no data")
+            self.assertEqual(us["avg_cost_per_ticket"], "no data")
+            self.assertEqual(us["avg_cost_per_pr"], "no data")
+
+    def test_total_working_seconds_none_when_absent(self):
+        """metrics.json present but totals.working_seconds absent -> total_working_seconds is None."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            write_metrics(ws, {
+                "prs": {"created": 1, "merged": 1},
+                "totals": {"runs": 2, "cost_usd": 3.0,
+                           "tokens": {"input": 100, "output": 50}},
+            })
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            us = out["panels"]["usage_summary"]
+            self.assertIsNone(us["total_working_seconds"])
+
+    def test_empty_workspace_usage_summary_no_data(self):
+        """Empty workspace early-return path -> panels['usage_summary'] == 'no data'."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            self.assertEqual(out["panels"]["usage_summary"], "no data")
+
+
+class TestNewPanelKeyPresence(unittest.TestCase):
+    """MAR-14 spec 01 §Test plan: key-presence (AC-1 / B1)."""
+
+    _NEW_KEYS = ("delivery_summary", "issues", "progress", "deadline", "usage_summary")
+    _OLD_KEYS = ("1", "2", "3", "4", "5", "6", "7")
+
+    def test_all_five_new_keys_present_happy_path(self):
+        """All five new string keys exist in panels alongside '1'..'7'."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            for k in self._NEW_KEYS:
+                self.assertIn(k, out["panels"], "missing new key: %s" % k)
+
+    def test_all_five_new_keys_present_empty_workspace(self):
+        """Empty workspace early-return path: all five new keys present."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            for k in self._NEW_KEYS:
+                self.assertIn(k, out["panels"], "missing new key on empty-ws: %s" % k)
+
+    def test_existing_keys_not_renamed_or_removed(self):
+        """Existing keys '1'..'7' still present after spec 01 additions."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            for k in self._OLD_KEYS:
+                self.assertIn(k, out["panels"], "existing key missing: %s" % k)
+
+    def test_empty_workspace_all_new_keys_are_no_data(self):
+        """Empty workspace: all five new keys have value 'no data'."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {})
+            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            for k in self._NEW_KEYS:
+                self.assertEqual(out["panels"][k], "no data",
+                                 "expected 'no data' for %s on empty-ws" % k)
+
+
+class TestAggregatorDeterminism(unittest.TestCase):
+    """MAR-14 spec 01: new panels identical across two calls (extends existing determinism coverage)."""
+
+    _NEW_KEYS = ("delivery_summary", "issues", "progress", "deadline", "usage_summary")
+
+    def test_new_panels_identical_across_two_calls(self):
+        """Run aggregate() twice on the same workspace; new panel values are equal."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {
+                "EP-1": {"status": "in_progress", "type": "epic", "title": "Epic",
+                         "children": ["S1", "S2"]},
+                "S1": {"status": "done", "type": "story"},
+                "S2": {"status": "in_progress", "type": "story"},
+            })
+            write_metrics(ws, {
+                "prs": {"created": 1, "merged": 1},
+                "totals": {"runs": 3, "working_seconds": 3600, "cost_usd": 5.0,
+                           "tokens": {"input": 10000, "output": 2000}},
+            })
+            write_ticket_json(ws, "S1", "2026-06-01T10:00:00Z")
+            write_pipeline(ws, "S1", steps={
+                "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
+                             "ended_at": "2026-06-10T12:00:00Z"},
+            })
+            out1 = metrics_aggregate.aggregate(ws, REPO_ID)
+            out2 = metrics_aggregate.aggregate(ws, REPO_ID)
+            for k in self._NEW_KEYS:
+                self.assertEqual(out1["panels"][k], out2["panels"][k],
+                                 "non-deterministic result for panel key: %s" % k)
