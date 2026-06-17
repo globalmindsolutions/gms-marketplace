@@ -1,11 +1,12 @@
 # Skill Requirements
 
-Fifteen skills in total: the bootstrap skill (`/init`), the umbrella command
+Sixteen skills in total: the bootstrap skill (`/init`), the umbrella command
 (`/ship`), the utility skills — the session-handoff helper (`/handoff`), the
-update assistant (`/update`), the local-hooks installer (`/install-hooks`), and
-the read-only metrics dashboard (`/metrics`) — the product-level
-`/create-prd`, `/create-architecture`, and `/create-project`, and six
-workflow skills (one of them, `/create-design`, conditional).
+update assistant (`/update`), the local-hooks installer (`/install-hooks`), the
+read-only PM metrics dashboard (`/metrics`), and the read-only usage dashboard
+(`/usage`) — the product-level `/create-prd`, `/create-architecture`, and
+`/create-project`, and six workflow skills (one of them, `/create-design`,
+conditional).
 Every **workflow** skill MUST:
 
 - run the Reflection cycle (plan → execute → verify) with its own
@@ -117,25 +118,54 @@ this skill owns the workflow around it.
 
 ## `/metrics` (utility)
 
-Purpose: render a **read-only** in-session dashboard of this repo's delivery
-metrics, derived entirely from existing workspace state — no network, no new
-config key, nothing written.
+Purpose: render a **read-only** in-session **PM view** dashboard of this
+repo's delivery metrics, derived entirely from existing workspace state — no
+network, no new config key, nothing written.
 
 - **Model-invocable** (unlike `/update` and `/install-hooks`, it does not set
   `disable-model-invocation`): a natural-language request to see this repo's
-  throughput, spend, coverage, or review effort routes here.
-- Runs the stdlib helper `metrics_aggregate.py`, which emits one aggregate JSON
-  of **six panels** — throughput by status/type, pipeline funnel, cost and time
-  per ticket by step, coverage achieved vs target, review iterations before the
-  verifier passed, and token burn by role (planner/executor/verifier).
+  throughput, pipeline health, issues, progress, coverage, or lead/cycle time
+  routes here.
+- Runs the stdlib helper `metrics_aggregate.py`, which emits one superset
+  aggregate JSON. The coordinator then passes the JSON to `metrics_render.py
+  --view pm`, which renders the **nine PM-view panels**: delivery summary (headline
+  KPIs), throughput by status/type, pipeline funnel + distinct PRs, ISSUES
+  (id/title/status/type/GitHub key), PROGRESS (per-epic done/total + burn-up
+  visual), DEADLINE ("not set" frame — deadline tracking requires a `due_date`
+  field on the ticket, wired in Child 3 / MAR-15), coverage achieved vs target,
+  review iterations before the verifier passed, and lead + cycle time.
 - The coordinator **routes** the aggregate JSON through the deterministic stdlib
-  renderer `metrics_render.py` rather than composing the layout itself: the
-  **terminal** Unicode dashboard is the Claude Code CLI default, and `--html`
-  emits a self-contained HTML string handed to `show_widget` on Claude
-  Desktop / claude.ai. Rendering is deterministic and read-only; every panel key
-  is always present (a panel with no data renders as "no data", not a missing
-  frame). The deterministic terminal renderer **supersedes** the former
+  renderer `metrics_render.py --view pm` rather than composing the layout
+  itself: the **terminal** Unicode dashboard is the Claude Code CLI default, and
+  `--html` emits a self-contained HTML string handed to `show_widget` on Claude
+  Desktop / claude.ai. Rendering is deterministic and read-only; every PM-view
+  panel key is always present (a panel with no data renders as "no data", not a
+  missing frame). The deterministic terminal renderer **supersedes** the former
   Markdown-table fallback.
+- **Reads only** — writes no file, makes no network/`gh` call, and consumes no
+  config key beyond the `.acs/settings.json` the helper already reads.
+- Not part of the gated pipeline; no planner/executor/verifier subagents.
+
+## `/usage` (utility)
+
+Purpose: render a **read-only** in-session **usage view** dashboard of this
+repo's acs-tool spend metrics (cost, time, token burn), derived entirely from
+existing workspace state — no network, no new config key, nothing written.
+
+- **Model-invocable** (it does not set `disable-model-invocation`): a
+  natural-language request to see this repo's acs spend, cost per ticket, or
+  token burn routes here.
+- Runs the same stdlib helper `metrics_aggregate.py` that `/metrics` uses (one
+  shared superset aggregator), then passes the JSON to `metrics_render.py
+  --view usage`, which renders the **three usage-view panels**: usage summary
+  (headline spend KPIs — total cost, total working time, total runs, plus four
+  averages: avg working time per ticket and per merged PR, avg cost per ticket
+  and per merged PR), cost + time per ticket by step with the four averages, and
+  token burn by role (planner/executor/verifier).
+- The coordinator **routes** the aggregate JSON through `metrics_render.py
+  --view usage`: **terminal** (Claude Code CLI default) or `--html`
+  (self-contained HTML → `show_widget`). Rendering is deterministic and
+  read-only; every usage-view panel key is always present.
 - **Reads only** — writes no file, makes no network/`gh` call, and consumes no
   config key beyond the `.acs/settings.json` the helper already reads.
 - Not part of the gated pipeline; no planner/executor/verifier subagents.
