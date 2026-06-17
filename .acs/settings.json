@@ -19,7 +19,7 @@
       "pr_title": true,
       "pr_description": true,
       "acs_label": true,
-      "commit_message": false
+      "commit_message": true
     },
     "exempt_branches": [
       "release/*",
