@@ -110,6 +110,17 @@ features.
   `patterns_allowed=["pre-commit/action@*"]`) — confirmed live via
   `gh api repos/:owner/:repo/actions/permissions` and
   `.../actions/permissions/workflow`; re-confirmable the same way.
+- **E5.5 — Escape-hatch merge path + pipeline-as-default guidance (MAR-9, PR #50 — pending merge).**
+  Completes the consumer side of the G9 escape hatch and makes the pipeline the default
+  rather than only the gate. `/acs:merge-pr --pr <n>` (also `#n` / a PR URL) lands a
+  legitimate non-ticket `acs-exempt` PR — same four readiness dimensions and
+  branch/worktree cleanup as the ticket path, but resolving no ticket, writing no
+  partition/state, and skipping tracker sync and archiving (bumping only the repo
+  `pr_merged` metric); it refuses and redirects when the PR is actually ticket-backed.
+  `/acs:init` Step 7e (opt-in, default-on) writes an idempotent, marker-delimited
+  `CLAUDE.md` acs-managed block (from `templates/CLAUDE.acs.md`) steering in-repo
+  Claude sessions to `/acs:ship` rather than a raw `gh pr create`. Pending merge in
+  PR #50; targeted for a v0.2.x release.
 
 ### Epic E3 — Dogfood acs on acs
 
