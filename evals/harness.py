@@ -1,4 +1,11 @@
-"""Behavioral eval harness for the acs plugin (M2 epic E1.1).
+"""Shared behavioral eval harness layer (M2 epic E1.1).
+
+acs-specific seam: ``SOURCE_SCRIPTS``, ``installed_scripts_dir()``, and
+``Sandbox`` are acs-scoped and live here as the shared module so they are not
+duplicated per plugin. Skills-only plugins (e.g. tabp) import neither
+``Sandbox`` nor ``installed_scripts_dir``; they reach ``run_evals.py`` without
+any acs cache resolution. The banner gate in ``run_evals.py`` ensures
+``installed_scripts_dir()`` is never called for a non-acs plugin.
 
 Where `tests/` exercises the *deterministic* layer (hooks, gates, state) by
 driving the Python scripts directly and runs in PR CI without `claude`, this
@@ -33,6 +40,11 @@ import tempfile
 import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# acs-specific: SOURCE_SCRIPTS and installed_scripts_dir() are the acs cache-
+# resolution seam.  They are deliberately NOT generalised to arbitrary plugins.
+# run_evals.py gates the banner that calls installed_scripts_dir() so a
+# skills-only plugin (no .acs/, no hooks/scripts) never triggers acs resolution.
 SOURCE_SCRIPTS = os.path.join(REPO_ROOT, "plugins", "acs", "hooks", "scripts")
 
 
