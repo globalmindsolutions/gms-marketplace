@@ -1,4 +1,4 @@
-"""s04 — description-trigger evals for all 15 skills (paid, E1.2).
+"""s04 — description-trigger evals for all 16 skills (paid, E1.2).
 
 For each skill, a natural-language request that describes the intent *without
 naming the skill* must route to that skill. Asserts on the first `Skill`
@@ -13,7 +13,7 @@ META = {
     "name": "skill_triggers",
     "tier": "paid",
     "goal": "route",
-    "summary": "the right skill fires for a natural-language request (all 15)",
+    "summary": "the right skill fires for a natural-language request (all 16)",
 }
 
 # (label, init?, request, expected skill) — requests avoid naming the skill.
@@ -64,6 +64,11 @@ CASES = [
      "Show me a dashboard of throughput, cost, coverage and review effort for "
      "this repo, read straight from the workspace state — no external tools.",
      "metrics"),
+    ("usage", True,
+     "Show me a breakdown of AI spend, token consumption, and average working "
+     "time per ticket for this repo — not delivery throughput, just the tool "
+     "usage and cost side.",
+     "usage"),
 ]
 
 

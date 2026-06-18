@@ -84,7 +84,7 @@ class TestDispatcher(AcsWorkspaceCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_unhooked_acs_skills_pass_through(self):
-        for skill in ("init", "ship", "handoff"):
+        for skill in ("init", "ship", "handoff", "metrics", "usage"):
             self.assertEqual(self.pre(skill).returncode, 0, skill)
 
     def test_garbage_stdin_does_not_crash(self):

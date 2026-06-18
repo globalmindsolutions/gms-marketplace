@@ -6,7 +6,7 @@ C4Container
 
     Person(dev, "Developer")
     System_Boundary(plugin, "acs plugin (installed from this marketplace)") {
-        Container(skills, "Skills", "15 x SKILL.md", "Coordinator protocols: lifecycle, reflection loop, user interaction, completion reports")
+        Container(skills, "Skills", "16 x SKILL.md", "Coordinator protocols: lifecycle, reflection loop, user interaction, completion reports")
         Container(agents, "Subagents", "27 x agent .md", "Planner/executor/verifier charters per hooked skill; grounding rules; XML I/O")
         Container(hooks, "Hook & helper layer", "Python 3.9+ stdlib", "dispatch + 9 pre + 9 post hooks; skill-start, new-ticket, handoff, clarify, validate_xml, status lines; acs_lib")
         Container(schemas, "Schemas & templates", "JSON Schema / XSD / md", "9 state schemas, acs-messages.xsd, 4 description templates")

@@ -17,6 +17,40 @@ the notes.
 
 ### Added
 
+- **Two-skill metrics split: `/acs:metrics` (PM view) + `/acs:usage` (usage view) (MAR-14).**
+  The former single-view `/acs:metrics` skill is split into two narrowly-scoped
+  utility skills over one shared stdlib aggregator:
+
+  - **`/acs:usage`** is a new model-invocable utility skill (skill count 15 → 16,
+    unhooked) that renders the **usage view**: usage summary (total cost, total
+    working time, total runs, plus four averages — avg working time per ticket and
+    per merged PR, avg cost per ticket and per merged PR), cost + time per ticket
+    by pipeline step with the four averages (Panel 3), and token burn by role
+    (Panel 6). Backed by `metrics_aggregate.py` (shared superset) then
+    `metrics_render.py --view usage`. Read-only; no network call; no config key.
+
+  - **`/acs:metrics`** is re-scoped to the **PM view**: delivery summary (headline
+    KPIs — tickets done/total, PRs merged, avg lead/cycle, coverage pass rate),
+    throughput by status/type (Panel 1), pipeline funnel + distinct PRs (Panel 2),
+    ISSUES (id/title/status/type/GitHub key), PROGRESS (per-epic done/total +
+    burn-up visual), DEADLINE ("not set" degraded frame — deadline tracking requires
+    a `due_date` ticket field, wired in Child 3 / MAR-15), coverage achieved vs
+    target (Panel 4), review iterations before the verifier passed (Panel 5), and
+    lead + cycle time per ticket (Panel 7). Invokes `metrics_render.py --view pm`.
+
+  **Shared mechanism.** `metrics_aggregate.py` emits one superset JSON carrying all
+  panel keys for both views (the PM union usage full set; no panel appears in both
+  views). `metrics_render.py` gains four new view entrypoints —
+  `render_pm_terminal`, `render_pm_html`, `render_usage_terminal`,
+  `render_usage_html` — selected by the new `--view {pm,usage}` CLI flag (bare
+  `metrics_render.py` with no `--view` defaults to the PM view; both skills invoke
+  the renderer with the flag explicitly). The existing `render_terminal` /
+  `render_html` entrypoints and `--view all` remain for back-compat.
+
+  **DEADLINE panel** ships as a "not set" B1-compliant degraded frame in this
+  release (the panel key is always present; it renders "not set" without error).
+  Child 3 / MAR-15 wires real due-date data via a `due_date` field on the ticket.
+
 - **Distinct-PR counting via `created_pr_numbers` + idempotent backfill (MAR-13 spec 01).**
   `prs.created` in `metrics.json` now counts **distinct PRs** rather than completed
   `create-pr` run invocations — a single PR re-triggered multiple times no longer
@@ -63,7 +97,7 @@ the notes.
   redirects to `/acs:merge-pr <ticket-id>` when the PR looks ticket-backed. The
   existing ticket-backed merge flow and every other gate are unchanged.
 - **`/acs:metrics` — read-only delivery dashboard (MAR-5).** A new
-  model-invocable utility skill that renders six panels for the current repo —
+  model-invocable utility skill that renders dashboard panels for the current repo —
   throughput by status/type, pipeline funnel, cost and time per ticket by step,
   coverage achieved vs target, review iterations before the verifier passed, and
   token burn by role (planner/executor/verifier). Backed by the stdlib-only
@@ -73,7 +107,7 @@ the notes.
   read-only: it writes no file, makes no network call, and adds no config key.
 - **Deterministic cross-surface metrics renderer (MAR-5).** Rendering is now a
   deterministic stdlib helper `metrics_render.py` that consumes the aggregate
-  JSON and emits the same six panels on two surfaces: a Unicode block-bar
+  JSON and emits the dashboard panels on two surfaces: a Unicode block-bar
   **terminal** dashboard for the Claude Code CLI (default) and a self-contained
   **HTML** component (`--html`, inline CSS, no external fetch) handed to
   `show_widget` verbatim on Claude Desktop / claude.ai. The skill now **routes**

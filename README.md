@@ -78,7 +78,7 @@ Its first plugin, **`acs` (Autonomous Coding Skills)**, provides a complete
 agentic software-delivery workflow: from a raw request through product
 definition (PRD), architecture, ticketing, design, implementation specs,
 TDD implementation with an automatic review loop, pull request, and merge.
-Twelve skills (`/acs:init`, `/acs:ship`, `/acs:code`, …) each run a
+Sixteen skills (`/acs:init`, `/acs:ship`, `/acs:code`, …) each run a
 plan → execute → verify reflection cycle with dedicated subagents; pre/post
 hooks gate every step on the recorded state of its predecessor; and all
 durable state lives in a workspace folder outside the consumer repo, making

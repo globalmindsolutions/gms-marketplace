@@ -162,7 +162,15 @@ Inspect progress and spend anytime: `tickets-index.json` for status across
 tickets, `metrics.json` for per-repo totals, a ticket's
 `pipeline-state.json` for where it stands in the pipeline.
 
-Or just run `/metrics` for a read-only in-session dashboard of the same numbers
-— six panels (throughput, pipeline funnel, cost/time per ticket, coverage vs
-target, review iterations, token burn by role) rendered from this workspace
-state; it writes nothing.
+Or run the two read-only in-session dashboards — both write nothing and make
+no network call:
+
+- **`/metrics`** (PM view) — delivery summary, throughput by status/type,
+  pipeline funnel + distinct PRs, ISSUES, PROGRESS (per-epic burn-up),
+  DEADLINE ("not set" until a `due_date` field is added to the ticket),
+  coverage achieved vs target, review iterations before the verifier passed,
+  and lead + cycle time per ticket.
+- **`/usage`** (usage view) — usage summary (total cost, time, runs, and four
+  averages), cost + time per ticket by pipeline step with the four averages
+  (avg working time and cost per ticket and per merged PR), and token burn by
+  role (planner/executor/verifier).

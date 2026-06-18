@@ -18,8 +18,8 @@ C4Component
         Component(handoff, "handoff.py", "session handoff", "finalize handed_off + summary; release lock; print continue_with")
         Component(vxml, "validate_xml.py", "message validation", "xmllint vs acs-messages.xsd, stdlib structural fallback")
         Component(sline, "statusline.py / subagent-statusline.py", "observability", "prompt line + agent-panel rows from workspace state")
-        Component(metrics, "metrics_aggregate.py", "observability", "read-only: aggregate the six /acs:metrics dashboard panels from workspace artifacts; emits JSON, never writes/gates/locks")
-        Component(mrender, "metrics_render.py", "observability", "read-only: deterministic cross-surface renderer of the aggregate JSON — terminal (CLI default) + self-contained HTML (--html → show_widget); pure, no clock, never writes")
+        Component(metrics, "metrics_aggregate.py", "observability", "read-only: aggregate all panels for /acs:metrics (PM view) and /acs:usage (usage view) from workspace artifacts; emits one superset JSON, never writes/gates/locks")
+        Component(mrender, "metrics_render.py", "observability", "read-only: deterministic cross-surface renderer of the aggregate JSON — serves two views via render_pm_terminal/html (/acs:metrics) and render_usage_terminal/html (/acs:usage), selected by --view {pm,usage}; bare default is PM view; self-contained HTML (--html → show_widget); pure, no clock, never writes")
         Component(lib, "acs_lib.py", "shared core", "settings resolution, repo/checkout identity, state files, ledger, index, counters, metrics, locks, gates")
     }
     ContainerDb_Ext(ws, "Workspace store")
