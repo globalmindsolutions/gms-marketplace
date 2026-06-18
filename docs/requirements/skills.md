@@ -131,8 +131,9 @@ network, no new config key, nothing written.
   --view pm`, which renders the **nine PM-view panels**: delivery summary (headline
   KPIs), throughput by status/type, pipeline funnel + distinct PRs, ISSUES
   (id/title/status/type/GitHub key), PROGRESS (per-epic done/total + burn-up
-  visual), DEADLINE ("not set" frame — deadline tracking requires a `due_date`
-  field on the ticket, wired in Child 3 / MAR-15), coverage achieved vs target,
+  visual), DEADLINE (on-track/overdue status derived from each ticket's `due_date` vs
+  the aggregation reference time; a workspace with no parseable `due_date` degrades to
+  "not set" (B1); set at `/acs:create-ticket`), coverage achieved vs target,
   review iterations before the verifier passed, and lead + cycle time.
 - The coordinator **routes** the aggregate JSON through the deterministic stdlib
   renderer `metrics_render.py --view pm` rather than composing the layout

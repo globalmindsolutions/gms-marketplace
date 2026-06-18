@@ -88,6 +88,23 @@ two-way sync ([configuration.md](configuration.md)), e.g.:
 "external": { "provider": "jira", "key": "PROJ-456" }
 ```
 
+Key fields written by `/acs:create-ticket` and maintained by hooks:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Allocated ticket id, e.g. `SHOP-123` |
+| `title` | string | Human-readable summary |
+| `type` | `"epic"\|"story"\|"task"` | |
+| `status` | `"open"\|"in_progress"\|"in_review"\|"done"` | Managed by hooks |
+| `parent` | string\|null | Parent epic id; null for roots |
+| `children` | string[] | Child ticket ids (epics only) |
+| `external` | object\|null | Remote tracker mapping (`provider`/`key`) |
+| `needs_design` | boolean | True for epics; user-confirmed for stories/tasks |
+| `docs_only` | boolean | True when the change is docs/comments only; default false |
+| `due_date` | string\|null | Optional delivery target date, ISO-8601 `YYYY-MM-DD`; `null` = no deadline set (MAR-15) |
+| `created_at` | ISO-8601 datetime | Set at ticket creation, never changed |
+| `updated_at` | ISO-8601 datetime | Refreshed on every save |
+
 ## State files
 
 Each skill's post-hook writes a `<skill>-state.json` into the ticket

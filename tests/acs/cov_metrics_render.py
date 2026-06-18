@@ -348,11 +348,52 @@ def _drive():
     mod.render_pm_terminal(pm_prog_nodata)
     mod.render_pm_html(pm_prog_nodata)
 
-    # 15) deadline = "no data" — whole-panel nodata path.
+    # 15a) deadline = rows+rollup dict (real data) — exercises the new table branch on both surfaces.
+    pm_dl_real = json.loads(json.dumps(pm_full))
+    pm_dl_real["panels"]["deadline"] = {
+        "rows": [
+            {"id": "T1", "due_date": "2026-06-01", "status": "overdue"},
+            {"id": "T2", "due_date": "2026-07-01", "status": "on-track"},
+            {"id": "T3", "due_date": None,          "status": "not-set"},
+        ],
+        "rollup": {"on_track": 1, "overdue": 1, "not_set": 1},
+    }
+    mod.render_pm_terminal(pm_dl_real)
+    mod.render_pm_html(pm_dl_real)
+
+    # 15b) deadline = degraded "not set" frame dict — exercises the backward-compat branch.
+    pm_dl_notset = json.loads(json.dumps(pm_full))
+    pm_dl_notset["panels"]["deadline"] = {
+        "status": "not set",
+        "due_date": None,
+        "message": "No due date configured. Set due_date on the ticket.",
+    }
+    mod.render_pm_terminal(pm_dl_notset)
+    mod.render_pm_html(pm_dl_notset)
+
+    # 15c) deadline = "no data" string — whole-panel nodata path (unchanged, B1).
     pm_dl_nodata = json.loads(json.dumps(pm_full))
     pm_dl_nodata["panels"]["deadline"] = "no data"
     mod.render_pm_terminal(pm_dl_nodata)
     mod.render_pm_html(pm_dl_nodata)
+
+    # 15d) deadline rows+rollup with empty rows list — exercises "no tickets" terminal branch.
+    pm_dl_empty_rows = json.loads(json.dumps(pm_full))
+    pm_dl_empty_rows["panels"]["deadline"] = {
+        "rows": [],
+        "rollup": {"on_track": 0, "overdue": 0, "not_set": 0},
+    }
+    mod.render_pm_terminal(pm_dl_empty_rows)
+    mod.render_pm_html(pm_dl_empty_rows)
+
+    # 15e) deadline rows+rollup with a non-dict row — exercises the `continue` guard.
+    pm_dl_bad_row = json.loads(json.dumps(pm_full))
+    pm_dl_bad_row["panels"]["deadline"] = {
+        "rows": ["not-a-dict", {"id": "T1", "due_date": "2026-07-01", "status": "on-track"}],
+        "rollup": {"on_track": 1, "overdue": 0, "not_set": 0},
+    }
+    mod.render_pm_terminal(pm_dl_bad_row)
+    mod.render_pm_html(pm_dl_bad_row)
 
     # 16) render_usage_terminal / render_usage_html — fully populated aggregate.
     #     Exercises usage_summary (all 10 KPIs populated), panels 3 + 6.

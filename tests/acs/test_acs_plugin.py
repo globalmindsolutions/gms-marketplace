@@ -12,6 +12,7 @@ Run:  python3 -m unittest discover -s tests -v
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1030,3 +1031,106 @@ class TestBackfillDistinctPRCount(AcsWorkspaceCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# MAR-15 spec 01 — due_date schema + write path
+# ---------------------------------------------------------------------------
+
+class TestDueDateSchema(unittest.TestCase):
+    """AC-1: due_date is an optional, back-compatible addition to ticket.schema.json.
+
+    The repo is stdlib-only (no third-party runtime/test deps), so instead of a
+    full JSON-Schema validator these tests assert the specific contract the
+    schema declares for due_date, reading the rule live from the schema file:
+      - due_date is NOT in `required` (so an absent key conforms);
+      - due_date is `oneOf [{type:string, pattern}, {type:null}]`, so null and a
+        pattern-matching string conform while a non-matching string does not.
+    The string-branch `pattern` is extracted from the loaded schema (not copied)
+    and applied with `re.match`, so the tests track the real schema rule.
+    """
+
+    SCHEMA_PATH = os.path.join(REPO_ROOT, "plugins", "acs", "schemas", "ticket.schema.json")
+
+    @classmethod
+    def setUpClass(cls):
+        with open(cls.SCHEMA_PATH) as fh:
+            cls.schema = json.load(fh)
+        due = cls.schema["properties"]["due_date"]
+        branches = due["oneOf"]
+        # Extract the string branch's pattern and confirm a null branch exists.
+        cls.string_pattern = next(
+            b["pattern"] for b in branches if b.get("type") == "string"
+        )
+        cls.allows_null = any(b.get("type") == "null" for b in branches)
+
+    def _due_date_conforms(self, value, *, present=True):
+        """Validate a candidate due_date against the schema's real contract.
+
+        `present=False` models a ticket dict that omits the key entirely.
+        """
+        if not present:
+            # Absent key conforms iff due_date is not required.
+            return "due_date" not in self.schema["required"]
+        if value is None:
+            return self.allows_null
+        if isinstance(value, str):
+            return re.match(self.string_pattern, value) is not None
+        return False
+
+    def test_ticket_without_due_date_validates(self):
+        """Absent due_date must remain schema-valid (back-compat)."""
+        self.assertNotIn("due_date", self.schema["required"])
+        self.assertTrue(self._due_date_conforms(None, present=False))
+
+    def test_ticket_with_due_date_null_validates(self):
+        """due_date: null must validate."""
+        self.assertTrue(self._due_date_conforms(None))
+
+    def test_ticket_with_valid_date_validates(self):
+        """due_date: '2026-07-01' must validate."""
+        self.assertTrue(self._due_date_conforms("2026-07-01"))
+
+    def test_ticket_with_malformed_due_date_fails_validation(self):
+        """due_date: 'not-a-date' must fail the schema's pattern rule."""
+        self.assertFalse(self._due_date_conforms("not-a-date"))
+
+
+class TestDueDateWritePath(AcsWorkspaceCase):
+    """AC-2 + C-3: new-ticket.py --due-date sets ticket.json and tickets-index.json."""
+
+    def test_due_date_written_to_ticket_json(self):
+        """--due-date 2026-07-01 must appear in ticket.json.due_date."""
+        ticket_id = self.new_ticket("T", "task", "--due-date", "2026-07-01")
+        ticket = lib.load_ticket(self.tdir(ticket_id))
+        self.assertEqual(ticket["due_date"], "2026-07-01")
+
+    def test_due_date_propagated_to_index(self):
+        """--due-date 2026-07-01 must propagate into tickets-index.json (C-3)."""
+        ticket_id = self.new_ticket("T", "task", "--due-date", "2026-07-01")
+        with open(lib.index_path(self.ws, "acme-shop")) as fh:
+            index = __import__("json").load(fh)
+        self.assertEqual(index["tickets"][ticket_id]["due_date"], "2026-07-01")
+
+    def test_omitting_due_date_yields_null(self):
+        """Omitting --due-date must write due_date: null in ticket.json."""
+        ticket_id = self.new_ticket("T2", "task")
+        ticket = lib.load_ticket(self.tdir(ticket_id))
+        self.assertIsNone(ticket["due_date"])
+
+    def test_malformed_due_date_rejected_non_zero_exit(self):
+        """2026/07/01 (wrong separator) must exit non-zero with 'YYYY-MM-DD' in stderr."""
+        result = self.run_script(
+            "new-ticket.py", "--title", "T3", "--type", "task",
+            "--due-date", "2026/07/01",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("YYYY-MM-DD", result.stderr)
+
+    def test_datetime_string_rejected(self):
+        """2026-07-01T00:00:00Z (datetime, not bare date) must exit non-zero."""
+        result = self.run_script(
+            "new-ticket.py", "--title", "T4", "--type", "task",
+            "--due-date", "2026-07-01T00:00:00Z",
+        )
+        self.assertNotEqual(result.returncode, 0)

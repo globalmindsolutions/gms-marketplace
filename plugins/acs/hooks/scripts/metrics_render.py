@@ -919,16 +919,47 @@ def _html_render_progress(panel):
 
 
 def _term_render_deadline(panel):
-    """Terminal renderer for the deadline panel (spec 02 §_render_deadline_terminal).
+    """Terminal renderer for the deadline panel (MAR-15 spec 02).
 
-    Always the degraded 'not set' frame (Child 3 / MAR-15 wires real data).
-    'no data' or non-dict -> single 'no data' row (B1).
+    Three branches (B1: all present):
+    - 'no data' or non-dict -> single 'no data' block.
+    - dict with 'rows' key -> per-ticket table + roll-up (real data, MAR-15).
+    - dict without 'rows' key -> degraded 'not set' frame (MAR-14 shape, backward-compat).
+
+    Every cell passes through _esc (NFR Security, design.md:101).
+    Reads no clock — determinism is preserved by construction (AC-6).
     """
     if _is_no_data(panel) or not isinstance(panel, dict):
         return _term_no_data_block()
+
+    if "rows" in panel:
+        # Real data: per-ticket table + roll-up (spec 02 §Renderer changes).
+        out = []
+        rows = panel.get("rows") or []
+        if not rows:
+            out.append("  (no tickets)")
+        else:
+            out.append("  %-20s  %-12s  %s" % ("ticket", "due date", "status"))
+            out.append("  " + "-" * 50)
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                tid = _esc(str(row.get("id", "")))
+                due = row.get("due_date")
+                due_str = _esc("—" if due is None else str(due))
+                st = _esc(str(row.get("status", "")))
+                out.append("  %-20s  %-12s  %s" % (tid, due_str, st))
+        rollup = panel.get("rollup") or {}
+        out.append("  overdue: %s / on-track: %s / not-set: %s" % (
+            _esc(str(rollup.get("overdue", 0))),
+            _esc(str(rollup.get("on_track", 0))),
+            _esc(str(rollup.get("not_set", 0))),
+        ))
+        return out
+
+    # Degraded 'not set' frame (MAR-14 shape, backward-compatible).
     out = []
     out.append("  status:   %s" % _esc(str(panel.get("status", ""))))
-    # due_date is always None for now; render as "—" (consistent representation)
     due = panel.get("due_date")
     out.append("  due date: %s" % ("—" if due is None else _esc(str(due))))
     out.append("  message:  %s" % _esc(str(panel.get("message", ""))))
@@ -936,12 +967,45 @@ def _term_render_deadline(panel):
 
 
 def _html_render_deadline(panel):
-    """HTML renderer for the deadline panel (spec 02 §_render_deadline_html).
+    """HTML renderer for the deadline panel (MAR-15 spec 02).
 
-    Renders the 'not set' frame. 'no data' or non-dict -> nodata div (B1).
+    Three branches (B1: all present):
+    - 'no data' or non-dict -> nodata div.
+    - dict with 'rows' key -> per-ticket HTML table + roll-up row (real data, MAR-15).
+    - dict without 'rows' key -> degraded 'not set' frame table (MAR-14 shape, backward-compat).
+
+    Every cell passes through _esc (NFR Security, design.md:101).
+    Reads no clock — determinism is preserved by construction (AC-6).
     """
     if _is_no_data(panel) or not isinstance(panel, dict):
         return _html_no_data()
+
+    if "rows" in panel:
+        # Real data: per-ticket table + roll-up (spec 02 §Renderer changes).
+        parts = []
+        ticket_rows = panel.get("rows") or []
+        header = "<tr><th>ticket</th><th>due date</th><th>status</th></tr>"
+        trs = [header]
+        for row in ticket_rows:
+            if not isinstance(row, dict):
+                continue
+            tid = _esc(str(row.get("id", "")))
+            due = row.get("due_date")
+            due_str = _esc("—" if due is None else str(due))
+            st = _esc(str(row.get("status", "")))
+            trs.append("<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (tid, due_str, st))
+        parts.append("<table>" + "".join(trs) + "</table>")
+        rollup = panel.get("rollup") or {}
+        parts.append(
+            "<p>overdue: %s / on-track: %s / not-set: %s</p>" % (
+                _esc(str(rollup.get("overdue", 0))),
+                _esc(str(rollup.get("on_track", 0))),
+                _esc(str(rollup.get("not_set", 0))),
+            )
+        )
+        return "".join(parts)
+
+    # Degraded 'not set' frame (MAR-14 shape, backward-compatible).
     due = panel.get("due_date")
     due_str = "—" if due is None else _esc(str(due))
     rows = [

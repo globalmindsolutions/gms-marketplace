@@ -1521,6 +1521,105 @@ class TestDeadlinePanelRendering(unittest.TestCase):
         self.assertIn("DeadlineMessage42", term)
         self.assertIn("DeadlineMessage42", html)
 
+    # --- MAR-15 spec 02: real-data table shape (rows + rollup) ---
+
+    _ROWS_ROLLUP = {
+        "rows": [
+            {"id": "T1", "due_date": "2026-06-01", "status": "overdue"},
+            {"id": "T2", "due_date": "2026-07-01", "status": "on-track"},
+        ],
+        "rollup": {"on_track": 1, "overdue": 1, "not_set": 0},
+    }
+
+    def test_deadline_real_data_table_renders_terminal(self):
+        """rows+rollup deadline shape renders 'overdue' and 'on-track' in terminal output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = self._ROWS_ROLLUP
+        term = metrics_render.render_pm_terminal(data)
+        self.assertIn("overdue", term)
+        self.assertIn("on-track", term)
+
+    def test_deadline_real_data_table_renders_html(self):
+        """rows+rollup deadline shape renders 'overdue' and 'on-track' in HTML output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = self._ROWS_ROLLUP
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("overdue", html)
+        self.assertIn("on-track", html)
+
+    def test_deadline_rollup_rendered_terminal(self):
+        """Rollup counts appear in terminal output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = self._ROWS_ROLLUP
+        term = metrics_render.render_pm_terminal(data)
+        self.assertIn("1", term)  # overdue: 1 / on-track: 1
+
+    def test_deadline_rollup_rendered_html(self):
+        """Rollup counts appear in HTML output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = self._ROWS_ROLLUP
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("1", html)
+
+    def test_pm_terminal_no_data_deadline_frame_present(self):
+        """deadline='no data' string -> 'no data' appears in terminal output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = "no data"
+        term = metrics_render.render_pm_terminal(data)
+        self.assertIn("no data", term)
+
+    def test_pm_html_no_data_deadline_frame_present(self):
+        """deadline='no data' string -> 'no data' appears in HTML output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = "no data"
+        html = metrics_render.render_pm_html(data)
+        self.assertIn("no data", html)
+
+    def test_deadline_render_writes_nothing(self):
+        """render_pm_terminal and render_pm_html are pure functions — no filesystem writes."""
+        import tempfile
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = self._ROWS_ROLLUP
+        with tempfile.TemporaryDirectory() as tmpdir:
+            before = set()
+            for root, dirs, files in os.walk(tmpdir):
+                for f in files:
+                    before.add(os.path.join(root, f))
+            metrics_render.render_pm_terminal(data)
+            metrics_render.render_pm_html(data)
+            after = set()
+            for root, dirs, files in os.walk(tmpdir):
+                for f in files:
+                    after.add(os.path.join(root, f))
+        self.assertEqual(before, after, "render functions must not create files")
+
+    def test_deadline_determinism_terminal(self):
+        """Two calls with identical input produce byte-identical terminal output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = self._ROWS_ROLLUP
+        out1 = metrics_render.render_pm_terminal(data)
+        out2 = metrics_render.render_pm_terminal(data)
+        self.assertEqual(out1, out2)
+
+    def test_deadline_determinism_html(self):
+        """Two calls with identical input produce byte-identical HTML output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = self._ROWS_ROLLUP
+        out1 = metrics_render.render_pm_html(data)
+        out2 = metrics_render.render_pm_html(data)
+        self.assertEqual(out1, out2)
+
+    def test_xss_in_deadline_row_id_escaped_html(self):
+        """XSS sentinel in deadline row id is escaped in PM HTML output."""
+        data = _full_workspace_data_with_new_panels()
+        data["panels"]["deadline"] = {
+            "rows": [{"id": "<script>x</script>", "due_date": "2026-07-01", "status": "on-track"}],
+            "rollup": {"on_track": 1, "overdue": 0, "not_set": 0},
+        }
+        html = metrics_render.render_pm_html(data)
+        self.assertNotIn("<script>x</script>", html)
+        self.assertIn("&lt;script&gt;", html)
+
 
 class TestUsageSummaryPanelRendering(unittest.TestCase):
     """Specific tests for the usage_summary panel renderers."""

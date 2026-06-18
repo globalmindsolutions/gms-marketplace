@@ -16,6 +16,7 @@ Prints {"ticket_id": ..., "partition": ...} on success.
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -36,7 +37,16 @@ def main():
     parser.add_argument("--external", help="remote tracker mapping, e.g. jira:PROJ-456 or github:123")
     parser.add_argument("--assignee")
     parser.add_argument("--story-points", dest="story_points", type=int)
+    parser.add_argument("--due-date", dest="due_date",
+                        help="Optional delivery target date, ISO-8601 YYYY-MM-DD.")
     args = parser.parse_args()
+
+    if args.due_date is not None:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.due_date):
+            sys.stderr.write(
+                "acs new-ticket: --due-date must be YYYY-MM-DD, got: %r\n" % args.due_date
+            )
+            sys.exit(2)
 
     cwd = os.getcwd()
     try:
@@ -84,6 +94,7 @@ def main():
         story_points=args.story_points,
         needs_design=needs_design,
         docs_only=args.docs_only == "true",
+        due_date=args.due_date,
     )
     lib.save_ticket(tdir, ticket)
     lib.update_index(workspace, repo_id, ticket, archived=False)

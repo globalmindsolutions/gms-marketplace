@@ -51,6 +51,30 @@ the notes.
   release (the panel key is always present; it renders "not set" without error).
   Child 3 / MAR-15 wires real due-date data via a `due_date` field on the ticket.
 
+- **Ticket `due_date` field + live DEADLINE panel (MAR-15).** The DEADLINE panel
+  in `/acs:metrics` (PM view) now derives and displays real on-track/overdue
+  status from each ticket's `due_date`:
+
+  - **`due_date` on `ticket.json`** is a new optional ISO-8601 date field
+    (`YYYY-MM-DD` or null; additive, back-compatible — existing tickets with no
+    `due_date` are valid and the panel degrades gracefully to "not set").
+    `/acs:create-ticket` elicits and sets `due_date`; the `--due-date` option on
+    `new-ticket.py` accepts and validates the value (malformed input is rejected
+    with a non-zero exit).
+  - **DEADLINE panel — live derivation.** `metrics_aggregate.py` reads each
+    ticket's `due_date` (from the `ticket.json` already opened per ticket) and
+    derives: *overdue* when `due_date < now` and the ticket is not done;
+    *on-track* otherwise.  The panel shows one row per ticket with a `due_date`,
+    plus a roll-up summary.  A workspace with no parseable `due_date` on any
+    ticket degrades to the "not set" state (B1 — the panel key is always
+    present; no crash).  An empty workspace keeps `deadline == "no data"`.
+  - **Read-only.** Aggregator and renderer write nothing; the only new write is
+    `due_date` at create-ticket.  No network call; no new config key.
+    Deterministic: the reference "now" is the same instant stamped into
+    `meta.generated_at` (pinnable in tests); the renderer reads no clock.
+
+  This supersedes the MAR-14 interim "not set" degraded frame.
+
 - **Distinct-PR counting via `created_pr_numbers` + idempotent backfill (MAR-13 spec 01).**
   `prs.created` in `metrics.json` now counts **distinct PRs** rather than completed
   `create-pr` run invocations — a single PR re-triggered multiple times no longer

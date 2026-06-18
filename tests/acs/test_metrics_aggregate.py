@@ -85,11 +85,17 @@ def write_create_pr_state(ws, tid, states=None, archived=False):
                 {"skill": "create-pr", "ticket_id": tid, "states": states or {}, "runs": []})
 
 
-def write_ticket_json(ws, tid, created_at, archived=False):
-    """Write <partition>/ticket.json carrying created_at (lead-time anchor for panel 7)."""
+def write_ticket_json(ws, tid, created_at, archived=False, due_date=None):
+    """Write <partition>/ticket.json carrying created_at (lead-time anchor for panel 7).
+
+    Optional due_date (ISO-8601 date string or None) is included when provided, supporting
+    the MAR-15 spec 02 deadline derivation tests.
+    """
     tdir = _ticket_dir(ws, tid, archived)
-    _write_json(os.path.join(tdir, "ticket.json"),
-                {"id": tid, "created_at": created_at})
+    data = {"id": tid, "created_at": created_at}
+    if due_date is not None:
+        data["due_date"] = due_date
+    _write_json(os.path.join(tdir, "ticket.json"), data)
 
 
 _RESULT_XML = (
@@ -1285,44 +1291,144 @@ class TestProgress(unittest.TestCase):
 
 
 class TestDeadline(unittest.TestCase):
-    """MAR-14 spec 01 §Test plan: deadline panel."""
+    """MAR-15 spec 02 §Test plan: deadline panel — real on-track/overdue derivation (AC-3/4/5/6)."""
 
-    def test_always_not_set(self):
-        """Any workspace -> deadline is 'not set' + meta.degraded."""
+    # --- AC-3: real on-track/overdue from due_date vs injected now ---
+
+    def test_overdue_ticket(self):
+        """Ticket with past due_date and status in_progress -> row status overdue, rollup overdue==1."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "in_progress", "type": "story"}})
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z", due_date="2026-06-01")
+            out = metrics_aggregate.aggregate(ws, REPO_ID, now="2026-06-18")
+            dl = out["panels"]["deadline"]
+            self.assertIn("rows", dl)
+            row = next(r for r in dl["rows"] if r["id"] == "T1")
+            self.assertEqual(row["status"], "overdue")
+            self.assertEqual(dl["rollup"]["overdue"], 1)
+            self.assertEqual(dl["rollup"]["on_track"], 0)
+
+    def test_on_track_future_date(self):
+        """Ticket with future due_date and status in_progress -> row status on-track."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "in_progress", "type": "story"}})
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z", due_date="2026-07-01")
+            out = metrics_aggregate.aggregate(ws, REPO_ID, now="2026-06-18")
+            dl = out["panels"]["deadline"]
+            self.assertIn("rows", dl)
+            row = next(r for r in dl["rows"] if r["id"] == "T1")
+            self.assertEqual(row["status"], "on-track")
+            self.assertEqual(dl["rollup"]["on_track"], 1)
+            self.assertEqual(dl["rollup"]["overdue"], 0)
+
+    def test_done_ticket_overrides_overdue(self):
+        """Ticket with past due_date but status done -> row status on-track (done overrides overdue)."""
         with TemporaryDirectory() as ws:
             write_index(ws, {"T1": {"status": "done", "type": "story"}})
-            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z", due_date="2026-06-01")
+            out = metrics_aggregate.aggregate(ws, REPO_ID, now="2026-06-18")
             dl = out["panels"]["deadline"]
-            self.assertEqual(dl["status"], "not set")
-            self.assertIsNone(dl["due_date"])
-            self.assertIsInstance(dl["message"], str)
-            self.assertTrue(dl["message"])
-            self.assertTrue(any(d["panel"] == "deadline" for d in out["meta"]["degraded"]))
+            self.assertIn("rows", dl)
+            row = next(r for r in dl["rows"] if r["id"] == "T1")
+            self.assertEqual(row["status"], "on-track",
+                             "done ticket must override overdue even if due_date < now")
+            self.assertEqual(dl["rollup"]["on_track"], 1)
+            self.assertEqual(dl["rollup"]["overdue"], 0)
 
-    def test_populated_workspace_also_not_set(self):
-        """Populated workspace: deadline does not vary with workspace content."""
+    def test_mixed_set_rollup_counts(self):
+        """Three tickets: one overdue, one on-track, one not-set -> rollup {overdue:1, on_track:1, not_set:1}."""
         with TemporaryDirectory() as ws:
             write_index(ws, {
-                "T1": {"status": "done", "type": "story"},
+                "T1": {"status": "in_progress", "type": "story"},
                 "T2": {"status": "in_progress", "type": "task"},
+                "T3": {"status": "in_progress", "type": "task"},
             })
-            write_pipeline(ws, "T1", steps={
-                "merge-pr": {"started_at": "2026-06-10T11:00:00Z", "status": "completed",
-                             "ended_at": "2026-06-10T12:00:00Z"},
-            })
-            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
-            out = metrics_aggregate.aggregate(ws, REPO_ID)
+            write_ticket_json(ws, "T1", "2026-06-01T00:00:00Z", due_date="2026-06-01")   # overdue
+            write_ticket_json(ws, "T2", "2026-06-01T00:00:00Z", due_date="2026-07-01")   # on-track
+            write_ticket_json(ws, "T3", "2026-06-01T00:00:00Z")                          # not-set (no due_date)
+            out = metrics_aggregate.aggregate(ws, REPO_ID, now="2026-06-18")
             dl = out["panels"]["deadline"]
-            self.assertEqual(dl["status"], "not set")
-            self.assertIsNone(dl["due_date"])
+            self.assertIn("rows", dl)
+            self.assertEqual(len(dl["rows"]), 3)
+            self.assertEqual(dl["rollup"]["overdue"], 1)
+            self.assertEqual(dl["rollup"]["on_track"], 1)
+            self.assertEqual(dl["rollup"]["not_set"], 1)
+
+    # --- AC-4: graceful degradation ---
+
+    def test_no_due_date_anywhere_degrades(self):
+        """All tickets without due_date -> deadline 'not set' frame + meta.degraded entry (B1)."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "done", "type": "story"}})
+            # write_ticket_json without due_date -> no due_date in ticket.json
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z")
+            out = metrics_aggregate.aggregate(ws, REPO_ID, now="2026-06-18")
+            dl = out["panels"]["deadline"]
+            self.assertEqual(dl.get("status"), "not set",
+                             "all-not-set workspace must degrade to the 'not set' frame")
+            self.assertIsNone(dl.get("due_date"))
+            self.assertIsInstance(dl.get("message"), str)
+            self.assertTrue(any(d["panel"] == "deadline" for d in out["meta"]["degraded"]),
+                            "B1: meta.degraded must contain a deadline entry")
+
+    def test_unparseable_due_date_row_not_set(self):
+        """Ticket with unparseable due_date string -> that row status 'not-set'; if only ticket, degrades."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "in_progress", "type": "story"}})
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z", due_date="not-a-date")
+            out = metrics_aggregate.aggregate(ws, REPO_ID, now="2026-06-18")
+            dl = out["panels"]["deadline"]
+            # Single unparseable ticket -> all not-set -> degraded frame
+            self.assertEqual(dl.get("status"), "not set",
+                             "single unparseable due_date must degrade to the 'not set' frame")
             self.assertTrue(any(d["panel"] == "deadline" for d in out["meta"]["degraded"]))
 
     def test_empty_workspace_deadline_no_data(self):
-        """Empty workspace early-return path -> panels['deadline'] == 'no data'."""
+        """Empty workspace early-return path -> panels['deadline'] == 'no data' (unchanged)."""
         with TemporaryDirectory() as ws:
             write_index(ws, {})
             out = metrics_aggregate.aggregate(ws, REPO_ID)
             self.assertEqual(out["panels"]["deadline"], "no data")
+
+    # --- AC-5: zero writes ---
+
+    def test_aggregate_writes_nothing(self):
+        """aggregate() must not write any file in the workspace directory tree (read-only)."""
+        import stat
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "in_progress", "type": "story"}})
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z", due_date="2026-07-01")
+            # Snapshot all file mtimes before the call
+            before = {}
+            for root, dirs, files in os.walk(ws):
+                for fname in files:
+                    fp = os.path.join(root, fname)
+                    before[fp] = os.stat(fp).st_mtime
+            metrics_aggregate.aggregate(ws, REPO_ID, now="2026-06-18")
+            after = {}
+            for root, dirs, files in os.walk(ws):
+                for fname in files:
+                    fp = os.path.join(root, fname)
+                    after[fp] = os.stat(fp).st_mtime
+            # No new files, no mtime changes
+            new_files = set(after) - set(before)
+            self.assertEqual(new_files, set(), "aggregate must not create new files")
+            for fp in before:
+                self.assertEqual(before[fp], after.get(fp, before[fp]),
+                                 "aggregate must not modify existing files: %s changed" % fp)
+
+    # --- AC-6: determinism with pinned now ---
+
+    def test_determinism_pinned_now(self):
+        """Two calls with same workspace + same now= yield identical panels and meta.generated_at."""
+        with TemporaryDirectory() as ws:
+            write_index(ws, {"T1": {"status": "in_progress", "type": "story"}})
+            write_ticket_json(ws, "T1", "2026-06-01T10:00:00Z", due_date="2026-07-01")
+            out1 = metrics_aggregate.aggregate(ws, REPO_ID, now="2026-07-01")
+            out2 = metrics_aggregate.aggregate(ws, REPO_ID, now="2026-07-01")
+            self.assertEqual(out1["panels"]["deadline"], out2["panels"]["deadline"])
+            self.assertEqual(out1["meta"]["generated_at"], out2["meta"]["generated_at"],
+                             "meta.generated_at must be identical for pinned now")
 
 
 class TestUsageSummary(unittest.TestCase):

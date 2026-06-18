@@ -809,6 +809,7 @@ def new_ticket_doc(ticket_id, title, ttype, **kw):
         "story_points": kw.get("story_points"),
         "needs_design": kw.get("needs_design", ttype == "epic"),
         "docs_only": kw.get("docs_only", False),
+        "due_date": kw.get("due_date"),
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -868,6 +869,7 @@ def update_index(workspace, repo_id, ticket, archived=None):
         "children": ticket.get("children", []),
         "needs_design": ticket.get("needs_design"),
         "external": ticket.get("external"),
+        "due_date": ticket.get("due_date"),
         "updated_at": now_iso(),
     })
     if archived is not None:

@@ -44,6 +44,14 @@
       "type": "boolean",
       "default": false
     },
+    "due_date": {
+      "description": "Optional delivery target date (ISO-8601 YYYY-MM-DD). null = no deadline set.",
+      "oneOf": [
+        {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        {"type": "null"}
+      ],
+      "default": null
+    },
     "created_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"}
   },

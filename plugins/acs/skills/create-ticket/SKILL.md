@@ -187,8 +187,9 @@ The executor must:
    (`critical|high|medium|low`), `parent` (null — this skill creates roots),
    `children` (filled by step 4, else `[]`), `status`, `external` (the import
    mapping, the sync result from step 5, or null), `assignee` (or null),
-   `story_points` (or null), `needs_design`, and `docs_only` (confirmed value,
-   default false); refresh `updated_at` (ISO-8601 UTC).
+   `story_points` (or null), `needs_design`, `docs_only` (confirmed value,
+   default false), and `due_date` (optional ISO-8601 date string or null;
+   elicited from user); refresh `updated_at` (ISO-8601 UTC).
 4. EPIC fan-out — for each user-confirmed child, run:
 
    ```bash
@@ -236,7 +237,8 @@ re-checks reality — it must independently confirm:
 
 - Schema-complete: `ticket.json` satisfies every required field and enum of
   `schemas/ticket.schema.json`; title matches `formats.tickets.<type>.title`;
-  description contains the resolved template's sections.
+  description contains the resolved template's sections; `due_date` is present
+  and is either a `YYYY-MM-DD` string or `null`.
 - Acceptance criteria: present, and each one concretely testable (an observable
   outcome a test or reviewer can check) — vague criteria are blocking findings.
 - PRD trace: when the PRD exists, the ticket maps to a named feature/goal (epics to
@@ -268,6 +270,12 @@ decision with `--source assumption --rationale "..."` — assumptions surface
 in the completion report's Findings and the PR body until a user confirms.
 Before a needs_input handoff, record the outgoing questions as `open`
 (`clarify.py add` without `--answer`).
+
+Before finalising the ticket, ask the user for an optional due date:
+"Do you want to set a due date for this ticket? (YYYY-MM-DD, or leave blank
+for none)". Record the answer with `clarify.py add`; pass the non-blank value
+to `new-ticket.py --due-date <date>`, or omit the flag if blank. Record the
+answer in the clarification ledger.
 
 Ask clarifying questions whenever the request is genuinely ambiguous (scope, type,
 priority, acceptance criteria, PRD divergence) — use AskUserQuestion or plain
