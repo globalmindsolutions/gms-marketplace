@@ -16,7 +16,7 @@ mixed two distinct kinds of signal:
 
 These two audiences have non-overlapping trigger requests, non-overlapping
 panels, and non-overlapping follow-up actions. Routing both through the same
-skill description caused ambiguity in `evals/scenarios/s04_skill_triggers.py`:
+skill description caused ambiguity in `evals/acs/scenarios/s04_skill_triggers.py`:
 a request about "AI spend" could legitimately route to `/acs:metrics` because
 the old description mentioned "cost/time per ticket" alongside "throughput" and
 "coverage" (design `MAR-8/design.md:45-49`).
