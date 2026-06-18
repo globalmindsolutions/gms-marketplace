@@ -18,6 +18,15 @@
         "ref": "v0.2.0"
       },
       "description": "Autonomous Coding Skills - an agentic software-delivery workflow: PRD, architecture, tickets, design, specs, TDD implementation with review loop, PR, and merge; hook-gated, resumable, workspace-backed."
+    },
+    {
+      "name": "tabp",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/globalmindsolution/gms-marketplace.git",
+        "path": "plugins/tabp"
+      },
+      "description": "TABP team toolkit for Claude Cowork — a skills-only plugin starting with screen-cvs, a skill that screens CVs against a job description with weighted scoring, fairness guardrails, and an Excel scorecard."
     }
   ]
 }

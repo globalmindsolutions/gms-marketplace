@@ -1,0 +1,16 @@
+{
+  "name": "tabp",
+  "version": "0.1.0",
+  "description": "TABP team toolkit for Claude Cowork. Includes screen-cvs, a skill that screens one CV or a batch of CVs against a job description, producing weighted match scores, a Recommend/Hold/Reject call, an inline summary, and an Excel scorecard, with built-in fairness guardrails.",
+  "author": {
+    "name": "TABP Team"
+  },
+  "keywords": [
+    "recruiting",
+    "hiring",
+    "cv-screening",
+    "resume",
+    "job-description",
+    "tabp"
+  ]
+}
