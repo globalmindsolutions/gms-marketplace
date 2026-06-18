@@ -126,8 +126,36 @@ def _elapsed_seconds(start_iso, end_iso):
     return None
 
 
-def aggregate(workspace, repo_id):
+def _parse_due_date(value):
+    """Parse a due_date string to a datetime.date, or return None on any failure.
+
+    Accepts YYYY-MM-DD (bare date) or YYYY-MM-DDTHH:MM:SSZ (datetime); returns
+    a datetime.date for both.  Returns None for None, non-string, or any parse failure.
+    This is module-private: do NOT widen acs_lib.parse_iso (spec 02:71-89, R-B1).
+    """
+    import datetime
+    if not isinstance(value, str) or not value:
+        return None
+    # Try bare YYYY-MM-DD first (the dominant test and production format).
+    try:
+        return datetime.date.fromisoformat(value[:10])
+    except ValueError:
+        pass
+    # Try YYYY-MM-DDTHH:MM:SSZ (fall back to extracting the date portion).
+    try:
+        dt = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        return dt.date()
+    except ValueError:
+        return None
+
+
+def aggregate(workspace, repo_id, now=None):
     """Pure aggregator: read the workspace partition for `repo_id`, return the dashboard payload.
+
+    now: optional ISO-8601 string (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ) pinning the reference
+    instant for both meta.generated_at AND the deadline comparison.  When None (default),
+    acs_lib.now_iso() is called once and reused for both.  Passing a fixed value yields
+    deterministic, byte-identical output for the same workspace state (AC-6, C-1).
 
     Never raises on missing/partial state — each absent source becomes a "no data" marker plus a
     meta.degraded entry. No git, no settings, no stdout, no writes.
@@ -137,6 +165,8 @@ def aggregate(workspace, repo_id):
     all at the same nesting level inside "panels". The new keys are additive; the existing
     panel shapes are UNCHANGED (A1 contract, MAR-8/design.md:88,456-458).
     """
+    # C-1: one reference instant used for BOTH meta.generated_at AND deadline comparison.
+    _now_str = now if now is not None else acs_lib.now_iso()
     degraded = []
 
     def degrade(ticket_id, panel, reason):
@@ -150,7 +180,7 @@ def aggregate(workspace, repo_id):
     repo_metrics = repo_metrics if isinstance(repo_metrics, dict) else None
 
     meta = {
-        "generated_at": acs_lib.now_iso(),
+        "generated_at": _now_str,
         "repo_id": repo_id,
         "ticket_count": len(tickets),
         "degraded": degraded,
@@ -178,6 +208,8 @@ def aggregate(workspace, repo_id):
     _ticket_updated_at = {}
     # _merge_ended_at: {ticket_id -> ended_at str or None} for burn_up primary date (spec 01:193-197)
     _merge_ended_at = {}
+    # _tickets_due_data: [{id, due_date, status}] for deadline panel (spec 02)
+    _tickets_due_data = []
 
     for ticket_id in tickets:
         tdir, _archived = acs_lib.find_ticket_partition(workspace, repo_id, ticket_id)
@@ -210,6 +242,16 @@ def aggregate(workspace, repo_id):
         _ticket_updated_at[ticket_id] = (
             ticket_json.get("updated_at") if isinstance(ticket_json, dict) else None
         )
+
+        # Collect due_date + status for the deadline panel (spec 02: reuse already-open ticket.json).
+        _due_date_raw = ticket_json.get("due_date") if isinstance(ticket_json, dict) else None
+        # Status can come from the index entry (already in memory; no extra I/O) or ticket_json.
+        _tkt_status = tickets[ticket_id].get("status") if isinstance(tickets[ticket_id], dict) else None
+        _tickets_due_data.append({
+            "id": ticket_id,
+            "due_date": _due_date_raw,
+            "status": _tkt_status,
+        })
 
     prs = (repo_metrics or {}).get("prs", {"created": 0, "merged": 0})
     totals = (repo_metrics or {}).get("totals", {})
@@ -249,8 +291,9 @@ def aggregate(workspace, repo_id):
         tickets, _merge_ended_at, _ticket_updated_at, degrade
     )
 
-    # deadline: always degraded "not set" frame (spec 01:231-249; Child 3 wires real data)
-    deadline = _deadline_panel(degrade)
+    # deadline: derive on-track/overdue from due_date vs _now_str (spec 02 / MAR-15).
+    _now_date = _parse_due_date(_now_str)  # date object for comparison; None if now is None
+    deadline = _deadline_panel(_tickets_due_data, _now_date, degrade)
 
     # usage_summary: totals + four averages (spec 01:251-269)
     usage_summary = _usage_summary_panel(totals, prs, panel3["averages"])
@@ -434,19 +477,61 @@ def _progress_panel(tickets, merge_ended_at, ticket_updated_at, degrade):
     }
 
 
-def _deadline_panel(degrade):
-    """Build the deadline panel: always a degraded 'not set' frame (spec 01:231-249).
+def _deadline_panel(tickets_with_due, now_date, degrade):
+    """Build the deadline panel from per-ticket due_date data (MAR-15 spec 02).
 
-    Child 3 / MAR-15 will wire real due_date data. This function always returns the
-    fixed degraded frame and always adds a meta.degraded entry (B1 invariant).
+    tickets_with_due: list of {id, due_date (str|None), status (str|None)} dicts.
+    now_date: datetime.date reference instant (from _parse_due_date(_now_str)); may be None
+              if _now_str itself was unparseable (production wall-clock is always parseable).
+    degrade: accumulator closure.
+
+    Returns a rows+rollup dict when at least one ticket has a parseable due_date.
+    Falls back to the MAR-14 'not set' degraded frame (+ meta.degraded B1 entry) when
+    NO ticket has a parseable due_date, or when tickets_with_due is empty.
     """
-    degrade(None, "deadline",
-            "deadline not configured — due_date not set (Child 3)")
-    return {
+    _NOT_SET_FRAME = {
         "status": "not set",
         "due_date": None,
-        "message": "No due date configured. Set due_date on the ticket (Child 3 / MAR-15).",
+        "message": "No due date configured. Set due_date on the ticket.",
     }
+
+    # Empty list -> degrade immediately (no tickets to derive from)
+    if not tickets_with_due:
+        degrade(None, "deadline",
+                "deadline not configured — no tickets in workspace")
+        return _NOT_SET_FRAME
+
+    rows = []
+    rollup = {"on_track": 0, "overdue": 0, "not_set": 0}
+    for entry in tickets_with_due:
+        tid = entry.get("id", "")
+        raw_due = entry.get("due_date")
+        tkt_status = entry.get("status", "")
+
+        parsed = _parse_due_date(raw_due)
+        if parsed is None or now_date is None:
+            row_status = "not-set"
+            rollup["not_set"] += 1
+        elif tkt_status == "done":
+            # done overrides overdue: a completed ticket is never considered overdue.
+            row_status = "on-track"
+            rollup["on_track"] += 1
+        elif parsed < now_date:
+            row_status = "overdue"
+            rollup["overdue"] += 1
+        else:
+            row_status = "on-track"
+            rollup["on_track"] += 1
+
+        rows.append({"id": tid, "due_date": raw_due, "status": row_status})
+
+    # If EVERY row is not-set (no parseable due_date anywhere), degrade to the MAR-14 frame.
+    if rollup["on_track"] == 0 and rollup["overdue"] == 0:
+        degrade(None, "deadline",
+                "deadline not configured — no parseable due_date on any ticket")
+        return _NOT_SET_FRAME
+
+    return {"rows": rows, "rollup": rollup}
 
 
 def _usage_summary_panel(totals, prs, panel3_averages):

@@ -328,10 +328,36 @@ def _drive():
         fx.write_index(ws, {"OP1": {"status": "in_progress", "type": "story"}})
         mod.aggregate(ws, REPO_ID)
 
-    # 8g) deadline: always-degraded path exercises _deadline_panel body.
+    # 8g) deadline: real-data branches exercises _deadline_panel and _parse_due_date.
+    # 8g-i) future due_date -> on-track row.
     with tempfile.TemporaryDirectory() as ws:
-        fx.write_index(ws, {"DL1": {"status": "done", "type": "story"}})
-        mod.aggregate(ws, REPO_ID)
+        fx.write_index(ws, {"DL1": {"status": "in_progress", "type": "story"}})
+        fx.write_ticket_json(ws, "DL1", "2026-06-01T00:00:00Z", due_date="2026-07-01")
+        mod.aggregate(ws, REPO_ID, now="2026-06-18")
+
+    # 8g-ii) past due_date, in_progress -> overdue row.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"DL2": {"status": "in_progress", "type": "story"}})
+        fx.write_ticket_json(ws, "DL2", "2026-06-01T00:00:00Z", due_date="2026-06-01")
+        mod.aggregate(ws, REPO_ID, now="2026-06-18")
+
+    # 8g-iii) past due_date, status done -> done-overrides-overdue -> on-track row.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"DL3": {"status": "done", "type": "story"}})
+        fx.write_ticket_json(ws, "DL3", "2026-06-01T00:00:00Z", due_date="2026-06-01")
+        mod.aggregate(ws, REPO_ID, now="2026-06-18")
+
+    # 8g-iv) all tickets without due_date -> not-set rows -> degraded frame + meta.degraded.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"DL4": {"status": "done", "type": "story"}})
+        fx.write_ticket_json(ws, "DL4", "2026-06-01T00:00:00Z")  # no due_date
+        mod.aggregate(ws, REPO_ID, now="2026-06-18")
+
+    # 8g-v) unparseable due_date string -> not-set row; no exception raised.
+    with tempfile.TemporaryDirectory() as ws:
+        fx.write_index(ws, {"DL5": {"status": "in_progress", "type": "story"}})
+        fx.write_ticket_json(ws, "DL5", "2026-06-01T00:00:00Z", due_date="not-a-date")
+        mod.aggregate(ws, REPO_ID, now="2026-06-18")
 
     # 8h) usage_summary: non-numeric/bool branches for total_cost_usd, tokens, runs, prs_merged.
     with tempfile.TemporaryDirectory() as ws:
