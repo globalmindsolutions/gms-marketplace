@@ -228,6 +228,38 @@ Deliver the screen-cvs capability in Claude Cowork:
 ticket** — this roadmap entry defines what to deliver and how to measure success;
 the implementation ticket carries the build work.
 
+### T-M2 — tabp upgrade *(future — pending tabp-upgrade epic)*
+
+Maps to PRD: [`prd.md`](prd.md#features-moscow)
+tabp re-scoped Must-have capabilities and the engineering-rigor NFR (MAR-35 amendment).
+
+Deliver the fuller tabp plugin capabilities in tabp's own namespace:
+
+- **tabp settings.json** — configurable models and default CV/JD folder paths; stored
+  in the Cowork project folder.
+- **.tabp/ workspace state** — run history and a per-screening archive (the `.xlsx`
+  scorecard and a JSON record per run); persisted in the Cowork project folder.
+- **/tabp:usage skill** — per-run usage metrics: cost, time, and tokens.
+- **Resumable runs** — all intermediate states persisted as a human-reviewable audit
+  trail; the run can be resumed from the persisted state.
+- **Rich Claude artifact** — results rendered as a rich Claude artifact for recruiter
+  review.
+- **Recruiter review** — completed result presented for recruiter sign-off.
+
+**Engineering-rigor NFR:** the tabp upgrade adopts proven quality patterns in tabp's
+own namespace: coordinator-plus-subagents (the Sonnet-per-CV + Opus-synthesis shape),
+reflection/self-verification before presenting results, structured JSON state,
+source-grounded evidence (anti-hallucination), and decision recording for human review.
+No `acs` naming or `acs:` prefixes in tabp's surface.
+
+**Deferral:** the MECHANISM (instruction-driven vs hook-gated) and verification of
+what the Cowork runtime actually supports (config resolution, hooks, artifacts,
+self-reported cost/tokens) are deferred to this epic's design phase.
+
+**Implementation note:** the tabp-upgrade design and build are a separate future epic —
+this milestone defines what to deliver; the design and implementation tickets carry
+the build work.
+
 ## Later / icebox
 
 Scheduled background sync routines; cross-machine handoff via shared

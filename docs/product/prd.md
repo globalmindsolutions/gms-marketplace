@@ -108,9 +108,10 @@ feature sections here.
 **Won't have (now)** *(acs feature scope)*
 - Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes for the acs pipeline.
 
-### Feature: tabp (recruiting/talent toolkit for the TABP team — screen-cvs)
+### Feature: tabp (recruiting/talent toolkit for the TABP team)
 
-Runs in **Claude Cowork** (not Claude Code). This feature targets Cowork skills format.
+Runs in **Claude Cowork** (not Claude Code). tabp is a fuller plugin; screen-cvs is
+one capability within it, targeting Cowork's project-folder-based workflow.
 
 **Must have** *(urgent — next delivery)*
 - **screen-cvs** — screen one CV or a batch against a job description; parse the JD
@@ -122,16 +123,56 @@ Runs in **Claude Cowork** (not Claude Code). This feature targets Cowork skills 
   framing); batch screening fans out one Sonnet subagent per CV with Opus synthesis;
   inputs read from the Cowork project folder, falling back to chat attachments.
   Traces T1, T2, T3, T4, T5.
+- **tabp settings.json** — configurable models and default CV/JD folder paths; stored
+  in the Cowork project folder.
+- **.tabp/ workspace state** — run history and a per-screening archive (the `.xlsx`
+  scorecard and a JSON record per run); persisted in the Cowork project folder.
+- **/tabp:usage skill** — surfaces per-run usage metrics: cost, time, and tokens.
+- **Resumable runs** — all intermediate states persisted as a human-reviewable audit
+  trail; the run can be resumed from the persisted state.
+- **Rich Claude artifact** — results rendered as a rich Claude artifact for recruiter
+  review; the completed result is presented for recruiter sign-off.
+
+**Namespace rule:** tabp operates in its own namespace and must never use `.acs/` or
+`acs:` prefixes. No `acs` token appears in tabp's external surface. The canonical
+tabp-namespaced forms are `.tabp/` (workspace state), `tabp settings.json`
+(configuration), and `/tabp:usage` (the usage-metrics skill).
+
+**Engineering-rigor NFR (tabp upgrade):** the fuller tabp workflow adopts the same
+proven quality patterns in tabp's own namespace:
+
+- **Coordinator-plus-subagents** — the Sonnet-per-CV + Opus-synthesis shape already
+  present in screen-cvs continues across the fuller tabp workflow.
+- **Reflection/self-verification** — the rubric's own consistency check; tabp presents
+  results only after a self-verification step.
+- **Structured JSON state** — tabp persists all run state in structured, human-readable
+  JSON (in `.tabp/`).
+- **Source-grounded evidence / anti-hallucination** — screen-cvs already cites CV
+  evidence per requirement; the fuller tabp workflow extends this discipline; tabp
+  never invents or assumes evidence the source does not support.
+- **Decision recording for human review** — the `.tabp/` audit trail and the
+  present-for-review step form the decision record.
+
+The specific mechanisms — message format, the exact reflection loop, hook-gating —
+are deferred to the tabp-upgrade epic design phase and verified against Cowork's
+actual capabilities.
+
+**Deferral:** the MECHANISM for the above capabilities — whether instruction-driven,
+hook-gated, or another approach — and the verification of what the Claude Cowork
+runtime actually supports (config resolution, hooks, rich artifacts, self-reported
+cost/tokens) are **deferred to the tabp-upgrade epic's design phase**. This PRD states
+the requirements (what); the design (how) is determined in the tabp-upgrade epic.
 
 **Won't have (now)** *(tabp feature scope)*
-- Integrations with ATS platforms; automated hiring decisions (screen-cvs is
+- Integrations with ATS platforms; automated hiring decisions (tabp is
   decision-support only, not a hiring authority); Claude Code runtime (tabp targets
-  Claude Cowork).
+  Claude Cowork, not Claude Code).
 
 ## Product-level NFRs
 
 These NFRs apply across all marketplace features. Each feature realizes them through
-its own mechanisms (acs via stdlib Python + hooks; tabp via Cowork skills format).
+its own mechanisms (acs via stdlib Python + hooks; tabp via its own Cowork-based plugin
+patterns).
 
 - **Determinism where possible**: ordering, gating, state writes, id allocation are scripts, never prose; gates fail closed.
 - **Portability**: hooks and helpers are stdlib-only Python ≥ 3.9; no network dependencies of their own. `/acs:init` Step 0b runs a toolchain preflight — it detects and offers to install the tools acs leans on (`git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli`) so onboarding fails up front with consent rather than mid-pipeline; the convention checker stays stdlib-only so no acs install is needed on the CI runner.
@@ -144,7 +185,11 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via Cowork skills format
 - **acs feature:** Claude Code plugin API (skills/agents/hooks as documented) is the runtime for the acs pipeline. Different features may target different Claude runtimes — acs targets Claude Code; tabp targets Claude Cowork.
 - Delivery is git + GitHub PRs (`gh` assumed); correctness must be checkable by automated tests for the strong-fit domains (see `docs/requirements/overview.md`).
 - Subagents cannot interact with the user — all user interaction happens in coordinators (drives the `needs_input` handoff design).
-- **tabp feature:** screen-cvs runs in Claude Cowork; inputs are read from the Cowork project folder, falling back to chat attachments; batch screening uses one Sonnet subagent per CV with Opus synthesis; outputs include a two-sheet Excel scorecard.
+- **tabp feature:** tabp runs in Claude Cowork as a fuller plugin; inputs are read from
+  the Cowork project folder, falling back to chat attachments; the screen-cvs capability
+  uses one Sonnet subagent per CV with Opus synthesis; outputs include a two-sheet Excel
+  scorecard and a per-run `.tabp/` archive. tabp is not skills-only — the fuller feature
+  shape is defined in the tabp feature section above.
 
 ## Out of scope
 
@@ -157,3 +202,13 @@ MAR-17 restructure (separate per-plugin PRDs) was abandoned. The tabp plugin
 implementation (plugin.json, screen-cvs skill, marketplace.json entry, CI
 version-coupling removal) is a separate follow-up ticket — this PRD defines the
 feature; the build is out of scope here.
+
+**Reversal note (MAR-35):** this amendment reverses the prior "tabp is skills-only"
+product decision that was previously stated in this PRD and in MAR-26 design C-arch-5
+(skills-only plugin shape). tabp remains a **FEATURE of the one GMS Marketplace
+product** — a fuller feature, not a separate product. This does NOT re-introduce the
+abandoned MAR-17 per-plugin-sub-product / separate-per-plugin-PRD approach. The tabp
+feature section above replaces the skills-only framing with the fuller-plugin shape.
+The tabp-upgrade epic (a separate future ticket) owns the design and build of the new
+capabilities; the MECHANISM and Cowork-runtime verification are deferred to that
+epic's design phase.
