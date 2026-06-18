@@ -1,31 +1,39 @@
-"""Shared behavioral eval harness layer (M2 epic E1.1).
+"""acs behavioral eval harness — acs-specific layer under evals/acs/ (M2 epic E1.1).
 
-acs-specific seam: ``SOURCE_SCRIPTS``, ``installed_scripts_dir()``, and
-``Sandbox`` are acs-scoped and live here as the shared module so they are not
-duplicated per plugin. Skills-only plugins (e.g. tabp) import neither
-``Sandbox`` nor ``installed_scripts_dir``; they reach ``run_evals.py`` without
-any acs cache resolution. The banner gate in ``run_evals.py`` ensures
-``installed_scripts_dir()`` is never called for a non-acs plugin.
+This module is the acs eval harness.  It lives under ``evals/acs/`` (relocated
+from the evals/ root in MAR-33) and contains only acs-specific symbols.  It is
+imported by the acs scenario runner (``evals/acs/run_evals.py``) and by the 5
+acs scenario files via a ``sys.path`` insertion that the runner performs at
+module scope.
 
-Where `tests/` exercises the *deterministic* layer (hooks, gates, state) by
-driving the Python scripts directly and runs in PR CI without `claude`, this
-harness exercises the *agentic* layer: it runs real `claude -p` sessions that
+``SOURCE_SCRIPTS``, ``installed_scripts_dir()``, and ``Sandbox`` are
+acs-scoped — they resolve the acs plugin build and drive the acs dispatch hook.
+Skills-only plugins (e.g. tabp) use their own per-plugin runner and never
+import this module.
+
+``Check`` is plugin-agnostic and may be imported by any plugin's scenario
+runner, though skills-only plugins are free to reimplement it.
+
+Where ``tests/`` exercises the *deterministic* layer (hooks, gates, state) by
+driving the Python scripts directly and runs in PR CI without ``claude``, this
+harness exercises the *agentic* layer: it runs real ``claude -p`` sessions that
 invoke acs skills end to end and asserts on the **workspace artifacts** they
 produce (the JSON state the pipeline itself trusts) — never on prose output.
 
-It is deliberately NOT under `tests/`: PR CI runs `python3 -m unittest
-discover -s tests`, and these scenarios cost money, need network + an
-authenticated `claude` CLI, and are non-deterministic. They belong to the
+It is deliberately NOT under ``tests/``: PR CI runs ``python3 -m unittest
+discover -s tests``, and these scenarios cost money, need network + an
+authenticated ``claude`` CLI, and are non-deterministic.  They belong to the
 nightly job (E1.4), not the PR gate.
 
 Two tiers of scenario, by cost:
 
-  * **free**  — no `claude`. Drives the *installed* dispatch hook through
+  * **free**  — no ``claude``. Drives the *installed* dispatch hook through
     pipeline states and asserts exit codes/messages. Catches packaging drift
     in the shipped build (the unittest suite only sees the source tree).
-  * **paid**  — spawns `claude -p`. Asserts on the artifacts the agents write.
+  * **paid**  — spawns ``claude -p``. Asserts on the artifacts the agents write.
 
-Run:  python3 evals/run_evals.py            # free tier only (default)
+Run:  python3 evals/run_evals.py            # free tier only (default, via dispatcher)
+      python3 evals/acs/run_evals.py        # directly
       python3 evals/run_evals.py --paid     # include claude-driven scenarios
       python3 evals/run_evals.py --list
 """
@@ -39,12 +47,13 @@ import sys
 import tempfile
 import time
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# REPO_ROOT: dirname x3 from evals/acs/harness.py reaches the repo root.
+# (dirname x2 would stop at evals/, making SOURCE_SCRIPTS resolve to
+# evals/plugins/acs/hooks/scripts — a nonexistent path that breaks the free tier.)
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # acs-specific: SOURCE_SCRIPTS and installed_scripts_dir() are the acs cache-
 # resolution seam.  They are deliberately NOT generalised to arbitrary plugins.
-# run_evals.py gates the banner that calls installed_scripts_dir() so a
-# skills-only plugin (no .acs/, no hooks/scripts) never triggers acs resolution.
 SOURCE_SCRIPTS = os.path.join(REPO_ROOT, "plugins", "acs", "hooks", "scripts")
 
 

@@ -14,12 +14,15 @@ for E1.1–E1.4.
 
 ```
 evals/
-├── harness.py              # shared Sandbox + Check layer (acs-specific internals — see Plugin seam)
-├── run_evals.py            # per-plugin dispatcher with --plugin selector
-└── acs/                    # acs behavioral scenarios
-    ├── __init__.py         # acs package marker
+├── run_evals.py        # THIN dispatcher: parses --plugin, delegates to evals/<plugin>/run_evals.py
+├── README.md
+└── acs/                # acs behavioral eval subtree
+    ├── __init__.py     # acs package marker
+    ├── harness.py      # acs Sandbox + Check (acs-specific; relocated from evals/ root — MAR-33)
+    ├── run_evals.py    # acs runner: tier selection, scenario loop, banner (MAR-33)
+    ├── README.md       # acs eval subtree docs
     └── scenarios/
-        ├── __init__.py     # SCENARIOS registry (imports s01..s05)
+        ├── __init__.py # SCENARIOS registry (imports s01..s05)
         ├── s01_install_gate_smoke.py
         ├── s02_create_ticket_artifacts.py
         ├── s03_resume_and_verify.py
@@ -27,8 +30,8 @@ evals/
         └── s05_session_end.py
 ```
 
-Future plugins add their own `evals/<plugin>/scenarios/` subtree; the shared
-`harness.py` and `run_evals.py` at the `evals/` root remain the dispatch layer.
+Future plugins add their own `evals/<plugin>/` subtree, each containing at
+minimum a `run_evals.py` runner and a `scenarios/` package.
 
 ## Why it lives in `evals/`, not `tests/`
 
@@ -115,16 +118,18 @@ release steps in the [root README](../README.md#releasing--updating).
 
 1. Drop `evals/<plugin>/scenarios/sNN_<name>.py` exposing:
    - `META = {"name", "tier", "goal", "summary"}`
-   - `run() -> harness.Check`
+   - `run() -> Check`
 2. Register it in `evals/<plugin>/scenarios/__init__.py` (`SCENARIOS` list, in
    run order).
-3. For acs: inside `run()`, use `harness.Sandbox` for an isolated repo +
-   workspace, drive behavior with `sb.gate(...)` (free) or `sb.run_skill(...)`
-   (paid), and assert with `Check.ok/eq` against `sb.repo_json(...)` /
-   `sb.ticket_json(...)`.
+3. For acs: inside `run()`, use `evals/acs/harness.Sandbox` for an isolated
+   repo + workspace, drive behavior with `sb.gate(...)` (free) or
+   `sb.run_skill(...)` (paid), and assert with `Check.ok/eq` against
+   `sb.repo_json(...)` / `sb.ticket_json(...)`. Import via
+   `from harness import Sandbox, Check` — the acs runner inserts `evals/acs/`
+   on `sys.path` so the import resolves to `evals/acs/harness.py`.
 4. For a skills-only plugin (e.g. tabp): inside `run()`, drive the skill
    directly (no `Sandbox`); assert on the artifacts the skill produces. Return a
-   `harness.Check` with `ok/eq` assertions.
+   `Check` object with `ok/eq` assertions.
 
 Assert on **artifacts**, never on prose: a scenario passes because the right
 JSON state exists with the right values, not because the model said the right
@@ -132,33 +137,25 @@ thing.
 
 ## Plugin seam
 
-`harness.py` is the **shared** dispatch layer at `evals/` root. It contains two
-kinds of symbols:
+The `evals/` root contains only the **thin dispatcher** (`run_evals.py`). Each
+plugin owns its entire eval subtree under `evals/<plugin>/`.
 
-**acs-scoped** (only acs scenarios use these):
+**acs** (`evals/acs/`):
+- `harness.py` — the acs-specific harness. Contains `SOURCE_SCRIPTS`,
+  `installed_scripts_dir()`, and `Sandbox` (acs-scoped) plus `Check`
+  (plugin-agnostic). Resolves to the installed acs build or the in-repo source.
+- `run_evals.py` — the acs runner. Performs tier selection, runs the scenario
+  loop, and prints the "plugin build under test" banner.
 
-- `SOURCE_SCRIPTS` — path to the in-repo acs hook scripts (`plugins/acs/hooks/scripts`).
-- `installed_scripts_dir()` — resolves the installed acs build in `~/.claude/plugins/cache/`.
-- `Sandbox` — a throwaway consumer repo + workspace seeded with `.acs/settings.json`;
-  drives the acs dispatch hook (`dispatch.py`) and asserts on acs workspace JSON
-  artifacts.
+**Skills-only plugins** (e.g. tabp — no `.acs/`, no `hooks/scripts`):
+- Provide their own `evals/<plugin>/run_evals.py` that imports only what they
+  need — no `Sandbox`, no `installed_scripts_dir`. The thin dispatcher routes
+  directly to their runner, so no acs cache resolution ever occurs.
+- `Check` may be imported from `evals/acs/harness.py` or reimplemented per
+  plugin.
 
-**Plugin-agnostic** (any plugin can use these):
-
-- `Check` — collects named assertions into a pass/fail report.
-
-A **skills-only plugin** (e.g. tabp — no `.acs/`, no `hooks/scripts`, no installed
-acs build) can run evals through `run_evals.py --plugin <name>` without
-triggering any acs cache resolution and without hard-failing. The mechanism:
-
-- `run_evals.py` gates the `installed_scripts_dir()` banner call behind
-  `if args.plugin == "acs"`, so a skills-only plugin reaches `mod.run()` (and
-  `--list`) with no acs-specific code executed.
-- Skills-only scenarios import only `harness.Check` (not `Sandbox` or
-  `installed_scripts_dir`), so the acs-scoped seam is never touched at runtime.
-
-This design keeps `harness.py` and `run_evals.py` at the `evals/` root as the
-shared layer without duplicating acs internals per plugin.
+The thin dispatcher at `evals/run_evals.py` contains no harness code and no
+scenario loop — it simply peels `--plugin` and delegates.
 
 ## Status / roadmap
 
@@ -187,5 +184,8 @@ shared layer without duplicating acs internals per plugin.
 - **MAR-28 (done)** — scenarios relocated to `evals/acs/scenarios/`; harness
   generalized with `--plugin` selector; skills-only plugin tolerance added;
   README updated.
+- **MAR-33 (done)** — `harness.py` and `run_evals.py` relocated under
+  `evals/acs/`; `evals/run_evals.py` rewritten as a thin dispatcher; per-plugin
+  runner shape fully established.
 - **MAR-32 (planned)** — `evals/tabp/` directory and `screen-cvs` behavioral
   scenario.
