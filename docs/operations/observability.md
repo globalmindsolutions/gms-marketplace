@@ -149,10 +149,32 @@ is absent. A zero-children epic renders "no data" for the burn-up series.
 
 ### Deadline
 
-Due date, on-track / overdue status. **Not configured — ships as a "not set"
-frame in this release; deadline tracking requires a `due_date` field on the
-ticket (Child 3 / MAR-15).** The panel key is always present (B1) and renders
-the "not set" state without error.
+Due date, on-track / overdue status per ticket.  The DEADLINE panel is live as
+of MAR-15 (Child 3 of MAR-8).
+
+- **Source.** `due_date` is an optional ISO-8601 date field (`YYYY-MM-DD`) on
+  `ticket.json`, set at `/acs:create-ticket`.  Existing tickets with no
+  `due_date` are valid; the panel degrades gracefully (see below).
+- **Per-ticket derivation.** For each ticket with a parseable `due_date` the
+  aggregator derives: *overdue* when `due_date < now` and the ticket is not
+  done; *on-track* otherwise (due date in the future, or the ticket is done).
+  "Now" is the same reference instant stamped into `meta.generated_at`
+  (injected into the aggregator; not re-read per comparison — see Determinism
+  below).
+- **Panel shape.** The panel carries one row per ticket that has a `due_date`,
+  showing ticket `id`, `due_date`, and on-track/overdue status.  A roll-up
+  summary (e.g. "k overdue / m on-track") is displayed at the top of the panel.
+- **Graceful degradation.** A workspace where no ticket has a parseable
+  `due_date` renders the panel as the "not set" degraded state with a
+  `meta.degraded` entry (B1 — the panel key is always present, never missing,
+  never a crash).  An empty workspace keeps `deadline == "no data"` (B1).
+- **Read-only.** The aggregator and renderer write nothing.  The only write is
+  `due_date` at `/acs:create-ticket`.
+- **No network.** The deadline source is the local `ticket.json`; no `gh` or
+  network call is made.
+- **Determinism.** The renderer reads no clock; `meta.generated_at` is
+  rendered exactly as the aggregator stamped it.  A pinned reference `now`
+  produces byte-identical output for fixed input.
 
 ### 4 — Coverage achieved vs target
 

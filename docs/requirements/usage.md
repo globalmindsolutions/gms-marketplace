@@ -167,7 +167,8 @@ no network call:
 
 - **`/metrics`** (PM view) — delivery summary, throughput by status/type,
   pipeline funnel + distinct PRs, ISSUES, PROGRESS (per-epic burn-up),
-  DEADLINE ("not set" until a `due_date` field is added to the ticket),
+  DEADLINE (on-track/overdue derived from `due_date`; degrades to "not set" when
+  no ticket has a parseable `due_date` — B1),
   coverage achieved vs target, review iterations before the verifier passed,
   and lead + cycle time per ticket.
 - **`/usage`** (usage view) — usage summary (total cost, time, runs, and four

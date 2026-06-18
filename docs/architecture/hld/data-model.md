@@ -34,6 +34,7 @@ erDiagram
         number story_points
         bool needs_design
         bool docs_only
+        string due_date "ISO-8601 date or null (NEW, MAR-8 Child 3)"
     }
     SKILL_STATE {
         string skill PK
