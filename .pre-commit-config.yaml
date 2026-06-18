@@ -30,10 +30,10 @@ repos:
     hooks:
       - id: acs-free-evals
         name: acs free evals (gate + cleanup smoke)
-        entry: env ACS_EVAL_SOURCE=1 python3 evals/run_evals.py
+        entry: env ACS_EVAL_SOURCE=1 python3 evals/run_evals.py --plugin acs
         language: system
         pass_filenames: false
-        files: ^(evals/|plugins/acs/)
+        files: ^(evals/|plugins/)
 
       # acs convention hooks — validate branch/commit against committed formats.*
       # (honour enforcement.checks.* toggles + exempt label/branches).

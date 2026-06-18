@@ -42,7 +42,7 @@ jobs:
               echo "::error file=$f::invalid JSON"
               status=1
             fi
-          done < <(find .claude-plugin plugins/acs -name '*.json' -not -path '*/__pycache__/*' -print0 | sort -z)
+          done < <(find .claude-plugin plugins -name '*.json' -not -path '*/__pycache__/*' -print0 | sort -z)
           exit "$status"
 
       - name: Validate marketplace/plugin version consistency
@@ -119,29 +119,49 @@ jobs:
           python3 - <<'EOF'
           import glob
           import json
+          import os
           import sys
 
+          with open(".claude-plugin/marketplace.json", encoding="utf-8") as fh:
+              mkt = json.load(fh)
+
+          plugin_root = (mkt.get("metadata") or {}).get("pluginRoot")
           failed = False
-          paths = sorted(glob.glob("plugins/acs/schemas/*.schema.json"))
-          if not paths:
-              print("FAIL: no *.schema.json files found under plugins/acs/schemas/", file=sys.stderr)
-              sys.exit(1)
-          for path in paths:
-              try:
-                  with open(path, encoding="utf-8") as fh:
-                      doc = json.load(fh)
-              except json.JSONDecodeError as exc:
-                  print(f"FAIL {path}: not valid JSON: {exc}", file=sys.stderr)
-                  failed = True
-                  continue
-              if not isinstance(doc, dict):
-                  print(f"FAIL {path}: top-level value is not an object", file=sys.stderr)
-                  failed = True
-              elif "$schema" not in doc:
-                  print(f'FAIL {path}: missing top-level "$schema" key', file=sys.stderr)
-                  failed = True
+
+          for entry in mkt.get("plugins", []):
+              src = entry.get("source")
+              if isinstance(src, str):
+                  rel = src
+              elif isinstance(src, dict) and src.get("source") == "git-subdir":
+                  rel = src["path"]
               else:
-                  print(f"ok   {path}")
+                  continue
+              if plugin_root and not rel.startswith(("./", "/")):
+                  rel = os.path.join(plugin_root, rel)
+              plugin_dir = rel
+              if not os.path.isdir(plugin_dir):
+                  continue
+
+              paths = sorted(glob.glob(os.path.join(plugin_dir, "schemas", "*.schema.json")))
+              if not paths:
+                  print(f"skip: no *.schema.json found under {plugin_dir}/schemas/ (plugin has no schemas)")
+                  continue
+              for path in paths:
+                  try:
+                      with open(path, encoding="utf-8") as fh:
+                          doc = json.load(fh)
+                  except json.JSONDecodeError as exc:
+                      print(f"FAIL {path}: not valid JSON: {exc}", file=sys.stderr)
+                      failed = True
+                      continue
+                  if not isinstance(doc, dict):
+                      print(f"FAIL {path}: top-level value is not an object", file=sys.stderr)
+                      failed = True
+                  elif "$schema" not in doc:
+                      print(f'FAIL {path}: missing top-level "$schema" key', file=sys.stderr)
+                      failed = True
+                  else:
+                      print(f"ok   {path}")
           sys.exit(1 if failed else 0)
           EOF
 
@@ -149,67 +169,185 @@ jobs:
         run: |
           python3 -m pip install --quiet jsonschema
           python3 - <<'EOF'
-          import json, os, sys
+          import glob
+          import json
+          import os
+          import sys
           from jsonschema import Draft202012Validator
 
-          schema_path = "plugins/acs/schemas/settings.schema.json"
-          schema = json.load(open(schema_path, encoding="utf-8"))
-          Draft202012Validator.check_schema(schema)
-          validator = Draft202012Validator(schema)
+          with open(".claude-plugin/marketplace.json", encoding="utf-8") as fh:
+              mkt = json.load(fh)
 
-          target = ".acs/settings.json"
-          if not os.path.exists(target):
-              print(f"skip: no {target}")
-              sys.exit(0)
+          plugin_root = (mkt.get("metadata") or {}).get("pluginRoot")
 
-          errors = sorted(
-              validator.iter_errors(json.load(open(target, encoding="utf-8"))),
-              key=lambda e: list(e.path),
-          )
-          for e in errors:
-              loc = "/".join(map(str, e.path)) or "(root)"
-              print(f"::error file={target}::{loc}: {e.message}", file=sys.stderr)
-          if errors:
-              sys.exit(1)
-          print(f"ok   {target} conforms to {schema_path}")
+          for entry in mkt.get("plugins", []):
+              src = entry.get("source")
+              if isinstance(src, str):
+                  rel = src
+              elif isinstance(src, dict) and src.get("source") == "git-subdir":
+                  rel = src["path"]
+              else:
+                  continue
+              if plugin_root and not rel.startswith(("./", "/")):
+                  rel = os.path.join(plugin_root, rel)
+              plugin_dir = rel
+              if not os.path.isdir(plugin_dir):
+                  continue
+
+              schema_path = os.path.join(plugin_dir, "schemas", "settings.schema.json")
+              if not os.path.exists(schema_path):
+                  print(f"skip: no settings.schema.json found under {plugin_dir}/schemas/")
+                  continue
+
+              schema = json.load(open(schema_path, encoding="utf-8"))
+              Draft202012Validator.check_schema(schema)
+              validator = Draft202012Validator(schema)
+
+              target = ".acs/settings.json"
+              if not os.path.exists(target):
+                  print(f"skip: no {target}")
+                  continue
+
+              errors = sorted(
+                  validator.iter_errors(json.load(open(target, encoding="utf-8"))),
+                  key=lambda e: list(e.path),
+              )
+              for e in errors:
+                  loc = "/".join(map(str, e.path)) or "(root)"
+                  print(f"::error file={target}::{loc}: {e.message}", file=sys.stderr)
+              if errors:
+                  sys.exit(1)
+              print(f"ok   {target} conforms to {schema_path}")
           EOF
 
       - name: Validate XSD (acs-messages.xsd)
-        run: xmllint --noout plugins/acs/schemas/acs-messages.xsd
+        run: |
+          status=0
+          while IFS= read -r plugin_dir; do
+            [ -z "$plugin_dir" ] && continue
+            xsd_files=()
+            while IFS= read -r -d '' f; do
+              xsd_files+=("$f")
+            done < <(find "$plugin_dir/schemas" -maxdepth 1 -name '*.xsd' -print0 2>/dev/null | sort -z)
+            if [ ${#xsd_files[@]} -eq 0 ]; then
+              echo "skip: no *.xsd found under $plugin_dir/schemas/ (plugin has no XSD)"
+              continue
+            fi
+            for xsd_file in "${xsd_files[@]}"; do
+              xmllint --noout "$xsd_file"
+              echo "ok   $xsd_file"
+            done
+          done < <(python3 - <<'PYEOF'
+          import json, os, sys
+          with open(".claude-plugin/marketplace.json") as fh:
+              mkt = json.load(fh)
+          plugin_root = (mkt.get("metadata") or {}).get("pluginRoot")
+          for entry in mkt.get("plugins", []):
+              src = entry.get("source")
+              if isinstance(src, str):
+                  rel = src
+              elif isinstance(src, dict) and src.get("source") == "git-subdir":
+                  rel = src["path"]
+              else:
+                  continue
+              if plugin_root and not rel.startswith(("./", "/")):
+                  rel = os.path.join(plugin_root, rel)
+              if os.path.isdir(rel):
+                  print(rel)
+          PYEOF
+          )
+          exit "$status"
 
       - name: Byte-compile hook scripts
-        run: python3 -m py_compile plugins/acs/hooks/scripts/*.py
+        run: |
+          status=0
+          while IFS= read -r plugin_dir; do
+            [ -z "$plugin_dir" ] && continue
+            py_files=()
+            while IFS= read -r -d '' f; do
+              py_files+=("$f")
+            done < <(find "$plugin_dir/hooks/scripts" -maxdepth 1 -name '*.py' -print0 2>/dev/null | sort -z)
+            if [ ${#py_files[@]} -eq 0 ]; then
+              echo "skip: no *.py found under $plugin_dir/hooks/scripts/ (plugin has no hook scripts)"
+              continue
+            fi
+            if ! python3 -m py_compile "${py_files[@]}"; then
+              status=1
+            else
+              echo "ok   compiled ${#py_files[@]} hook script(s) in $plugin_dir"
+            fi
+          done < <(python3 - <<'PYEOF'
+          import json, os, sys
+          with open(".claude-plugin/marketplace.json") as fh:
+              mkt = json.load(fh)
+          plugin_root = (mkt.get("metadata") or {}).get("pluginRoot")
+          for entry in mkt.get("plugins", []):
+              src = entry.get("source")
+              if isinstance(src, str):
+                  rel = src
+              elif isinstance(src, dict) and src.get("source") == "git-subdir":
+                  rel = src["path"]
+              else:
+                  continue
+              if plugin_root and not rel.startswith(("./", "/")):
+                  rel = os.path.join(plugin_root, rel)
+              if os.path.isdir(rel):
+                  print(rel)
+          PYEOF
+          )
+          exit "$status"
 
       - name: Check skill/agent frontmatter (name + description)
         run: |
           python3 - <<'EOF'
           import glob
+          import json
+          import os
           import re
           import sys
 
+          with open(".claude-plugin/marketplace.json", encoding="utf-8") as fh:
+              mkt = json.load(fh)
+
+          plugin_root = (mkt.get("metadata") or {}).get("pluginRoot")
           failed = False
-          paths = sorted(glob.glob("plugins/acs/skills/*/SKILL.md")) \
-                + sorted(glob.glob("plugins/acs/agents/*.md"))
-          if not paths:
-              print("FAIL: no SKILL.md or agent .md files found", file=sys.stderr)
-              sys.exit(1)
-          for path in paths:
-              with open(path, encoding="utf-8") as fh:
-                  text = fh.read()
-              match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
-              if not match:
-                  print(f"FAIL {path}: missing YAML frontmatter block", file=sys.stderr)
-                  failed = True
-                  continue
-              frontmatter = match.group(1)
-              missing = [
-                  key for key in ("name", "description")
-                  if not re.search(rf"^{key}:\s*\S", frontmatter, re.M)
-              ]
-              if missing:
-                  print(f"FAIL {path}: frontmatter missing {', '.join(missing)}", file=sys.stderr)
-                  failed = True
+
+          for entry in mkt.get("plugins", []):
+              src = entry.get("source")
+              if isinstance(src, str):
+                  rel = src
+              elif isinstance(src, dict) and src.get("source") == "git-subdir":
+                  rel = src["path"]
               else:
-                  print(f"ok   {path}")
+                  continue
+              if plugin_root and not rel.startswith(("./", "/")):
+                  rel = os.path.join(plugin_root, rel)
+              plugin_dir = rel
+              if not os.path.isdir(plugin_dir):
+                  continue
+
+              paths = sorted(glob.glob(os.path.join(plugin_dir, "skills", "*", "SKILL.md"))) \
+                    + sorted(glob.glob(os.path.join(plugin_dir, "agents", "*.md")))
+              if not paths:
+                  print(f"skip: no SKILL.md or agent .md files found under {plugin_dir} (plugin has no skills/agents)")
+                  continue
+              for path in paths:
+                  with open(path, encoding="utf-8") as fh:
+                      text = fh.read()
+                  match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.S)
+                  if not match:
+                      print(f"FAIL {path}: missing YAML frontmatter block", file=sys.stderr)
+                      failed = True
+                      continue
+                  frontmatter = match.group(1)
+                  missing = [
+                      key for key in ("name", "description")
+                      if not re.search(rf"^{key}:\s*\S", frontmatter, re.M)
+                  ]
+                  if missing:
+                      print(f"FAIL {path}: frontmatter missing {', '.join(missing)}", file=sys.stderr)
+                      failed = True
+                  else:
+                      print(f"ok   {path}")
           sys.exit(1 if failed else 0)
           EOF
