@@ -26,6 +26,9 @@ context and consequences.
 | [0015](0015-metrics-single-show-widget-call.md) | acs:metrics renders all six panels in a single show_widget call | Accepted |
 | [0016](0016-metrics-bounded-single-pass-walk.md) | metrics aggregation uses a bounded single-pass walk with regex extraction | Accepted |
 | [0017](0017-metrics-deterministic-cross-surface-rendering.md) | acs:metrics renders deterministically across surfaces via metrics_render.py | Accepted |
+| [0018](0018-distinct-pr-counting-via-created-pr-numbers.md) | Distinct-PR counting via a recorded `created_pr_numbers` set | Accepted |
+| [0019](0019-split-acs-metrics-into-pm-and-usage-skills.md) | Split `/acs:metrics` into two narrowly-scoped skills: PM delivery and tool usage | Accepted |
+| [0020](0020-ticket-due-date-and-deadline-panel.md) | Deadlines sourced from a `due_date` ticket field (not the GitHub tracker, not deferred) | Accepted |
 
 Format: status, date, context, decision, consequences (MADR-flavored, kept
 short). New ADRs are appended by the pipeline with the next sequence number.
