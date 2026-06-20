@@ -6,7 +6,7 @@ C4Context
 
     Person(dev, "Developer", "Invokes /acs:* skills; answers clarifications; reviews and merges PRs")
 
-    System(mkt, "GMS Marketplace", "Curated plugin catalog hosting heterogeneous plugins: acs (full-shape, agentic delivery workflow via Claude Code) and tabp (skills-only, screen-CVs recruiting workflow via Cowork)")
+    System(mkt, "GMS Marketplace", "Curated plugin catalog hosting heterogeneous plugins: acs (full-shape, agentic delivery workflow via Claude Code) and tabp (fuller shape: skills + helper + schemas + subagent charters + .tabp/ state, screen-CVs recruiting workflow via Cowork)")
 
     System_Ext(cc, "Claude Code", "Runtime: executes skills/agents, fires hook events, spawns subagents (acs targets Claude Code)")
     System_Ext(cowork, "Cowork", "Runtime: executes Cowork skills (tabp targets Cowork for screen-cvs)")

@@ -16,8 +16,10 @@ plugins distributed from this repository. Plugins differ in shape:
   **Claude Code**; drives an agentic software-delivery workflow on any
   **consumer repository**, persisting all pipeline state into a **workspace
   folder outside that repo**.
-- **tabp** (skills-only: `skills/` only) — targets **Cowork**; provides a
-  screen-CVs recruiting workflow dispatched via the Cowork runtime.
+- **tabp** (fuller shape: `skills/` + `helpers/` + `schemas/` + `agents/` + `.tabp/` state) — targets
+  **Cowork**; provides a screen-CVs recruiting workflow where a coordinator
+  fans out Sonnet-per-CV subagents and an Opus synthesis subagent, persisting
+  all run state in the project folder's `.tabp/` directory.
 
 ## Quality attributes (drive the design)
 

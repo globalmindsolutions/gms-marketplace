@@ -2,6 +2,27 @@
 
 A Claude Cowork plugin for the TABP team. A home for the team's skills — starting with CV screening, with room to add more.
 
+## Plugin shape
+
+The tabp plugin has grown beyond a simple skills folder. Its full shape is:
+
+- **`skills/`** — Cowork skill definitions (coordinator protocols). `screen-cvs/SKILL.md` now orchestrates a coordinator+subagents flow.
+- **`agents/`** — Reusable tabp-namespaced subagent charters spawned by the coordinator: `screen-cv-subagent.md` (Sonnet, one per CV) and `synthesis-subagent.md` (Opus, once per run).
+- **`helpers/`** — `tabp_helper.py`: stdlib-only Python helper for atomic `.tabp/` state writes, spin-lock, schema validation, run history, and usage stubs. Invoked via Bash; no external imports.
+- **`schemas/`** — JSON Schema contracts for run records, evidence, decisions, history, and lock files. Used by the helper for validation.
+- **`.tabp/`** — Per-project state directory (created at runtime in the recruiter's project folder, not in this repo). Holds `runs/<run-id>/run.json`, `evidence-<id>.json`, `decision.json`, `history.json`, and `lock`.
+
+The `screen-cvs` coordinator follows this pattern per run:
+
+1. Calls `tabp_helper.py run-start` (Step 0) to initialise the run record.
+2. Fans out one Sonnet subagent per candidate CV in parallel (Step 3a), with each subagent following `agents/screen-cv-subagent.md`.
+3. Persists each evidence record via `tabp_helper.py state-write` (Step 3a).
+4. Invokes the Opus synthesis subagent once (Step 3a), following `agents/synthesis-subagent.md`.
+5. Runs a self-verification pass (Step 5a) before presenting any results.
+6. Delivers results only after the self-verification pass finds no blocking findings (Step 6).
+
+If the Cowork runtime denies Bash access, the coordinator falls back to direct file writes (`state_write_mode: "instructed"`). All other steps are unaffected by this degradation.
+
 ## Skills
 
 ### screen-cvs — Screen CVs against a job description
@@ -11,10 +32,11 @@ Screens one CV or a batch of CVs against a job description (JD) and tells you wh
 **What it does**
 
 - Parses the JD into **must-have** and **nice-to-have** requirements.
-- Checks each candidate's evidence against every requirement (met / partial / missing, with citations).
-- Computes a weighted **0–100 match score**; a missing must-have caps the result.
+- Fans out one Sonnet subagent per candidate CV for parallel evidence collection.
+- Invokes an Opus synthesis subagent to score, band, and rank the batch.
+- Runs a self-verification pass to confirm all evidence is cited and fairness guardrails were followed before presenting results.
 - Bands each candidate **Strong / Moderate / Weak** with a **Recommend / Hold / Reject** call.
-- Ranks a batch from best to worst fit.
+- Persists all evidence, synthesis, and decision records in the `.tabp/` state directory.
 
 **What you get back**
 
@@ -40,4 +62,4 @@ The skill scores only job-relevant qualifications and ignores protected characte
 
 ## Adding more skills
 
-This plugin is structured to grow. Each new skill lives in its own folder under `skills/`. Ask Claude to "add a skill to the TABP toolkit" to extend it.
+This plugin is structured to grow. Each new skill lives in its own folder under `skills/`. Subagent charters for a new skill live under `agents/`. Ask Claude to "add a skill to the TABP toolkit" to extend it.

@@ -10,7 +10,8 @@ C4Container
         Container(agents, "acs Subagents", "27 x agent .md", "Planner/executor/verifier charters per hooked skill; grounding rules; XML I/O")
         Container(hooks, "acs Hook & helper layer", "Python 3.9+ stdlib", "dispatch + 9 pre + 9 post hooks; skill-start, new-ticket, handoff, clarify, validate_xml, status lines; acs_lib")
         Container(schemas, "acs Schemas & templates", "JSON Schema / XSD / md", "9 state schemas, acs-messages.xsd, 4 description templates")
-        Container(tabp_skills, "tabp Skills", "1 x SKILL.md (screen-cvs)", "Screen-CV recruiting workflow; dispatched via Cowork")
+        Container(tabp_skills, "tabp Skills", "1 x SKILL.md (screen-cvs)", "Screen-CV recruiting workflow; coordinator orchestrates parallel Sonnet-per-CV subagents + Opus synthesis via the coordinator+subagents convention; dispatched via Cowork")
+        Container(tabp_agents, "tabp Subagents", "2 x agent .md", "Two reusable tabp-namespaced agent charters under plugins/tabp/agents/: screen-cv-subagent (Sonnet, one per CV) + synthesis-subagent (Opus, once per run). Spawned by the screen-cvs coordinator. No foreign-namespace tokens.")
         Container(tabp_helper, "tabp_helper.py", "Python 3.9+ stdlib only", "stdlib-only Python >= 3.9 helper; atomic .tabp/ writes, spin-lock, schema validation, run-history, usage-read stub; invoked via Bash; no acs import")
     }
     System_Ext(cc, "Claude Code runtime")
@@ -33,6 +34,7 @@ C4Container
     Rel(skills, trackers, "gh / acli (sync, PRs)")
     Rel(skills, schemas, "validate messages & state; render templates")
     Rel(tabp_skills, cowork, "screen-cvs skill dispatched via Cowork")
+    Rel(tabp_skills, tabp_agents, "spawns screen-cv-subagent per CV + synthesis-subagent once per run")
     Rel(tabp_skills, tabp_helper, "run-start / state-write / decision-write / run-finalize / run-status (Bash)")
     Rel(tabp_helper, ws, ".tabp/ state: run.json, evidence, decision, history, lock")
     Rel(tests_plugin, mkt, "validates per-plugin schemas, hooks, skills presence-gated")
@@ -41,6 +43,6 @@ C4Container
 Container responsibilities are deliberately asymmetric: **skills/agents decide,
 the hook layer records and gates** — no prose can unlock a gate, and no script
 makes a judgment call. The marketplace boundary holds heterogeneous plugin
-shapes: acs (full-shape) and tabp (skills + helper + schemas). Tooling containers
-(`tests/<plugin>/`, `evals/<plugin>/`) are developer/CI support and sit
-outside the runtime boundary.
+shapes: acs (full-shape) and tabp (skills + helper + schemas + subagent charters).
+Tooling containers (`tests/<plugin>/`, `evals/<plugin>/`) are developer/CI support
+and sit outside the runtime boundary.
