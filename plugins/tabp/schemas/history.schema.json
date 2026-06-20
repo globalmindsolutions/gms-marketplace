@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/tabp/schemas/history.schema.json",
+  "title": "tabp run history",
+  "description": "Append-only run history stored at <project>/.tabp/history.json. New runs are appended to the runs array; no entry is ever removed. runs[-1] is the current status. The append-only invariant is enforced at runtime by tabp_helper.py (spec 02), not by this schema.",
+  "type": "object",
+  "required": ["runs"],
+  "properties": {
+    "runs": {
+      "type": "array",
+      "minItems": 0,
+      "description": "Append-only array of run summary objects. runs[-1] is the most recent run.",
+      "items": {
+        "type": "object",
+        "required": ["run_id", "skill", "started_at", "status"],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "Unique run identifier."
+          },
+          "skill": {
+            "type": "string",
+            "description": "Skill name that produced this run."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 datetime when the run started."
+          },
+          "ended_at": {
+            "oneOf": [
+              {"type": "string", "format": "date-time"},
+              {"type": "null"}
+            ],
+            "description": "ISO-8601 datetime when the run ended. Null or absent while in_progress."
+          },
+          "status": {
+            "enum": ["in_progress", "completed", "failed", "interrupted"],
+            "description": "Run status at the time this summary was written."
+          },
+          "candidates_screened": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of candidates screened."
+          },
+          "jd_slug": {
+            "type": "string",
+            "description": "Job description slug."
+          },
+          "duration_seconds": {
+            "oneOf": [
+              {"type": "number", "minimum": 0},
+              {"type": "null"}
+            ],
+            "description": "Wall-clock duration of the run in seconds."
+          },
+          "usage_source": {
+            "enum": ["cowork", "unavailable"],
+            "description": "Source of usage data for this run."
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

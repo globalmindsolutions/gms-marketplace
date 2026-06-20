@@ -82,3 +82,96 @@ Invariants (enforced by `acs_lib` + schemas + tests):
 - Cross-partition writes limited to the defined parent-epic updates; reads
   (e.g. a child consuming the epic's `design.md`) are allowed.
 - Done partitions move to `archive/` — never deleted; the index keeps them.
+
+---
+
+## tabp plugin data model
+
+Source: `MAR-2/specs/01-tabp-state-json-schemas.md`, `MAR-1/design.md:652-722`.
+Schemas: `plugins/tabp/schemas/`. All entities live in `<project>/.tabp/`
+within the Cowork project folder (separate from the acs workspace partition).
+
+```mermaid
+erDiagram
+    TABP_PROJECT ||--o{ TABP_RUN : "run history (append-only)"
+    TABP_PROJECT ||--|| TABP_HISTORY : "history.json"
+    TABP_RUN ||--o{ EVIDENCE_RECORD : "one per candidate screened"
+    TABP_RUN ||--o| DECISION_RECORD : "created at sign-off"
+    TABP_RUN ||--|| XLSX_SCORECARD : "cv-screening-scorecard-<role>-<date>.xlsx"
+    TABP_PROJECT ||--o| TABP_SETTINGS : "tabp settings.json"
+    TABP_PROJECT ||--o| TABP_LOCK : "held during active run"
+
+    TABP_PROJECT {
+        string project_folder PK "Cowork project folder path"
+    }
+    TABP_HISTORY {
+        string project_folder FK
+        array runs "append-only array of run summaries"
+    }
+    TABP_RUN {
+        string run_id PK "run-<ISO8601>"
+        string skill "screen-cvs"
+        datetime started_at
+        datetime ended_at
+        enum status "in_progress|completed|failed|interrupted"
+        string stop_reason
+        enum state_write_mode "helper|instructed"
+        string usage_source "cowork|unavailable"
+        number tokens_in "null if unavailable"
+        number tokens_out "null if unavailable"
+        number cost_usd "null if unavailable"
+        number duration_seconds
+        number candidates_screened
+        string jd_slug
+        string scorecard_file
+    }
+    EVIDENCE_RECORD {
+        string run_id FK
+        string candidate_id PK
+        string candidate_name
+        array requirements "judgment+evidence per requirement"
+        number score
+        string band "Strong|Moderate|Weak"
+        string recommendation "Recommend|Hold|Reject"
+        string must_have_gate "OK|Missing:<list>"
+        bool fairness_check_passed
+        array bias_flags
+    }
+    DECISION_RECORD {
+        string run_id FK PK
+        bool verification_passed
+        string verification_notes
+        datetime presented_at
+        object sign_off "null until recruiter confirms"
+    }
+    XLSX_SCORECARD {
+        string run_id FK
+        string filename "cv-screening-scorecard-<role>-<date>.xlsx"
+    }
+    TABP_SETTINGS {
+        string project_folder FK
+        string screening_model
+        string synthesis_model
+        string cv_folder
+        string jd_folder
+        enum state_write_mode "helper|instructed"
+    }
+    TABP_LOCK {
+        string project_folder FK
+        int pid
+        string hostname
+        datetime created_at
+    }
+```
+
+Invariants (enforced by `tabp_helper.py` at runtime, not by schema alone):
+
+- `runs[-1]` in `history.json` is the current status of the most recent run.
+- `status = "in_progress"` means the run is resumable from `.tabp/runs/<run-id>/`.
+- Evidence records and the decision record are appended/updated only within an `in_progress` run.
+- The lock is held while `status = "in_progress"`; stale locks are reported, not stolen.
+- No entry in `history.json` or any per-run file is ever deleted; archives are never purged.
+
+PII-minimal rule: `candidate_name` holds only a name or anonymised label. No contact
+details, no protected-class attributes, no secrets in any state file
+(`design.md:129-132`).

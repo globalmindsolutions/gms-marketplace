@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/tabp/schemas/evidence.schema.json",
+  "title": "tabp evidence record",
+  "description": "Per-candidate evidence record written to <project>/.tabp/runs/<run-id>/evidence-<candidate-id>.json. Every judgment must cite non-empty source evidence from the CV (AC-4: source-grounded evidence). PII-minimal rule: candidate_name holds only a name or anonymised label — no contact details, no protected-class attributes, no secrets.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "candidate_id",
+    "candidate_name",
+    "requirements",
+    "score",
+    "band",
+    "recommendation",
+    "must_have_gate",
+    "fairness_check_passed"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Run identifier this evidence record belongs to."
+    },
+    "candidate_id": {
+      "type": "string",
+      "description": "Unique candidate identifier within this run. E.g. 'candidate-01'."
+    },
+    "candidate_name": {
+      "type": "string",
+      "description": "Candidate name or anonymised label. No contact details or protected-class attributes."
+    },
+    "requirements": {
+      "type": "array",
+      "description": "Per-requirement judgments with cited CV evidence. Each entry must have non-empty evidence (AC-4).",
+      "items": {
+        "type": "object",
+        "required": ["requirement", "category", "judgment", "evidence"],
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "description": "The requirement text being evaluated."
+          },
+          "category": {
+            "type": "string",
+            "description": "Requirement category, e.g. 'must-have' or 'nice-to-have'."
+          },
+          "judgment": {
+            "type": "string",
+            "description": "Screening judgment: e.g. 'Met', 'Not Met', 'Partial'."
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Cited CV evidence supporting the judgment. Must be non-empty (AC-4: no invented evidence)."
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Composite score for this candidate, range 0..100."
+    },
+    "band": {
+      "enum": ["Strong", "Moderate", "Weak"],
+      "description": "Scoring band derived from the score."
+    },
+    "recommendation": {
+      "enum": ["Recommend", "Hold", "Reject"],
+      "description": "Recruiter-facing recommendation for this candidate."
+    },
+    "must_have_gate": {
+      "type": "string",
+      "pattern": "^(OK|Missing:.+)$",
+      "description": "Must-have gate result: 'OK' if all must-have requirements are met, or 'Missing:<comma-separated-list>' if any are missing."
+    },
+    "fairness_check_passed": {
+      "type": "boolean",
+      "description": "Whether the fairness guardrail check passed for this candidate."
+    },
+    "bias_flags": {
+      "type": "array",
+      "description": "List of bias flags raised during screening. Empty array when none detected.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

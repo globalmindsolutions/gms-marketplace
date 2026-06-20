@@ -67,12 +67,12 @@ class TestPluginJson(unittest.TestCase):
 
 
 class TestSkillsOnlyShape(unittest.TestCase):
-    """Group 2 -- skills-only shape (AC1, AC5).
+    """Group 2 -- plugin shape guard (AC1, AC5, AC6).
 
-    Asserts that none of the full-shape directories are present under
-    plugins/tabp/. Their absence ensures the CI shape-conditional steps
-    (JSON Schema, settings validation, XSD, hook byte-compile) all skip
-    for tabp -- see spec 02 CI table.
+    After spec 01 (MAR-2): plugins/tabp/schemas/ is present (schemas + samples).
+    Asserts that .acs/, hooks/, and agents/ are absent (tabp has no acs state,
+    no hooks, and no subagent charters yet). schemas/ assertFalse flipped to
+    assertTrue by spec 01 delivery. agents/ remains assertFalse until spec 03.
     """
 
     def test_no_acs_dir(self):
@@ -84,9 +84,9 @@ class TestSkillsOnlyShape(unittest.TestCase):
 
     def test_no_schemas_dir(self):
         schemas_dir = os.path.join(TABP_DIR, "schemas")
-        self.assertFalse(
+        self.assertTrue(
             os.path.isdir(schemas_dir),
-            "plugins/tabp/schemas/ must not exist for a skills-only plugin",
+            "plugins/tabp/schemas/ must exist (tabp has JSON Schema contracts, spec 01)",
         )
 
     def test_no_hooks_dir(self):

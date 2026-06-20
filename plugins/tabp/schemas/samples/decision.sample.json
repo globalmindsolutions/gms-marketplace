@@ -1,0 +1,7 @@
+{
+  "run_id": "run-20260620T091530Z",
+  "verification_passed": true,
+  "verification_notes": "All judgments cite CV evidence; fairness guardrails observed; must-have gates correct.",
+  "presented_at": "2026-06-20T09:48:00Z",
+  "sign_off": null
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/tabp/schemas/lock.schema.json",
+  "title": "tabp .lock",
+  "description": "Project-folder lock held while a screen-cvs run is in_progress. Written to <project>/.tabp/.lock. Stale locks (process gone, different host) are reported for manual removal, never auto-stolen. Released when the run transitions out of in_progress status.",
+  "type": "object",
+  "required": ["pid", "hostname", "created_at"],
+  "properties": {
+    "pid": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "PID of the process holding the lock."
+    },
+    "hostname": {
+      "type": "string",
+      "description": "Hostname of the machine holding the lock."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 datetime when the lock was acquired."
+    }
+  },
+  "additionalProperties": true
+}

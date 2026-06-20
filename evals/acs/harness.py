@@ -133,6 +133,9 @@ class Sandbox:
 
     def __enter__(self):
         self.tmp = tempfile.mkdtemp(prefix="acs-eval-")
+        # Override HOME so sandbox git processes do not pick up the user global
+        # .gitignore (which may ignore .acs/, blocking git add .acs/settings.json).
+        self.env["HOME"] = self.tmp
         self.repo = os.path.join(self.tmp, self.slug)
         self.ws = os.path.join(self.tmp, "workspace")
         os.makedirs(self.repo)

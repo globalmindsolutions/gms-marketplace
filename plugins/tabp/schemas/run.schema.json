@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/tabp/schemas/run.schema.json",
+  "title": "tabp run record",
+  "description": "Per-run record written to <project>/.tabp/runs/<run-id>/run.json. Tracks execution status, usage, and metadata for a single screen-cvs run. Validated by tabp_helper.py (spec 02).",
+  "type": "object",
+  "required": [
+    "run_id",
+    "skill",
+    "started_at",
+    "status",
+    "state_write_mode",
+    "usage",
+    "candidates_screened",
+    "jd_slug"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Unique run identifier, format: run-<ISO8601>. E.g. run-20260620T091530Z."
+    },
+    "skill": {
+      "type": "string",
+      "description": "Skill name that produced this run. E.g. 'screen-cvs'."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 datetime when the run started."
+    },
+    "ended_at": {
+      "oneOf": [
+        {"type": "string", "format": "date-time"},
+        {"type": "null"}
+      ],
+      "description": "ISO-8601 datetime when the run ended. Null while in_progress."
+    },
+    "status": {
+      "enum": ["in_progress", "completed", "failed", "interrupted"],
+      "description": "Current run status. in_progress means the run is resumable."
+    },
+    "stop_reason": {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "null"}
+      ],
+      "description": "Reason the run stopped early. Null unless failed or interrupted."
+    },
+    "state_write_mode": {
+      "enum": ["helper", "instructed"],
+      "description": "How state is written: 'helper' = tabp_helper.py shell subcommands; 'instructed' = coordinator instructed to write state files directly (Cowork degraded mode)."
+    },
+    "usage": {
+      "type": "object",
+      "description": "Usage metadata for this run.",
+      "required": ["usage_source"],
+      "properties": {
+        "usage_source": {
+          "enum": ["cowork", "unavailable"],
+          "description": "Source of usage data: 'cowork' = Cowork self-reported; 'unavailable' = not self-reported."
+        },
+        "tokens_in": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ],
+          "description": "Input token count. Null if usage_source is unavailable."
+        },
+        "tokens_out": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ],
+          "description": "Output token count. Null if usage_source is unavailable."
+        },
+        "cost_usd": {
+          "oneOf": [
+            {"type": "number", "minimum": 0},
+            {"type": "null"}
+          ],
+          "description": "Cost in USD. Null if usage_source is unavailable."
+        },
+        "duration_seconds": {
+          "oneOf": [
+            {"type": "number", "minimum": 0},
+            {"type": "null"}
+          ],
+          "description": "Wall-clock duration of the run in seconds."
+        }
+      },
+      "additionalProperties": true
+    },
+    "candidates_screened": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of candidates screened in this run."
+    },
+    "jd_slug": {
+      "type": "string",
+      "description": "Job description slug identifying the role. E.g. 'backend-engineer'."
+    },
+    "scorecard_file": {
+      "type": "string",
+      "description": "Filename of the Excel scorecard produced by this run."
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/tabp/schemas/decision.schema.json",
+  "title": "tabp decision record",
+  "description": "Decision and sign-off record written to <project>/.tabp/runs/<run-id>/decision.json. Created when the coordinator presents results for human review (AC-5). sign_off is null until the recruiter explicitly confirms in-chat.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "verification_passed",
+    "presented_at"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Run identifier this decision record belongs to."
+    },
+    "verification_passed": {
+      "type": "boolean",
+      "description": "Whether the self-verification step passed before presenting results."
+    },
+    "verification_notes": {
+      "type": "string",
+      "description": "Free-text notes from the self-verification step."
+    },
+    "presented_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 datetime when results were presented to the recruiter."
+    },
+    "sign_off": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["recruiter", "confirmed_at"],
+          "properties": {
+            "recruiter": {
+              "type": "string",
+              "description": "Recruiter name or 'on-file'."
+            },
+            "confirmed_at": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO-8601 datetime when the recruiter confirmed."
+            },
+            "notes": {
+              "type": "string",
+              "description": "Optional free-text notes from the recruiter at sign-off."
+            }
+          },
+          "additionalProperties": true
+        }
+      ],
+      "description": "Recruiter sign-off. Null until the recruiter explicitly confirms in-chat."
+    }
+  },
+  "additionalProperties": true
+}

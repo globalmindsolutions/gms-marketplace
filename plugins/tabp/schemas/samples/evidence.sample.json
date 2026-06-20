@@ -1,0 +1,19 @@
+{
+  "run_id": "run-20260620T091530Z",
+  "candidate_id": "candidate-01",
+  "candidate_name": "Name or anonymized label",
+  "requirements": [
+    {
+      "requirement": "Python 3+ experience",
+      "category": "must-have",
+      "judgment": "Met",
+      "evidence": "5 years Python at Roles X and Y (CV p.2)"
+    }
+  ],
+  "score": 87,
+  "band": "Strong",
+  "recommendation": "Recommend",
+  "must_have_gate": "OK",
+  "fairness_check_passed": true,
+  "bias_flags": []
+}
