@@ -31,6 +31,8 @@ context and consequences.
 | [0020](0020-ticket-due-date-and-deadline-panel.md) | Deadlines sourced from a `due_date` ticket field (not the GitHub tracker, not deferred) | Accepted |
 | [0021](0021-heterogeneous-plugin-contract-via-directory-convention-shapes.md) | Heterogeneous plugin contract via directory-convention shapes | Accepted |
 | [0022](0022-behavioral-evals-local-only-ci-runs-no-llm-calls.md) | Behavioral evals are local-only; CI runs no LLM calls | Accepted |
+| [0023](0023-tabp-hybrid-quality-mechanism-instruction-driven-plus-stdlib-helper.md) | tabp quality-mechanism: hybrid instruction-driven orchestration plus tabp-namespaced stdlib-Python helper (deliberate divergence from ADR 0001 hook-gated model) | Accepted |
+| [0024](0024-tabp-state-in-cowork-project-folder.md) | tabp state in the Cowork project folder (deliberate divergence from ADR 0003 outside-repo rule) | Accepted |
 
 Format: status, date, context, decision, consequences (MADR-flavored, kept
 short). New ADRs are appended by the pipeline with the next sequence number.
