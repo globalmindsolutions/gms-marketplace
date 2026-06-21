@@ -1830,3 +1830,222 @@ class TestEvidenceScoreType(unittest.TestCase):
         bad["score"] = True
         with self.assertRaises(tabp_helper.TabpValidationError):
             tabp_helper._validate_record(bad, "evidence")
+
+
+# ---------------------------------------------------------------------------
+# Class TestSchemaWideningAndFinalize — Spec 01 (MAR-38)
+# TDD: Written before implementation; all tests MUST fail before impl.
+# ---------------------------------------------------------------------------
+
+class TestSchemaWideningAndFinalize(unittest.TestCase):
+    """Spec 01 (MAR-38) — run schema widening + finalize write-through.
+
+    Tests for:
+    (a/b) _validate_run accepts new usage_source values; rejects 'unknown'
+    (c)   cost_basis optional: absent ok, valid values ok, bad value raises
+    (d)   run-finalize writes tokens-in/out/cost-basis + re-validate passes
+    (e)   run-finalize with unavailable leaves tokens/cost-basis absent
+    (f)   argparse accepts all four usage-source values (regression)
+    (g)   history enum additive: claude-code validates
+    (h)   R2 regression: cost_basis absent on old records is valid
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._project_dir = self._tmpdir
+        self._tabp_dir = os.path.join(self._project_dir, ".tabp")
+        os.makedirs(self._tabp_dir, exist_ok=True)
+        self._orig_stdout = sys.stdout
+        self._orig_stderr = sys.stderr
+
+    def tearDown(self):
+        import shutil
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _capture(self):
+        import io
+        out = io.StringIO()
+        err = io.StringIO()
+        sys.stdout = out
+        sys.stderr = err
+        return out, err
+
+    def _restore_streams(self):
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+
+    def _do_run_start(self):
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_run_start([
+                "--project-dir", self._project_dir,
+                "--skill", "screen-cvs",
+                "--jd-slug", "test-role",
+            ])
+        finally:
+            self._restore_streams()
+        return out.getvalue().strip()
+
+    def _make_run(self, usage_source="unavailable"):
+        """Return a valid run record with the given usage_source."""
+        run = _make_valid_run()
+        run["usage"]["usage_source"] = usage_source
+        return run
+
+    # (a/b) usage_source enum widened
+    def test_validate_run_accepts_claude_code(self):
+        """_validate_run accepts usage_source='claude-code'."""
+        run = self._make_run("claude-code")
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_accepts_estimate(self):
+        """_validate_run accepts usage_source='estimate'."""
+        run = self._make_run("estimate")
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_accepts_cowork_regression(self):
+        """_validate_run still accepts usage_source='cowork' (regression)."""
+        run = self._make_run("cowork")
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_accepts_unavailable_regression(self):
+        """_validate_run still accepts usage_source='unavailable' (regression)."""
+        run = self._make_run("unavailable")
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_rejects_unknown_usage_source(self):
+        """_validate_run rejects usage_source='unknown'."""
+        run = self._make_run("unknown")
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_run(run)
+
+    # (c) cost_basis optional
+    def test_validate_run_cost_basis_absent_ok(self):
+        """cost_basis absent (old record) is valid — backward compat."""
+        run = self._make_run("unavailable")
+        self.assertNotIn("cost_basis", run["usage"])
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_cost_basis_actual_ok(self):
+        """cost_basis='actual' is valid."""
+        run = self._make_run("cowork")
+        run["usage"]["cost_basis"] = "actual"
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_cost_basis_estimate_ok(self):
+        """cost_basis='estimate' is valid."""
+        run = self._make_run("claude-code")
+        run["usage"]["cost_basis"] = "estimate"
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_cost_basis_unavailable_ok(self):
+        """cost_basis='unavailable' is valid."""
+        run = self._make_run("unavailable")
+        run["usage"]["cost_basis"] = "unavailable"
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_cost_basis_bad_value_raises(self):
+        """cost_basis='bad-value' raises TabpValidationError."""
+        run = self._make_run("cowork")
+        run["usage"]["cost_basis"] = "bad-value"
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_run(run)
+
+    # (d) run-finalize writes tokens + cost-basis
+    def test_run_finalize_writes_tokens_and_cost_basis(self):
+        """run-finalize with --tokens-in/out/cost-basis writes through to run.json."""
+        run_id = self._do_run_start()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "claude-code",
+            "--tokens-in", "28000",
+            "--tokens-out", "5200",
+            "--cost-basis", "estimate",
+        ])
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        with open(run_path) as fh:
+            run = json.load(fh)
+        self.assertEqual(run["usage"]["usage_source"], "claude-code")
+        self.assertEqual(run["usage"]["tokens_in"], 28000)
+        self.assertEqual(run["usage"]["tokens_out"], 5200)
+        self.assertEqual(run["usage"]["cost_basis"], "estimate")
+        # Re-validate: widened _validate_run must pass
+        tabp_helper._validate_run(run)
+
+    # (e) run-finalize with unavailable leaves tokens None and cost-basis absent
+    def test_run_finalize_unavailable_no_tokens(self):
+        """run-finalize --usage-source unavailable: tokens remain null, cost_basis absent."""
+        run_id = self._do_run_start()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "unavailable",
+        ])
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        with open(run_path) as fh:
+            run = json.load(fh)
+        usage = run.get("usage", {})
+        # tokens_in/out may be null (not set by finalize without --tokens-in/out)
+        self.assertIsNone(usage.get("tokens_in"),
+                          "tokens_in must be None when not passed to run-finalize")
+        self.assertIsNone(usage.get("tokens_out"),
+                          "tokens_out must be None when not passed to run-finalize")
+        # cost_basis must not be set when --cost-basis not passed
+        self.assertNotIn("cost_basis", usage)
+
+    # (f) argparse accepts all four usage-source values
+    def test_run_finalize_accepts_estimate_usage_source(self):
+        """run-finalize accepts --usage-source estimate (no argparse error)."""
+        run_id = self._do_run_start()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "estimate",
+        ])
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        with open(run_path) as fh:
+            run = json.load(fh)
+        self.assertEqual(run["usage"]["usage_source"], "estimate")
+
+    def test_run_finalize_accepts_cowork_usage_source(self):
+        """run-finalize accepts --usage-source cowork (regression)."""
+        run_id = self._do_run_start()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "cowork",
+        ])
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        with open(run_path) as fh:
+            run = json.load(fh)
+        self.assertEqual(run["usage"]["usage_source"], "cowork")
+
+    # (g) history enum additive
+    def test_validate_history_accepts_claude_code_usage_source(self):
+        """_validate_history accepts runs[0].usage_source='claude-code'."""
+        history = {
+            "runs": [
+                {
+                    "run_id": "run-20260620T091530Z",
+                    "skill": "screen-cvs",
+                    "started_at": "2026-06-20T09:15:30Z",
+                    "status": "completed",
+                    "usage_source": "claude-code",
+                }
+            ]
+        }
+        tabp_helper._validate_history(history)  # must not raise
+
+    # (h) R2 regression: cost_basis absent on old records
+    def test_validate_run_old_record_without_cost_basis_is_valid(self):
+        """Old run record without cost_basis key passes validation (additive)."""
+        run = _make_valid_run()  # run.sample.json has no cost_basis
+        self.assertNotIn("cost_basis", run.get("usage", {}))
+        tabp_helper._validate_run(run)  # must not raise

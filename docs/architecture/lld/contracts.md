@@ -82,10 +82,11 @@ Schema: `plugins/tabp/schemas/run.schema.json`
 | `status` | enum | `"in_progress"`, `"completed"`, `"failed"`, `"interrupted"`. |
 | `stop_reason` | string or null | Reason run stopped early. Null unless `failed` or `interrupted`. |
 | `state_write_mode` | enum | `"helper"` (tabp_helper.py subcommands) or `"instructed"` (degraded mode). |
-| `usage.usage_source` | enum | `"cowork"` (self-reported) or `"unavailable"`. |
+| `usage.usage_source` | enum | `"cowork"` (self-reported, cost_basis=actual), `"claude-code"` (transcript tokens, cost_basis=estimate), `"estimate"` (heuristic, cost_basis=estimate), `"unavailable"` (no data). |
 | `usage.tokens_in` | integer or null | Input token count. Null when `usage_source = "unavailable"`. |
 | `usage.tokens_out` | integer or null | Output token count. Null when `usage_source = "unavailable"`. |
 | `usage.cost_usd` | number or null | Cost in USD. Null when `usage_source = "unavailable"`. |
+| `usage.cost_basis` | enum (optional) | `"actual"` (self-reported by runtime), `"estimate"` (derived from tokens x pricing), `"unavailable"` (no cost data). Absent on legacy records — treated as `"unavailable"`. |
 | `usage.duration_seconds` | number or null | Wall-clock duration in seconds. |
 | `candidates_screened` | integer | Number of candidates screened. |
 | `jd_slug` | string | Job description slug. E.g. `"backend-engineer"`. |
@@ -141,7 +142,7 @@ Schema: `plugins/tabp/schemas/history.schema.json`
 | `runs[].candidates_screened` | integer (optional) | Number of candidates screened. |
 | `runs[].jd_slug` | string (optional) | Job description slug. |
 | `runs[].duration_seconds` | number or null (optional) | Wall-clock duration. |
-| `runs[].usage_source` | enum (optional) | `"cowork"` or `"unavailable"`. |
+| `runs[].usage_source` | enum (optional) | `"cowork"`, `"claude-code"`, `"estimate"`, or `"unavailable"`. |
 
 The append-only invariant (no deletion) is enforced at runtime by `tabp_helper.py`.
 

@@ -372,7 +372,10 @@ def _validate_run(record):
               candidates_screened, jd_slug.
     Enum: status in {in_progress, completed, failed, interrupted}.
     Enum: state_write_mode in {helper, instructed}.
-    Enum: usage.usage_source in {cowork, unavailable}.
+    Enum: usage.usage_source in {cowork, claude-code, estimate, unavailable}.
+    Optional: usage.cost_basis in {actual, estimate, unavailable} (absent = ok).
+    MAR-38: widened from two-value to four-value usage_source enum; added
+            optional cost_basis check.
     """
     for field in ("run_id", "skill", "started_at", "status",
                   "state_write_mode", "usage", "candidates_screened", "jd_slug"):
@@ -387,11 +390,13 @@ def _validate_run(record):
         raise TabpValidationError(
             "tabp: validation error: run.usage must be an object"
         )
-    _require(usage, "usage_source", "run.usage")
-    if usage["usage_source"] not in ("cowork", "unavailable"):
-        raise TabpValidationError(
-            "tabp: validation error: run.usage.usage_source must be 'cowork' or 'unavailable'"
-        )
+    _require_enum(usage, "usage_source",
+                  {"cowork", "claude-code", "estimate", "unavailable"},
+                  "run.usage")
+    if "cost_basis" in usage:
+        _require_enum(usage, "cost_basis",
+                      {"actual", "estimate", "unavailable"},
+                      "run.usage")
 
 
 def _validate_evidence(record):
@@ -750,11 +755,15 @@ def _cmd_run_finalize(args):
     Args: --project-dir <path> --run-id <id>
           --status <completed|failed|interrupted>
           [--candidates-screened <n>]
-          [--usage-source <cowork|unavailable>]
+          [--usage-source <cowork|claude-code|estimate|unavailable>]
+          [--tokens-in <int>]
+          [--tokens-out <int>]
+          [--cost-basis <actual|estimate|unavailable>]
           [--stop-reason <text>]
 
     Updates run.json (status, ended_at, optional fields), updates matching
     history entry, releases lock. Validates run.json with _validate_run.
+    MAR-38: widened --usage-source to four values; added --tokens-in/out/cost-basis.
     Design ref: design.md:263, 775.
     """
     import argparse
@@ -765,7 +774,14 @@ def _cmd_run_finalize(args):
                         choices=["completed", "failed", "interrupted"])
     parser.add_argument("--candidates-screened", type=int, default=None)
     parser.add_argument("--usage-source", default=None,
-                        choices=["cowork", "unavailable"])
+                        choices=["cowork", "claude-code", "estimate", "unavailable"])
+    parser.add_argument("--tokens-in", type=int, default=None,
+                        dest="tokens_in")
+    parser.add_argument("--tokens-out", type=int, default=None,
+                        dest="tokens_out")
+    parser.add_argument("--cost-basis", default=None,
+                        choices=["actual", "estimate", "unavailable"],
+                        dest="cost_basis")
     parser.add_argument("--stop-reason", default=None)
     parsed = parser.parse_args(args)
 
@@ -789,6 +805,12 @@ def _cmd_run_finalize(args):
         run_record["candidates_screened"] = parsed.candidates_screened
     if parsed.usage_source is not None:
         run_record.setdefault("usage", {})["usage_source"] = parsed.usage_source
+    if parsed.tokens_in is not None:
+        run_record.setdefault("usage", {})["tokens_in"] = parsed.tokens_in
+    if parsed.tokens_out is not None:
+        run_record.setdefault("usage", {})["tokens_out"] = parsed.tokens_out
+    if parsed.cost_basis is not None:
+        run_record.setdefault("usage", {})["cost_basis"] = parsed.cost_basis
 
     _validate_run(run_record)
     _write_json(run_path, run_record)
