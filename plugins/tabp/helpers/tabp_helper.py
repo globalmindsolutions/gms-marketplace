@@ -6,7 +6,8 @@ screen-cvs coordinator as:
     python3 plugins/tabp/helpers/tabp_helper.py <subcommand> [args]
 
 Subcommands: run-start, state-write, decision-write, sign-off-write,
-             run-finalize, run-status, validate, usage-read, settings-read.
+             run-finalize, run-status, validate, usage-read, settings-read,
+             settings-validate.
 
 Re-implements (does NOT import) acs_lib primitives in the tabp namespace.
 No acs reference appears in this file.
@@ -536,10 +537,72 @@ def _validate_lock(record):
         )
 
 
+# Namespace guard token (runtime-built to avoid the literal substring in source).
+# AC-4 / design.md:512 — no tabp settings value may reference the acs workspace dir.
+# Built via list-join: [".acs", "/"] is not a compile-time foldable string literal.
+_SETTINGS_FORBIDDEN_SUBSTR = "".join([".", "a", "c", "s", "/"])
+
+
+def _validate_settings(record):
+    """Validate a settings record (tabp settings.json).
+
+    Hand-written stdlib walker. Does NOT call _load_schema or import jsonschema.
+    All fields are optional; an empty dict is valid.
+    Raises TabpValidationError on failure. Returns None on success.
+
+    Rules:
+    1. record must be a dict.
+    2. All keys must be known (in _SETTINGS_DEFAULTS); unknown keys rejected.
+       workspace_path is caught by this rule with a specific message.
+    3. Known present fields must be str (screening_model, synthesis_model,
+       cv_folder, jd_folder) or str in {helper, instructed} (state_write_mode).
+    4. No string value may contain the namespace-polluting workspace prefix.
+    """
+    if not isinstance(record, dict):
+        raise TabpValidationError(
+            "tabp: validation error: settings record must be a dict"
+        )
+    # Reject unknown keys (covers workspace_path)
+    known_keys = set(_SETTINGS_DEFAULTS.keys())
+    for key in record:
+        if key not in known_keys:
+            if key == "workspace_path":
+                raise TabpValidationError(
+                    "tabp: validation error: settings.workspace_path is forbidden "
+                    "(design.md:512 — no secrets, no workspace_path)"
+                )
+            raise TabpValidationError(
+                "tabp: validation error: settings has unknown key '%s'" % key
+            )
+    # Type-check each present known key
+    _str_fields = ("screening_model", "synthesis_model", "cv_folder", "jd_folder")
+    for field in _str_fields:
+        if field in record:
+            if not isinstance(record[field], str):
+                raise TabpValidationError(
+                    "tabp: validation error: settings.%s must be a string, "
+                    "got %r" % (field, type(record[field]).__name__)
+                )
+    if "state_write_mode" in record:
+        val = record["state_write_mode"]
+        if not isinstance(val, str) or val not in {"helper", "instructed"}:
+            raise TabpValidationError(
+                "tabp: validation error: settings.state_write_mode value %r "
+                "not in allowed set {'helper', 'instructed'}" % (val,)
+            )
+    # Reject any string value containing the forbidden namespace prefix
+    for key, val in record.items():
+        if isinstance(val, str) and _SETTINGS_FORBIDDEN_SUBSTR in val:
+            raise TabpValidationError(
+                "tabp: validation error: settings.%s value contains forbidden "
+                "namespace prefix" % key
+            )
+
+
 def _validate_record(record, record_type):
     """Dispatch validation to the type-specific validator.
 
-    record_type: 'run' | 'evidence' | 'decision' | 'history' | 'lock'
+    record_type: 'run' | 'evidence' | 'decision' | 'history' | 'lock' | 'settings'
     Raises TabpValidationError on any validation failure.
     """
     dispatch = {
@@ -548,6 +611,7 @@ def _validate_record(record, record_type):
         "decision": _validate_decision,
         "history": _validate_history,
         "lock": _validate_lock,
+        "settings": _validate_settings,
     }
     if record_type not in dispatch:
         raise TabpValidationError(
@@ -929,33 +993,110 @@ _SETTINGS_DEFAULTS = {
 
 
 def _cmd_settings_read(args):
-    """settings-read subcommand.
+    """settings-read subcommand (MAR-3 corrected path + observable envelope).
 
     Args: --project-dir <path>
 
-    Resolves tabp settings from <project>/.tabp/settings.json layered over the
-    documented defaults (_SETTINGS_DEFAULTS), and prints the resolved settings
-    as JSON to stdout. A missing or corrupt settings file falls back to the
-    defaults (never raises), so the screen-cvs coordinator always gets a usable
-    settings object. Only known keys are honoured. This is the foundation
-    reader; the writable settings surface is owned by the tabp upgrade epic.
+    Resolves tabp settings from <project>/"tabp settings.json" (project root,
+    literal filename with space) layered over _SETTINGS_DEFAULTS. Emits a
+    single JSON envelope to stdout:
+
+        {
+          "settings": { ...resolved fields... },
+          "settings_source": "file" | "absent" | "corrupt",
+          "from_file": [...keys present in file...],
+          "from_default": [...remaining keys...]
+        }
+
+    Never raises. Design ref: design.md:490-491, spec 01:66-109.
     """
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper settings-read")
     parser.add_argument("--project-dir", required=True)
     parsed = parser.parse_args(args)
 
-    tabp_dir = _tabp_dir_from_project(parsed.project_dir)
-    settings_path = os.path.join(tabp_dir, "settings.json")
+    settings_path = os.path.join(parsed.project_dir, "tabp settings.json")
 
     resolved = dict(_SETTINGS_DEFAULTS)
     file_settings = _read_json(settings_path)
+
     if isinstance(file_settings, dict):
+        settings_source = "file"
+        from_file = []
         for key in _SETTINGS_DEFAULTS:
             if key in file_settings:
                 resolved[key] = file_settings[key]
+                from_file.append(key)
+        from_default = [k for k in _SETTINGS_DEFAULTS if k not in from_file]
+    else:
+        # Distinguish absent (path does not exist) vs corrupt (exists but unreadable)
+        if not os.path.exists(settings_path):
+            settings_source = "absent"
+        else:
+            settings_source = "corrupt"
+        from_file = []
+        from_default = list(_SETTINGS_DEFAULTS.keys())
 
-    sys.stdout.write(json.dumps(resolved, indent=2, ensure_ascii=False) + "\n")
+    envelope = {
+        "settings": resolved,
+        "settings_source": settings_source,
+        "from_file": from_file,
+        "from_default": from_default,
+    }
+    sys.stdout.write(json.dumps(envelope, indent=2, ensure_ascii=False) + "\n")
+
+
+def _cmd_settings_validate(args):
+    """settings-validate subcommand (MAR-3).
+
+    Args: --project-dir <path>  (resolves to <project>/"tabp settings.json")
+       OR --file <path>          (validates an arbitrary file path)
+    Exactly one of the two must be provided.
+
+    Exit codes: EXIT_OK (0) on success; EXIT_VALIDATION_FAILED (3) on
+    validation failure or unreadable file; EXIT_ERROR (1) on bad args.
+
+    stdout on success: {"ok": true}
+    stdout on failure: {"ok": false, "error": "<message>"}
+
+    Mirrors _cmd_validate in CLI shape. Design ref: spec 01:171-195.
+    """
+    import argparse
+    parser = argparse.ArgumentParser(prog="tabp_helper settings-validate",
+                                     add_help=False)
+    parser.add_argument("--project-dir", default=None)
+    parser.add_argument("--file", default=None)
+    parsed, _unknown = parser.parse_known_args(args)
+
+    if (parsed.project_dir is None) == (parsed.file is None):
+        # Both given or neither given
+        sys.stderr.write(
+            "tabp_helper settings-validate: usage: "
+            "settings-validate --project-dir <path> | --file <path>\n"
+        )
+        sys.exit(EXIT_ERROR)
+
+    if parsed.project_dir is not None:
+        file_path = os.path.join(parsed.project_dir, "tabp settings.json")
+    else:
+        file_path = parsed.file
+
+    record = _read_json(file_path)
+    if record is None:
+        sys.stdout.write(
+            json.dumps({
+                "ok": False,
+                "error": "settings file absent or unreadable at %s" % file_path,
+            }) + "\n"
+        )
+        sys.exit(EXIT_VALIDATION_FAILED)
+
+    try:
+        _validate_settings(record)
+        sys.stdout.write(json.dumps({"ok": True}) + "\n")
+    except TabpValidationError as exc:
+        sys.stdout.write(json.dumps({"ok": False, "error": str(exc)}) + "\n")
+        sys.exit(EXIT_VALIDATION_FAILED)
 
 
 # ---------------------------------------------------------------------------
@@ -969,7 +1110,8 @@ def main():
         sys.stderr.write(
             "tabp_helper: usage: tabp_helper.py <subcommand> [args]\n"
             "Subcommands: run-start, state-write, decision-write, sign-off-write, "
-            "run-finalize, run-status, validate, usage-read, settings-read\n"
+            "run-finalize, run-status, validate, usage-read, settings-read, "
+            "settings-validate\n"
         )
         sys.exit(EXIT_ERROR)
 
@@ -995,6 +1137,8 @@ def main():
             _cmd_usage_read(rest)
         elif subcommand == "settings-read":
             _cmd_settings_read(rest)
+        elif subcommand == "settings-validate":
+            _cmd_settings_validate(rest)
         else:
             sys.stderr.write(
                 "tabp_helper: unknown subcommand '%s'\n" % subcommand

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/globalmindsolution/gms-marketplace/plugins/tabp/schemas/settings.schema.json",
+  "title": "tabp settings",
+  "description": "Optional recruiter-facing configuration file at <project>/tabp settings.json. All fields optional with documented defaults. No secrets. No workspace_path.",
+  "type": "object",
+  "properties": {
+    "screening_model": {
+      "type": "string",
+      "description": "Model for per-CV screening subagents. Default: coordinator default Sonnet model."
+    },
+    "synthesis_model": {
+      "type": "string",
+      "description": "Model for the synthesis subagent. Default: coordinator default Opus model."
+    },
+    "cv_folder": {
+      "type": "string",
+      "description": "Relative path to CV folder from project folder. Default: ./cvs."
+    },
+    "jd_folder": {
+      "type": "string",
+      "description": "Relative path to JD folder from project folder. Default: ./jds."
+    },
+    "state_write_mode": {
+      "enum": ["helper", "instructed"],
+      "description": "How state is written. helper = tabp_helper.py; instructed = coordinator writes directly (degraded mode). Default: helper."
+    }
+  },
+  "additionalProperties": false
+}
