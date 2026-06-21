@@ -19,6 +19,13 @@
       "type": "string",
       "format": "date-time",
       "description": "ISO-8601 datetime when the lock was acquired."
+    },
+    "run_id": {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "null"}
+      ],
+      "description": "Run identifier this lock was acquired for. Ownership travels with run_id (stable across the short-lived helper subprocesses), so run-finalize can release the lock that run-start acquired in an earlier process. Null only for locks written by a direct _acquire_lock call without a run_id."
     }
   },
   "additionalProperties": true

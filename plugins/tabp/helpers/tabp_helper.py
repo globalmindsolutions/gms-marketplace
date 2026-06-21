@@ -6,7 +6,7 @@ screen-cvs coordinator as:
     python3 plugins/tabp/helpers/tabp_helper.py <subcommand> [args]
 
 Subcommands: run-start, state-write, decision-write, sign-off-write,
-             run-finalize, run-status, validate, usage-read.
+             run-finalize, run-status, validate, usage-read, settings-read.
 
 Re-implements (does NOT import) acs_lib primitives in the tabp namespace.
 No acs reference appears in this file.
@@ -62,6 +62,17 @@ class TabpValidationError(Exception):
 def _now_iso():
     """Return current UTC time as ISO-8601 string: YYYY-MM-DDTHH:MM:SSZ."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _run_stamp():
+    """Timestamp for run identifiers, with microsecond precision.
+
+    Distinct from _now_iso (second precision, used for human-facing
+    timestamps): two runs started within the same wall-clock second must still
+    receive unique run_ids, otherwise the second run would overwrite the
+    first's run.json and append a duplicate-run_id history entry.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _parse_iso(s):
@@ -127,6 +138,33 @@ def _lock_path(tabp_dir):
     return os.path.join(tabp_dir, ".lock")
 
 
+def _lock_is_ours(lock, run_id):
+    """Return True if `lock` is held by us.
+
+    The tabp helper runs as a series of short-lived subprocesses (one per
+    subcommand), so the process that acquired the lock has already exited by
+    the time a later subcommand (e.g. run-finalize) needs to release it. The
+    live PID therefore cannot be the sole ownership key. Ownership holds when
+    EITHER:
+
+      - same process: hostname matches and the recorded PID is this process
+        (covers a single process re-acquiring/releasing its own lock); or
+      - same run: hostname matches and the recorded run_id equals `run_id`
+        (the cross-process case — run-finalize releasing the lock that the
+        prior run-start process acquired for this same run, and resume
+        re-entrancy).
+
+    A cross-host lock is never ours.
+    """
+    if lock.get("hostname") != socket.gethostname():
+        return False
+    if lock.get("pid") == os.getpid():
+        return True
+    if run_id is not None and lock.get("run_id") == run_id:
+        return True
+    return False
+
+
 def _is_stale_lock(lock):
     """Determine whether a lock record is stale.
 
@@ -159,22 +197,23 @@ def _is_stale_lock(lock):
     return age_hours > 24
 
 
-def _acquire_lock(tabp_dir):
+def _acquire_lock(tabp_dir, run_id=None):
     """Acquire the tabp run lock.
 
     1. Read existing lock.
-    2. If same pid+hostname: re-entrant -> return immediately.
+    2. If it is ours (same process PID, or same host + matching run_id):
+       re-entrant -> return immediately.
     3. If stale: print REPORT to stderr, raise TabpLockError (REPORT-not-steal,
        design.md:729).
     4. If active foreign lock: raise TabpLockError naming the holder.
-    5. If no lock: write new lock record.
+    5. If no lock: write new lock record (pid, hostname, created_at, run_id).
     """
     lpath = _lock_path(tabp_dir)
     lock = _read_json(lpath)
     if isinstance(lock, dict):
-        # Re-entrant check: same process
-        if (lock.get("pid") == os.getpid()
-                and lock.get("hostname") == socket.gethostname()):
+        # Re-entrant check: our own lock (same process, or same run_id resumed
+        # in a later subprocess).
+        if _lock_is_ours(lock, run_id):
             return  # re-entrant: already holding the lock
 
         if _is_stale_lock(lock):
@@ -198,21 +237,24 @@ def _acquire_lock(tabp_dir):
         "pid": os.getpid(),
         "hostname": socket.gethostname(),
         "created_at": _now_iso(),
+        "run_id": run_id,
     })
 
 
-def _release_lock(tabp_dir):
+def _release_lock(tabp_dir, run_id=None):
     """Release the tabp run lock, but only if we own it.
 
+    Ownership uses the same cross-process rule as _acquire_lock (our live PID,
+    or a matching run_id on this host), so run-finalize — which runs in a
+    different process from run-start — can release the lock for its run.
+
     Suppresses FileNotFoundError (idempotent).
-    Never releases another process's lock.
+    Never releases a foreign lock (different run or different host).
     """
     lpath = _lock_path(tabp_dir)
     lock = _read_json(lpath)
-    if isinstance(lock, dict):
-        if not (lock.get("pid") == os.getpid()
-                and lock.get("hostname") == socket.gethostname()):
-            return  # not our lock; do not release
+    if isinstance(lock, dict) and not _lock_is_ours(lock, run_id):
+        return  # not our lock; do not release
     try:
         os.unlink(lpath)
     except FileNotFoundError:
@@ -244,11 +286,13 @@ def _append_run_to_history(history_path, run_summary):
     _write_json(history_path, history)
 
 
-def _update_run_in_history(history_path, run_id, updates):
+def _update_run_in_history(history_path, run_id, updates, fallback=None):
     """Update fields of the last entry in history.json whose run_id matches.
 
-    If no matching entry exists, append a new entry (recovery path).
-    Prior entries are never touched.
+    If no matching entry exists, append a new entry (recovery path), seeded
+    with `fallback` first (e.g. skill/started_at carried from run.json) so the
+    recovered summary still satisfies history.schema.json's required fields
+    (run_id, skill, started_at, status). Prior entries are never touched.
     """
     history = _read_history(history_path)
     runs = history["runs"]
@@ -263,6 +307,8 @@ def _update_run_in_history(history_path, run_id, updates):
     else:
         # Recovery path: no matching entry found, append one
         entry = {"run_id": run_id}
+        if fallback:
+            entry.update(fallback)
         entry.update(updates)
         runs.append(entry)
     _write_json(history_path, history)
@@ -369,7 +415,9 @@ def _validate_evidence(record):
     _require_enum(record, "recommendation", {"Recommend", "Hold", "Reject"}, "evidence")
 
     score = record.get("score")
-    if not isinstance(score, (int, float)) or not (0 <= score <= 100):
+    if (isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or not (0 <= score <= 100)):
         raise TabpValidationError(
             "tabp: validation error: evidence.score must be a number in [0, 100]"
         )
@@ -546,11 +594,14 @@ def _cmd_run_start(args):
     tabp_dir = _tabp_dir_from_project(project_dir)
     os.makedirs(tabp_dir, exist_ok=True)
 
-    run_id = "run-" + _now_iso()
+    run_id = "run-" + _run_stamp()
+
+    # Acquire the lock BEFORE creating any run artifacts, so a run blocked by a
+    # live foreign lock leaves no orphaned runs/<run-id>/ directory behind.
+    _acquire_lock(tabp_dir, run_id)
+
     run_dir = _run_dir(tabp_dir, run_id)
     os.makedirs(run_dir, exist_ok=True)
-
-    _acquire_lock(tabp_dir)
 
     started_at = _now_iso()
     run_record = {
@@ -751,9 +802,15 @@ def _cmd_run_finalize(args):
         history_updates["candidates_screened"] = parsed.candidates_screened
     if parsed.usage_source is not None:
         history_updates["usage_source"] = parsed.usage_source
-    _update_run_in_history(history_path, parsed.run_id, history_updates)
+    _update_run_in_history(
+        history_path, parsed.run_id, history_updates,
+        fallback={
+            "skill": run_record.get("skill"),
+            "started_at": run_record.get("started_at"),
+        },
+    )
 
-    _release_lock(tabp_dir)
+    _release_lock(tabp_dir, parsed.run_id)
 
 
 def _cmd_run_status(args):
@@ -860,6 +917,47 @@ def _cmd_usage_read(args):
     sys.stdout.write(json.dumps(stub_output, indent=2, ensure_ascii=False) + "\n")
 
 
+# Documented tabp settings defaults. Mirrors the screen-cvs SKILL.md step-1
+# fallback values so settings-read and the skill agree on the defaults.
+_SETTINGS_DEFAULTS = {
+    "screening_model": "sonnet",
+    "synthesis_model": "opus",
+    "cv_folder": "./cvs",
+    "jd_folder": "./jds",
+    "state_write_mode": "helper",
+}
+
+
+def _cmd_settings_read(args):
+    """settings-read subcommand.
+
+    Args: --project-dir <path>
+
+    Resolves tabp settings from <project>/.tabp/settings.json layered over the
+    documented defaults (_SETTINGS_DEFAULTS), and prints the resolved settings
+    as JSON to stdout. A missing or corrupt settings file falls back to the
+    defaults (never raises), so the screen-cvs coordinator always gets a usable
+    settings object. Only known keys are honoured. This is the foundation
+    reader; the writable settings surface is owned by the tabp upgrade epic.
+    """
+    import argparse
+    parser = argparse.ArgumentParser(prog="tabp_helper settings-read")
+    parser.add_argument("--project-dir", required=True)
+    parsed = parser.parse_args(args)
+
+    tabp_dir = _tabp_dir_from_project(parsed.project_dir)
+    settings_path = os.path.join(tabp_dir, "settings.json")
+
+    resolved = dict(_SETTINGS_DEFAULTS)
+    file_settings = _read_json(settings_path)
+    if isinstance(file_settings, dict):
+        for key in _SETTINGS_DEFAULTS:
+            if key in file_settings:
+                resolved[key] = file_settings[key]
+
+    sys.stdout.write(json.dumps(resolved, indent=2, ensure_ascii=False) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -871,7 +969,7 @@ def main():
         sys.stderr.write(
             "tabp_helper: usage: tabp_helper.py <subcommand> [args]\n"
             "Subcommands: run-start, state-write, decision-write, sign-off-write, "
-            "run-finalize, run-status, validate, usage-read\n"
+            "run-finalize, run-status, validate, usage-read, settings-read\n"
         )
         sys.exit(EXIT_ERROR)
 
@@ -895,6 +993,8 @@ def main():
             _cmd_validate(rest)
         elif subcommand == "usage-read":
             _cmd_usage_read(rest)
+        elif subcommand == "settings-read":
+            _cmd_settings_read(rest)
         else:
             sys.stderr.write(
                 "tabp_helper: unknown subcommand '%s'\n" % subcommand

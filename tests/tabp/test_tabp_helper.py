@@ -1500,3 +1500,333 @@ class TestMainDispatch(unittest.TestCase):
         finally:
             self._restore()
         self.assertEqual(ctx.exception.code, tabp_helper.EXIT_VALIDATION_FAILED)
+
+
+# ---------------------------------------------------------------------------
+# Class TestCrossProcessLock — the lock lifecycle across SEPARATE processes
+# ---------------------------------------------------------------------------
+
+class TestCrossProcessLock(unittest.TestCase):
+    """Regression for the lock lifecycle across separate OS processes.
+
+    The screen-cvs coordinator invokes each subcommand as its own
+    `python3 tabp_helper.py <subcommand>` process, so run-start and
+    run-finalize never share a PID. The in-process TestSubcommands tests cannot
+    observe this — they call the _cmd_* functions in one interpreter where
+    os.getpid() is constant. These tests drive the real CLI via subprocess so a
+    PID-coupled lock-release regression is caught: with PID-based ownership the
+    lock leaks and every run after the first is blocked.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._project_dir = self._tmpdir
+        self._tabp_dir = os.path.join(self._project_dir, ".tabp")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _run(self, *cli_args):
+        return subprocess.run(
+            [sys.executable, _MODULE_PATH, *cli_args],
+            capture_output=True, text=True,
+        )
+
+    def test_finalize_releases_lock_across_processes(self):
+        """run-finalize (a different process from run-start) releases the lock,
+        and a subsequent run-start is not blocked."""
+        started = self._run("run-start", "--project-dir", self._project_dir,
+                             "--skill", "screen-cvs", "--jd-slug", "backend")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_id = started.stdout.strip()
+        lock_path = os.path.join(self._tabp_dir, ".lock")
+        self.assertTrue(os.path.isfile(lock_path), "run-start must create the lock")
+
+        finalized = self._run("run-finalize", "--project-dir", self._project_dir,
+                              "--run-id", run_id, "--status", "completed",
+                              "--candidates-screened", "3",
+                              "--usage-source", "unavailable")
+        self.assertEqual(finalized.returncode, 0, finalized.stderr)
+        self.assertFalse(
+            os.path.isfile(lock_path),
+            "run-finalize in a separate process must release the lock "
+            "(regression: PID-coupled ownership left it leaked)",
+        )
+
+        # A second run, in yet another process, must NOT be blocked.
+        again = self._run("run-start", "--project-dir", self._project_dir,
+                          "--skill", "screen-cvs", "--jd-slug", "backend")
+        self.assertEqual(
+            again.returncode, 0,
+            "second run-start must succeed after a clean finalize; "
+            "stderr=%r" % again.stderr,
+        )
+        self.assertNotEqual(again.stdout.strip(), run_id,
+                            "second run must get a fresh run_id")
+
+    def test_second_run_start_blocked_while_first_in_progress(self):
+        """While the first run's lock is still held (no finalize), a second
+        run-start in a new process is lock-blocked (exit 2)."""
+        started = self._run("run-start", "--project-dir", self._project_dir,
+                             "--skill", "screen-cvs")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        blocked = self._run("run-start", "--project-dir", self._project_dir,
+                            "--skill", "screen-cvs")
+        self.assertEqual(blocked.returncode, tabp_helper.EXIT_LOCK_BLOCKED,
+                         "a concurrent second run-start must be lock-blocked")
+
+
+# ---------------------------------------------------------------------------
+# Class TestLockOwnershipCrossProcess — run_id-scoped ownership (unit level)
+# ---------------------------------------------------------------------------
+
+class TestLockOwnershipCrossProcess(unittest.TestCase):
+    """_lock_is_ours / _release_lock recognise run_id ownership regardless of PID."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._tabp_dir = os.path.join(self._tmpdir, ".tabp")
+        os.makedirs(self._tabp_dir, exist_ok=True)
+        self._lock_path = os.path.join(self._tabp_dir, ".lock")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_release_by_run_id_when_pid_differs(self):
+        """A lock acquired by a now-gone process is released via matching run_id."""
+        tabp_helper._write_json(self._lock_path, {
+            "pid": os.getpid() + 99999,  # a different (gone) process
+            "hostname": socket.gethostname(),
+            "created_at": tabp_helper._now_iso(),
+            "run_id": "run-xyz",
+        })
+        tabp_helper._release_lock(self._tabp_dir, "run-xyz")
+        self.assertFalse(os.path.isfile(self._lock_path),
+                         "release must remove a same-host lock with matching run_id")
+
+    def test_no_release_when_run_id_differs(self):
+        """A lock for a different run is never released."""
+        tabp_helper._write_json(self._lock_path, {
+            "pid": os.getpid() + 99999,
+            "hostname": socket.gethostname(),
+            "created_at": tabp_helper._now_iso(),
+            "run_id": "run-other",
+        })
+        tabp_helper._release_lock(self._tabp_dir, "run-mine")
+        self.assertTrue(os.path.isfile(self._lock_path),
+                        "release must not remove a lock owned by a different run")
+
+    def test_no_release_cross_host_even_with_matching_run_id(self):
+        """A lock on a different host is never released, even if run_id matches."""
+        tabp_helper._write_json(self._lock_path, {
+            "pid": 4242,
+            "hostname": "some-other-host",
+            "created_at": tabp_helper._now_iso(),
+            "run_id": "run-xyz",
+        })
+        tabp_helper._release_lock(self._tabp_dir, "run-xyz")
+        self.assertTrue(os.path.isfile(self._lock_path),
+                        "release must not remove a cross-host lock")
+
+    def test_acquire_resume_reentrant_by_run_id(self):
+        """A new process resuming the same run_id re-enters rather than blocking."""
+        tabp_helper._write_json(self._lock_path, {
+            "pid": os.getpid() + 99999,  # acquired by a prior (gone) process
+            "hostname": socket.gethostname(),
+            "created_at": tabp_helper._now_iso(),
+            "run_id": "run-resume",
+        })
+        # Must NOT raise: same host + matching run_id == ours (resume).
+        tabp_helper._acquire_lock(self._tabp_dir, "run-resume")
+
+
+# ---------------------------------------------------------------------------
+# Class TestSettingsRead — settings-read subcommand
+# ---------------------------------------------------------------------------
+
+class TestSettingsRead(unittest.TestCase):
+    """settings-read resolves <project>/.tabp/settings.json over documented defaults."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._project_dir = self._tmpdir
+        self._tabp_dir = os.path.join(self._project_dir, ".tabp")
+        os.makedirs(self._tabp_dir, exist_ok=True)
+        self._orig_argv = sys.argv[:]
+        self._orig_stdout = sys.stdout
+        self._orig_stderr = sys.stderr
+
+    def tearDown(self):
+        import shutil
+        sys.argv = self._orig_argv
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _read_settings(self):
+        import io
+        out = io.StringIO()
+        sys.stdout = out
+        try:
+            tabp_helper._cmd_settings_read(["--project-dir", self._project_dir])
+        finally:
+            sys.stdout = self._orig_stdout
+        return json.loads(out.getvalue())
+
+    def test_defaults_when_no_file(self):
+        """No settings.json -> documented defaults."""
+        self.assertEqual(self._read_settings(), tabp_helper._SETTINGS_DEFAULTS)
+
+    def test_file_overrides_known_keys_only(self):
+        """A settings.json overrides known keys; unknown keys are not surfaced."""
+        tabp_helper._write_json(
+            os.path.join(self._tabp_dir, "settings.json"),
+            {"screening_model": "haiku", "cv_folder": "/abs/cvs", "unknown": "x"},
+        )
+        settings = self._read_settings()
+        self.assertEqual(settings["screening_model"], "haiku")
+        self.assertEqual(settings["cv_folder"], "/abs/cvs")
+        self.assertEqual(settings["synthesis_model"],
+                         tabp_helper._SETTINGS_DEFAULTS["synthesis_model"])
+        self.assertNotIn("unknown", settings)
+
+    def test_corrupt_file_falls_back_to_defaults(self):
+        """A corrupt settings.json falls back to defaults (never raises)."""
+        import io
+        with open(os.path.join(self._tabp_dir, "settings.json"), "w") as fh:
+            fh.write("{not json")
+        sys.stderr = io.StringIO()  # swallow the _read_json corruption warning
+        self.assertEqual(self._read_settings(), tabp_helper._SETTINGS_DEFAULTS)
+
+    def test_main_dispatch_settings_read(self):
+        """main() dispatches settings-read and prints a settings object."""
+        import io
+        sys.argv = ["tabp_helper.py", "settings-read",
+                    "--project-dir", self._project_dir]
+        out = io.StringIO()
+        sys.stdout = out
+        try:
+            tabp_helper.main()
+        finally:
+            sys.stdout = self._orig_stdout
+        self.assertIn("screening_model", json.loads(out.getvalue()))
+
+
+# ---------------------------------------------------------------------------
+# Class TestHistoryRecoveryFallback — recovery path stays schema-valid
+# ---------------------------------------------------------------------------
+
+class TestHistoryRecoveryFallback(unittest.TestCase):
+    """_update_run_in_history recovery path produces a schema-valid summary."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._history_path = os.path.join(self._tmpdir, "history.json")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_recovery_entry_carries_fallback_fields(self):
+        """With no matching entry, the appended recovery entry includes the
+        fallback skill/started_at and validates against history.schema."""
+        tabp_helper._write_json(self._history_path, {"runs": []})
+        tabp_helper._update_run_in_history(
+            self._history_path, "run-MISSING",
+            {"status": "completed", "ended_at": "2026-06-20T10:00:00Z"},
+            fallback={"skill": "screen-cvs", "started_at": "2026-06-20T09:00:00Z"},
+        )
+        hist = tabp_helper._read_history(self._history_path)
+        entry = hist["runs"][-1]
+        self.assertEqual(entry["run_id"], "run-MISSING")
+        for field in ("run_id", "skill", "started_at", "status"):
+            self.assertIn(field, entry)
+        tabp_helper._validate_record(hist, "history")  # must not raise
+
+    def test_run_finalize_recovers_schema_valid_history_entry(self):
+        """run-finalize whose history lost the entry rebuilds a schema-valid one
+        from run.json (skill + started_at carried via fallback)."""
+        import io
+        project_dir = self._tmpdir
+        tabp_dir = os.path.join(project_dir, ".tabp")
+        run_id = "run-recover"
+        run_dir = os.path.join(tabp_dir, "runs", run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        tabp_helper._write_json(os.path.join(run_dir, "run.json"), {
+            "run_id": run_id, "skill": "screen-cvs",
+            "started_at": "2026-06-20T09:00:00Z", "ended_at": None,
+            "status": "in_progress", "stop_reason": None,
+            "state_write_mode": "helper",
+            "usage": {"usage_source": "unavailable"},
+            "candidates_screened": 0, "jd_slug": "backend",
+        })
+        # history.json exists but does NOT contain this run (lost entry).
+        tabp_helper._write_json(os.path.join(tabp_dir, "history.json"), {"runs": []})
+        orig_err = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            tabp_helper._cmd_run_finalize([
+                "--project-dir", project_dir, "--run-id", run_id,
+                "--status", "completed", "--candidates-screened", "2",
+            ])
+        finally:
+            sys.stderr = orig_err
+        hist = tabp_helper._read_history(os.path.join(tabp_dir, "history.json"))
+        entry = hist["runs"][-1]
+        self.assertEqual(entry["run_id"], run_id)
+        self.assertEqual(entry["skill"], "screen-cvs")
+        self.assertEqual(entry["started_at"], "2026-06-20T09:00:00Z")
+        tabp_helper._validate_record(hist, "history")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Class TestRunIdUniqueness — sub-second run_id precision
+# ---------------------------------------------------------------------------
+
+class TestRunIdUniqueness(unittest.TestCase):
+    """run_ids carry sub-second precision so same-second runs don't collide."""
+
+    def test_run_stamp_has_microsecond_precision(self):
+        stamp = tabp_helper._run_stamp()
+        self.assertRegex(
+            stamp, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
+
+    def test_two_run_starts_get_distinct_run_ids(self):
+        import io
+        import shutil
+        tmp = tempfile.mkdtemp()
+        try:
+            ids = []
+            for _ in range(2):
+                out = io.StringIO()
+                orig = sys.stdout
+                sys.stdout = out
+                try:
+                    tabp_helper._cmd_run_start([
+                        "--project-dir", tmp, "--skill", "screen-cvs"])
+                finally:
+                    sys.stdout = orig
+                rid = out.getvalue().strip()
+                ids.append(rid)
+                # finalize releases the lock before the next start
+                tabp_helper._cmd_run_finalize([
+                    "--project-dir", tmp, "--run-id", rid, "--status", "completed"])
+            self.assertEqual(len(set(ids)), 2, "run_ids must be unique: %r" % ids)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Class TestEvidenceScoreType — score must be a real number, not a bool
+# ---------------------------------------------------------------------------
+
+class TestEvidenceScoreType(unittest.TestCase):
+    """evidence.score must be a real number; a bool is not a valid score."""
+
+    def test_bool_score_rejected(self):
+        bad = _make_valid_evidence()
+        bad["score"] = True
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_record(bad, "evidence")
