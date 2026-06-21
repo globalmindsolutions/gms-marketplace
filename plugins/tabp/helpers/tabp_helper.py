@@ -913,30 +913,201 @@ def _cmd_validate(args):
 
 
 def _cmd_usage_read(args):
-    """usage-read subcommand — CONTRACT STUB ONLY (full aggregation: MAR-6).
+    """usage-read subcommand — real aggregation (MAR-38).
 
-    Args: --project-dir <path> [--run-id <id>]
+    Args: --project-dir <path> [--run-id <id>|all]
 
-    Prints the read-contract output shape (design.md:619-642) with placeholder
-    values and exits 0. The aggregation body (reading history.json and each
-    run.json) is owned by MAR-6; this stub provides a stable entry point for
-    spec-03 and MAR-6.
+    Reads history.json and per-run run.json records; aggregates token counts,
+    cost, and candidate totals. Emits the documented output shape to stdout.
+    Read-only: no _write_json calls, no history mutations, no transcript writes.
+
+    Output shape: total_runs, completed_runs, failed_runs,
+    total_candidates_screened, total_duration_seconds, total_tokens_in,
+    total_tokens_out, total_cost_usd, cost_basis, pricing_snapshot_date,
+    usage_note, runs[].
+
+    Design ref: design.md:307-348, :456-491. MAR-38 replaces the MAR-6 stub.
     """
-    # Stub: print the design.md:619-642 output shape with placeholder values
-    stub_output = {
-        "total_runs": 0,
-        "completed_runs": 0,
-        "failed_runs": 0,
-        "total_candidates_screened": 0,
-        "total_duration_seconds": 0,
-        "usage_note": (
-            "Cost and token counts unavailable "
-            "(Cowork usage reporting not confirmed). "
-            "[usage-read stub — full aggregation delivered in MAR-6]"
-        ),
-        "runs": [],
+    import argparse
+    parser = argparse.ArgumentParser(prog="tabp_helper usage-read")
+    parser.add_argument("--project-dir", required=True)
+    parser.add_argument("--run-id", default=None, dest="run_id")
+    parsed = parser.parse_args(args)
+
+    project_dir = parsed.project_dir
+    tabp_dir = _tabp_dir_from_project(project_dir)
+
+    # Step 1: Read settings + resolve pricing
+    settings_path = os.path.join(tabp_dir, "settings.json")
+    file_settings = _read_json(settings_path)
+    settings = dict(_SETTINGS_DEFAULTS)
+    if isinstance(file_settings, dict):
+        for key in _SETTINGS_DEFAULTS:
+            if key in file_settings:
+                settings[key] = file_settings[key]
+        if "model_pricing" in file_settings:
+            settings["model_pricing"] = file_settings["model_pricing"]
+    pricing, snapshot_date = _resolve_pricing(settings)
+
+    # Step 2: Read history
+    history_path = os.path.join(tabp_dir, "history.json")
+    history = _read_history(history_path)
+    all_runs = history.get("runs", [])
+
+    # Step 3: Filter runs
+    run_id_filter = parsed.run_id
+    if run_id_filter and run_id_filter != "all":
+        filtered_runs = [r for r in all_runs if r.get("run_id") == run_id_filter]
+    else:
+        filtered_runs = all_runs
+
+    # Step 4: Determine transcript root (injectable via TABP_TRANSCRIPT_ROOT env)
+    transcript_root = os.environ.get(
+        "TABP_TRANSCRIPT_ROOT",
+        os.path.expanduser("~/.claude/projects")
+    )
+    cwd_slug = _cwd_slug(project_dir)
+
+    # Step 5: Process each run
+    runs_output = []
+    agg_total_runs = 0
+    agg_completed = 0
+    agg_failed = 0
+    agg_candidates = 0
+    agg_duration = 0.0
+    agg_tokens_in = 0
+    agg_tokens_out = 0
+    agg_cost = 0.0
+    cost_basis_flags = set()  # tracks which cost_basis values appear in non-unavailable runs
+
+    for hist_entry in filtered_runs:
+        run_id = hist_entry.get("run_id", "")
+        run_dir = _run_dir(tabp_dir, run_id)
+        run_path = os.path.join(run_dir, "run.json")
+
+        run_record = _read_json(run_path)
+        if not isinstance(run_record, dict):
+            # Missing or corrupt run.json — skip entirely (design.md step 5b)
+            continue
+
+        usage = run_record.get("usage") or {}
+        usage_source = usage.get("usage_source", "unavailable")
+        cost_basis = usage.get("cost_basis", "unavailable")
+        status = run_record.get("status", "")
+        candidates = run_record.get("candidates_screened", 0) or 0
+        duration = usage.get("duration_seconds")
+        started_at = run_record.get("started_at")
+        ended_at = run_record.get("ended_at")
+
+        # Per-source dispatch (design.md step 5e)
+        tokens_in = None
+        tokens_out = None
+        cost_usd = None
+        run_note = ""
+
+        if usage_source == "claude-code":
+            # Read actuals from Claude Code transcript (injectable root, privacy-safe)
+            t_in, t_out, model = _read_transcript_tokens(
+                transcript_root, cwd_slug, started_at, ended_at
+            )
+            if t_in > 0 or t_out > 0:
+                tokens_in = t_in
+                tokens_out = t_out
+            else:
+                # Transcript dir absent or empty — fall back to run.json tokens
+                tokens_in = usage.get("tokens_in")
+                tokens_out = usage.get("tokens_out")
+                model = None
+            cost_usd = _derive_cost(tokens_in, tokens_out, model, pricing)
+            cost_basis = "estimate"  # always derived, never self-reported (AC-2)
+            run_note = "Tokens: actuals from Claude Code transcript. Cost: derived estimate."
+
+        elif usage_source == "estimate":
+            tokens_in = usage.get("tokens_in")
+            tokens_out = usage.get("tokens_out")
+            model = None
+            cost_usd = _derive_cost(tokens_in, tokens_out, model, pricing)
+            cost_basis = "estimate"
+            run_note = "Token estimate; cost derived via pricing snapshot."
+
+        elif usage_source == "cowork":
+            tokens_in = usage.get("tokens_in")
+            tokens_out = usage.get("tokens_out")
+            cost_usd = usage.get("cost_usd")
+            cost_basis = "actual"  # self-reported by runtime (forward hook)
+            run_note = "Cowork self-reported usage."
+
+        else:  # unavailable
+            tokens_in = None
+            tokens_out = None
+            cost_usd = None
+            cost_basis = "unavailable"
+            run_note = "Usage data unavailable for this run."
+
+        # Build per-run row (always included in runs[])
+        run_row = {
+            "run_id": run_id,
+            "started_at": started_at,
+            "status": status,
+            "candidates_screened": candidates,
+            "duration_seconds": duration,
+            "usage_source": usage_source,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "cost_usd": cost_usd,
+            "cost_basis": cost_basis,
+            "usage_note": run_note,
+        }
+        runs_output.append(run_row)
+
+        # Aggregate totals (counters)
+        agg_total_runs += 1
+        if status == "completed":
+            agg_completed += 1
+        elif status in ("failed", "interrupted"):
+            agg_failed += 1
+        agg_candidates += candidates
+        agg_duration += (duration or 0.0)
+
+        # Omit unavailable from token/cost totals (design.md:344)
+        if usage_source != "unavailable":
+            agg_tokens_in += (tokens_in or 0)
+            agg_tokens_out += (tokens_out or 0)
+            agg_cost += (cost_usd or 0.0)
+            cost_basis_flags.add(cost_basis)
+
+    # Step 6: Aggregate cost_basis determination
+    if "actual" in cost_basis_flags:
+        agg_cost_basis = "actual"
+    elif "estimate" in cost_basis_flags:
+        agg_cost_basis = "estimate"
+    else:
+        agg_cost_basis = "unavailable"
+
+    # Step 7: Build usage_note
+    usage_note = (
+        "Cost is a derived estimate (tokens x pricing table snapshot %s). "
+        "Token counts are actuals from Claude Code transcript where available; "
+        "estimate otherwise. Unavailable runs excluded from totals."
+        % snapshot_date
+    )
+
+    # Step 8: Emit output (read-only — no _write_json calls)
+    output = {
+        "total_runs": agg_total_runs,
+        "completed_runs": agg_completed,
+        "failed_runs": agg_failed,
+        "total_candidates_screened": agg_candidates,
+        "total_duration_seconds": agg_duration,
+        "total_tokens_in": agg_tokens_in,
+        "total_tokens_out": agg_tokens_out,
+        "total_cost_usd": agg_cost,
+        "cost_basis": agg_cost_basis,
+        "pricing_snapshot_date": snapshot_date,
+        "usage_note": usage_note,
+        "runs": runs_output,
     }
-    sys.stdout.write(json.dumps(stub_output, indent=2, ensure_ascii=False) + "\n")
+    sys.stdout.write(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
 
 
 # Documented tabp settings defaults. Mirrors the screen-cvs SKILL.md step-1
@@ -1123,6 +1294,9 @@ def _cmd_settings_read(args):
         for key in _SETTINGS_DEFAULTS:
             if key in file_settings:
                 resolved[key] = file_settings[key]
+        # MAR-38: pass through model_pricing if present (runtime-read-only; no schema file, DEV-1)
+        if "model_pricing" in file_settings:
+            resolved["model_pricing"] = file_settings["model_pricing"]
 
     sys.stdout.write(json.dumps(resolved, indent=2, ensure_ascii=False) + "\n")
 

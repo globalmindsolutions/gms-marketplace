@@ -2,7 +2,7 @@
 
 | Layer | Technology | Why |
 |-------|------------|-----|
-| acs Skills (16) | Markdown SKILL.md, Claude Code plugin skill format | acs coordinator protocols; user-invocable as `/acs:<name>` (16 skills; tabp has 1 skill — screen-cvs — via Cowork, counted separately (the /tabp:usage skill is MAR-6 scope, not yet shipped)) |
+| acs Skills (16) | Markdown SKILL.md, Claude Code plugin skill format | acs coordinator protocols; user-invocable as `/acs:<name>` (16 skills; tabp has 1 skill — screen-cvs — via Cowork, counted separately (the /tabp:usage skill is MAR-39 scope, not yet shipped)) |
 | Subagents (27) | Markdown agent definitions | Separate contexts per reflection phase; tool allowlists in frontmatter |
 | Hooks & helpers | **Python ≥ 3.9, stdlib only** | Deterministic gating/persistence with zero consumer-machine installs |
 | State | JSON (pretty-printed, atomic writes), JSON Schema 2020-12 | Human-auditable, machine-validated |
@@ -12,7 +12,7 @@
 | Trackers (optional) | `gh` (Projects v2), `acli` (Jira) | Two-way sync; CLIs own auth — no secrets in settings |
 | CI / release | GitHub Actions | Per-plugin shape-conditional tests + validation per PR (`tests/acs/` + `tests/tabp/`; per-plugin schemas, hooks, skills presence-gated; no eval calls in CI); tag-on-version-bump releases |
 | Tests | `unittest` (stdlib) | Multi-plugin test discovery: `python3 -m unittest discover -s tests` finds `tests/acs/` and `tests/tabp/` automatically; per-plugin `__init__.py` package markers prevent import collisions |
-| tabp_helper.py | Python ≥ 3.9, stdlib only (no pip) | tabp `.tabp/` atomic write / locking / schema validation / run-history / usage aggregation stub; invoked via Bash by the screen-cvs coordinator |
+| tabp_helper.py | Python ≥ 3.9, stdlib only (no pip) | tabp `.tabp/` atomic write / locking / schema validation / run-history / usage aggregation (MAR-38); invoked via Bash by the screen-cvs coordinator |
 
 ## Conventions
 

@@ -180,11 +180,10 @@ never auto-stolen. Released when the run transitions out of `in_progress`.
 
 ### `/tabp:usage` read contract output shape
 
-_Full aggregation logic owned by MAR-6. This section documents the read-contract
-output shape as defined in `design.md:619-642`._
+_Implemented in MAR-38. Replaces the MAR-6 placeholder stub._
 
-`tabp_helper.py usage-read [--run-id <id>|all]` aggregates from
-`history.json` + per-run `run.json` records and prints to stdout:
+`tabp_helper.py usage-read --project-dir <path> [--run-id <id>|all]` aggregates
+from `history.json` + per-run `run.json` records and prints to stdout:
 
 ```json
 {
@@ -193,7 +192,12 @@ output shape as defined in `design.md:619-642`._
   "failed_runs": 1,
   "total_candidates_screened": 47,
   "total_duration_seconds": 19205,
-  "usage_note": "Cost and token counts unavailable (Cowork usage reporting not confirmed).",
+  "total_tokens_in": 284000,
+  "total_tokens_out": 52000,
+  "total_cost_usd": 4.12,
+  "cost_basis": "estimate",
+  "pricing_snapshot_date": "2025-08-01",
+  "usage_note": "Cost is a derived estimate (tokens x pricing table snapshot 2025-08-01). Token counts are actuals from Claude Code transcript where available; estimate otherwise. Unavailable runs excluded from totals.",
   "runs": [
     {
       "run_id": "run-20260620T091530Z",
@@ -201,12 +205,27 @@ output shape as defined in `design.md:619-642`._
       "status": "completed",
       "candidates_screened": 5,
       "duration_seconds": 1902,
-      "usage_source": "unavailable"
+      "usage_source": "claude-code",
+      "tokens_in": 28000,
+      "tokens_out": 5200,
+      "cost_usd": 0.41,
+      "cost_basis": "estimate",
+      "usage_note": "Tokens: actuals from Claude Code transcript. Cost: derived estimate."
     }
   ]
 }
 ```
 
-When `usage_source = "cowork"`, per-run entries also include `tokens_in`,
-`tokens_out`, and `cost_usd`; aggregates appear in the top-level object.
-Read-only: no writes, no network calls, no re-screening.
+When `usage_source = "unavailable"`: `tokens_in`, `tokens_out`, `cost_usd` are
+`null`; `cost_basis` is `"unavailable"`; the run is included in `runs[]` but
+excluded from token/cost totals.
+
+When `usage_source = "cowork"`: `cost_basis = "actual"` (self-reported by
+Cowork runtime — forward hook, MAR-40).
+
+`pricing_snapshot_date` is always present (`_PRICING_SNAPSHOT_DATE` constant).
+`cost_basis` is the aggregate: `"actual"` if any non-unavailable run has actual,
+else `"estimate"`, else `"unavailable"`.
+
+Read-only: no writes, no network calls, no re-screening. No transcript text is
+persisted into `.tabp/` state files.

@@ -12,7 +12,7 @@ C4Container
         Container(schemas, "acs Schemas & templates", "JSON Schema / XSD / md", "9 state schemas, acs-messages.xsd, 4 description templates")
         Container(tabp_skills, "tabp Skills", "1 x SKILL.md (screen-cvs)", "Screen-CV recruiting workflow; coordinator orchestrates parallel Sonnet-per-CV subagents + Opus synthesis via the coordinator+subagents convention; dispatched via Cowork")
         Container(tabp_agents, "tabp Subagents", "2 x agent .md", "Two reusable tabp-namespaced agent charters under plugins/tabp/agents/: screen-cv-subagent (Sonnet, one per CV) + synthesis-subagent (Opus, once per run). Spawned by the screen-cvs coordinator. No foreign-namespace tokens.")
-        Container(tabp_helper, "tabp_helper.py", "Python 3.9+ stdlib only", "stdlib-only Python >= 3.9 helper; atomic .tabp/ writes, spin-lock, schema validation, run-history, usage-read stub; invoked via Bash; no acs import")
+        Container(tabp_helper, "tabp_helper.py", "Python 3.9+ stdlib only", "stdlib-only Python >= 3.9 helper; atomic .tabp/ writes, spin-lock, schema validation, run-history, usage aggregation (MAR-38); invoked via Bash; no acs import")
     }
     System_Ext(cc, "Claude Code runtime")
     System_Ext(cowork, "Cowork runtime")
