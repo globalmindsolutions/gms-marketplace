@@ -2049,3 +2049,245 @@ class TestSchemaWideningAndFinalize(unittest.TestCase):
         run = _make_valid_run()  # run.sample.json has no cost_basis
         self.assertNotIn("cost_basis", run.get("usage", {}))
         tabp_helper._validate_run(run)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Class TestPricingAndTranscriptReader — Spec 02 (MAR-38)
+# TDD: Written before implementation; all tests MUST fail before impl.
+# ---------------------------------------------------------------------------
+
+class TestPricingAndTranscriptReader(unittest.TestCase):
+    """Spec 02 (MAR-38) — model pricing snapshot + transcript token reader.
+
+    Tests for:
+    (a)   _resolve_pricing({}) returns snapshot dict + snapshot date
+    (b)   single-model override; non-overridden model uses snapshot
+    (c/d) malformed/non-numeric entry silently skipped, snapshot retained
+    (e)   _PRICING_SNAPSHOT_DATE is YYYY-MM-DD string
+    (f)   _read_transcript_tokens accumulates valid JSONL lines
+    (g)   corrupt JSONL line skipped
+    (h)   line missing 'usage' key skipped
+    (i)   absent transcript dir -> (0, 0, None)
+    (j)   non-int token treated as zero
+    (k)   privacy: reader returns only (int, int, str|None) — no content text
+    (l)   _derive_cost known-model math
+    (m)   _derive_cost unknown model -> None
+    (n)   _derive_cost None tokens -> None
+    (o)   _cwd_slug path-to-slug conversion
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _make_transcript_dir(self, cwd_slug, lines):
+        """Create a temp transcript dir with a session.jsonl file."""
+        slug_dir = os.path.join(self._tmpdir, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        jsonl_path = os.path.join(slug_dir, "session.jsonl")
+        with open(jsonl_path, "w", encoding="utf-8") as fh:
+            for line in lines:
+                fh.write(json.dumps(line) + "\n")
+        return self._tmpdir  # transcript_root
+
+    # (a) _resolve_pricing snapshot fallback
+    def test_resolve_pricing_empty_settings(self):
+        """_resolve_pricing({}) returns snapshot dict and snapshot date."""
+        pricing, date = tabp_helper._resolve_pricing({})
+        self.assertIsInstance(pricing, dict)
+        self.assertGreater(len(pricing), 0, "pricing dict must be non-empty")
+        self.assertEqual(date, tabp_helper._PRICING_SNAPSHOT_DATE)
+        # Must match snapshot
+        for model, snap in tabp_helper._MODEL_PRICING.items():
+            self.assertIn(model, pricing)
+            self.assertEqual(pricing[model], snap)
+
+    # (b) single-model override
+    def test_resolve_pricing_single_model_override(self):
+        """Single model override in settings overrides that model only."""
+        settings = {
+            "model_pricing": {
+                "claude-opus-4-8": {"input_per_mtok": 20.00, "output_per_mtok": 100.00}
+            }
+        }
+        pricing, date = tabp_helper._resolve_pricing(settings)
+        self.assertEqual(pricing["claude-opus-4-8"]["input_per_mtok"], 20.00)
+        self.assertEqual(pricing["claude-opus-4-8"]["output_per_mtok"], 100.00)
+        # Non-overridden model falls back to snapshot
+        if "claude-sonnet-4-6" in tabp_helper._MODEL_PRICING:
+            snap_val = tabp_helper._MODEL_PRICING["claude-sonnet-4-6"]
+            self.assertEqual(pricing["claude-sonnet-4-6"], snap_val)
+
+    # (c) malformed entry skipped
+    def test_resolve_pricing_malformed_entry_skipped(self):
+        """Malformed per-model entry (non-numeric price) is silently skipped."""
+        settings = {
+            "model_pricing": {
+                "bad-model": {"input_per_mtok": "not-a-number", "output_per_mtok": 0}
+            }
+        }
+        # Must not raise
+        pricing, date = tabp_helper._resolve_pricing(settings)
+        self.assertIsInstance(pricing, dict)
+        # bad-model absent from snapshot, so should not appear in result
+        self.assertNotIn("bad-model", pricing)
+
+    # (d) non-numeric price rejected silently, snapshot retained
+    def test_resolve_pricing_non_numeric_price_retains_snapshot(self):
+        """Non-numeric input_per_mtok causes the entry to be skipped; snapshot value retained."""
+        settings = {
+            "model_pricing": {
+                "claude-opus-4-8": {"input_per_mtok": "fifteen", "output_per_mtok": 75.0}
+            }
+        }
+        pricing, _ = tabp_helper._resolve_pricing(settings)
+        # Snapshot value for claude-opus-4-8 must be retained
+        self.assertEqual(
+            pricing["claude-opus-4-8"],
+            tabp_helper._MODEL_PRICING["claude-opus-4-8"]
+        )
+
+    # (e) _PRICING_SNAPSHOT_DATE format
+    def test_pricing_snapshot_date_format(self):
+        """_PRICING_SNAPSHOT_DATE is a YYYY-MM-DD string."""
+        import re
+        date = tabp_helper._PRICING_SNAPSHOT_DATE
+        self.assertIsInstance(date, str)
+        self.assertRegex(date, r"^\d{4}-\d{2}-\d{2}$")
+
+    # (f) _read_transcript_tokens accumulates valid lines
+    def test_read_transcript_tokens_accumulates(self):
+        """_read_transcript_tokens sums input/output tokens from valid JSONL lines."""
+        cwd_slug = "Users-testuser-myproject"
+        lines = [
+            {"message": {"usage": {"input_tokens": 1000, "output_tokens": 200}, "model": "claude-sonnet-4-6"}},
+            {"message": {"usage": {"input_tokens": 500, "output_tokens": 100}, "model": "claude-opus-4-8"}},
+        ]
+        transcript_root = self._make_transcript_dir(cwd_slug, lines)
+        total_in, total_out, model = tabp_helper._read_transcript_tokens(transcript_root, cwd_slug)
+        self.assertEqual(total_in, 1500)
+        self.assertEqual(total_out, 300)
+        self.assertEqual(model, "claude-opus-4-8")  # last model seen
+
+    # (g) corrupt JSONL line skipped
+    def test_read_transcript_tokens_skips_corrupt_line(self):
+        """Corrupt (non-JSON) line is skipped; valid lines are still summed."""
+        cwd_slug = "Users-testuser-project2"
+        slug_dir = os.path.join(self._tmpdir, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        jsonl_path = os.path.join(slug_dir, "session.jsonl")
+        with open(jsonl_path, "w", encoding="utf-8") as fh:
+            fh.write('{"message": {"usage": {"input_tokens": 300, "output_tokens": 50}, "model": "claude-sonnet-4-6"}}\n')
+            fh.write('NOT VALID JSON!!!\n')
+        total_in, total_out, model = tabp_helper._read_transcript_tokens(self._tmpdir, cwd_slug)
+        self.assertEqual(total_in, 300)
+        self.assertEqual(total_out, 50)
+
+    # (h) line missing 'usage' key skipped
+    def test_read_transcript_tokens_skips_missing_usage(self):
+        """Line with message but no 'usage' key is skipped gracefully."""
+        cwd_slug = "Users-testuser-project3"
+        lines = [
+            {"message": {"model": "claude-sonnet-4-6"}},  # no usage
+            {"message": {"usage": {"input_tokens": 200, "output_tokens": 40}, "model": "claude-sonnet-4-6"}},
+        ]
+        transcript_root = self._make_transcript_dir(cwd_slug, lines)
+        total_in, total_out, model = tabp_helper._read_transcript_tokens(transcript_root, cwd_slug)
+        self.assertEqual(total_in, 200)
+        self.assertEqual(total_out, 40)
+
+    # (i) absent transcript dir -> (0, 0, None)
+    def test_read_transcript_tokens_absent_dir(self):
+        """Absent transcript directory returns (0, 0, None)."""
+        total_in, total_out, model = tabp_helper._read_transcript_tokens(
+            self._tmpdir, "nonexistent-slug-xyz"
+        )
+        self.assertEqual(total_in, 0)
+        self.assertEqual(total_out, 0)
+        self.assertIsNone(model)
+
+    # (j) non-integer token treated as zero
+    def test_read_transcript_tokens_non_int_token_treated_as_zero(self):
+        """Non-integer input_tokens value is treated as 0, not added to total."""
+        cwd_slug = "Users-testuser-project4"
+        lines = [
+            {"message": {"usage": {"input_tokens": "many", "output_tokens": 50}, "model": "claude-sonnet-4-6"}},
+            {"message": {"usage": {"input_tokens": 100, "output_tokens": 20}, "model": "claude-sonnet-4-6"}},
+        ]
+        transcript_root = self._make_transcript_dir(cwd_slug, lines)
+        total_in, total_out, _ = tabp_helper._read_transcript_tokens(transcript_root, cwd_slug)
+        self.assertEqual(total_in, 100)  # "many" treated as 0, only 100 counted
+        self.assertEqual(total_out, 70)  # 50+20
+
+    # (k) privacy: reader returns only token integers + model, no content text
+    def test_read_transcript_tokens_privacy_no_content_returned(self):
+        """Privacy gate: reader returns (int, int, str|None) — no message.content text."""
+        cwd_slug = "Users-testuser-project5"
+        private_text = "CONFIDENTIAL CV CONTENT DO NOT EXPOSE"
+        lines = [
+            {
+                "message": {
+                    "content": private_text,
+                    "usage": {"input_tokens": 500, "output_tokens": 100},
+                    "model": "claude-sonnet-4-6",
+                }
+            }
+        ]
+        transcript_root = self._make_transcript_dir(cwd_slug, lines)
+        result = tabp_helper._read_transcript_tokens(transcript_root, cwd_slug)
+        # Result must be a 3-tuple of (int, int, str|None)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 3)
+        total_in, total_out, model = result
+        self.assertIsInstance(total_in, int)
+        self.assertIsInstance(total_out, int)
+        # Assert no element of the result contains the private text
+        for element in result:
+            if element is not None:
+                self.assertNotEqual(element, private_text)
+                if isinstance(element, str):
+                    self.assertNotIn(private_text, element)
+
+    # (l) _derive_cost known model math
+    def test_derive_cost_known_model(self):
+        """_derive_cost known model computes (tin/1e6)*in_price + (tout/1e6)*out_price."""
+        pricing = {"claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}}
+        expected = (28000 / 1_000_000) * 15.0 + (5200 / 1_000_000) * 75.0
+        result = tabp_helper._derive_cost(28000, 5200, "claude-opus-4-8", pricing)
+        self.assertAlmostEqual(result, expected, places=6)
+
+    # (m) _derive_cost unknown model -> None
+    def test_derive_cost_unknown_model_returns_none(self):
+        """_derive_cost returns None for unknown model."""
+        pricing = {"claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}}
+        result = tabp_helper._derive_cost(28000, 5200, "claude-unknown-99", pricing)
+        self.assertIsNone(result)
+
+    # (n) _derive_cost None tokens -> None
+    def test_derive_cost_none_tokens_returns_none(self):
+        """_derive_cost returns None when tokens_in is None."""
+        pricing = {"claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}}
+        result = tabp_helper._derive_cost(None, 5200, "claude-opus-4-8", pricing)
+        self.assertIsNone(result)
+
+    def test_derive_cost_none_tokens_out_returns_none(self):
+        """_derive_cost returns None when tokens_out is None."""
+        pricing = {"claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}}
+        result = tabp_helper._derive_cost(28000, None, "claude-opus-4-8", pricing)
+        self.assertIsNone(result)
+
+    # (o) _cwd_slug path-to-slug conversion
+    def test_cwd_slug_conversion(self):
+        """_cwd_slug converts path to cwd-slug format (/ -> -, strip leading -)."""
+        slug = tabp_helper._cwd_slug("/Users/bob/projects/myapp")
+        # /Users/bob/projects/myapp -> -Users-bob-projects-myapp -> Users-bob-projects-myapp
+        self.assertEqual(slug, "Users-bob-projects-myapp")
+
+    def test_cwd_slug_no_leading_dash(self):
+        """_cwd_slug strips leading dash from the result."""
+        slug = tabp_helper._cwd_slug("/home/user/work")
+        self.assertFalse(slug.startswith("-"), "cwd_slug must not start with '-'")
+        self.assertEqual(slug, "home-user-work")

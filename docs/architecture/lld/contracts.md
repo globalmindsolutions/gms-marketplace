@@ -62,6 +62,24 @@ applies defaults for missing keys. Schema: `plugins/tabp/schemas/settings.schema
 (MAR-3). Key fields: `screening_model`, `synthesis_model`, `cv_folder`,
 `jd_folder`, `state_write_mode` (`"helper"` or `"instructed"`).
 
+**MAR-38 — `model_pricing` (runtime-read-only, no schema file):** an optional
+`model_pricing` block may appear in `settings.json` to override the built-in
+pricing snapshot on a per-model basis. No `settings.schema.json` is created for
+this key (DEV-1: MAR-3-owned schema boundary; would activate `ci.yml:197-199`).
+Format:
+```json
+{
+  "model_pricing": {
+    "claude-opus-4-8":   { "input_per_mtok": 15.00, "output_per_mtok": 75.00 },
+    "claude-sonnet-4-6": { "input_per_mtok":  3.00, "output_per_mtok": 15.00 }
+  }
+}
+```
+Values are USD per million tokens (numbers). No credentials or API keys.
+If absent, the built-in `_MODEL_PRICING` snapshot (dated `_PRICING_SNAPSHOT_DATE`)
+is used. Surfaced via `settings-read` output when present (`_cmd_settings_read`,
+MAR-38). Validated/sanitised at usage-read time by `_resolve_pricing`.
+
 ### `.tabp/` state record schemas
 
 All state files are written to `<project>/.tabp/` in the Cowork project folder.
