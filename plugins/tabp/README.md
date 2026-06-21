@@ -7,7 +7,7 @@ A Claude Cowork plugin for the TABP team. A home for the team's skills — start
 The tabp plugin has grown beyond a simple skills folder. Its full shape is:
 
 - **`skills/`** — Cowork skill definitions (coordinator protocols). `screen-cvs/SKILL.md` now orchestrates a coordinator+subagents flow.
-- **`agents/`** — Reusable tabp-namespaced subagent charters spawned by the coordinator: `screen-cv-subagent.md` (Sonnet, one per CV) and `synthesis-subagent.md` (Opus, once per run).
+- **`agents/`** — Reusable tabp-namespaced subagent charters spawned by the coordinator: `screen-cv-subagent.md` (Sonnet, one per CV), `synthesis-subagent.md` (Opus, once per run), and `screen-verifier-subagent.md` (Sonnet, independent verifier, always-on).
 - **`helpers/`** — `tabp_helper.py`: stdlib-only Python helper for atomic `.tabp/` state writes, spin-lock, schema validation, run history, and usage stubs. Invoked via Bash; no external imports.
 - **`schemas/`** — JSON Schema contracts for run records, evidence, decisions, history, and lock files. Used by the helper for validation.
 - **`.tabp/`** — Per-project state directory (created at runtime in the recruiter's project folder, not in this repo). Holds `runs/<run-id>/run.json`, `evidence-<id>.json`, `decision.json`, `history.json`, and `lock`.
@@ -18,10 +18,10 @@ The `screen-cvs` coordinator follows this pattern per run:
 2. Fans out one Sonnet subagent per candidate CV in parallel (Step 3a), with each subagent following `agents/screen-cv-subagent.md`.
 3. Persists each evidence record via `tabp_helper.py state-write` (Step 3a).
 4. Invokes the Opus synthesis subagent once (Step 3a), following `agents/synthesis-subagent.md`.
-5. Runs a self-verification pass (Step 5a) before presenting any results.
-6. Delivers results only after the self-verification pass finds no blocking findings (Step 6).
+5. Spawns the independent verifier subagent (Step 5a), following `agents/screen-verifier-subagent.md`. The verifier runs always-on (no skip path) and returns a `pass` or `blocking` verdict. On blocking findings, the coordinator remediates and re-verifies, capped at N=3 total verifier invocations.
+6. Delivers results only after the verifier returns a clean `pass` verdict (Step 6). On cap-hit with unresolved findings, writes `verification_passed=false` and notifies the recruiter without presenting results.
 
-If the Cowork runtime denies Bash access, the coordinator falls back to direct file writes (`state_write_mode: "instructed"`). All other steps are unaffected by this degradation.
+If the Cowork runtime denies Bash access, the coordinator falls back to direct file writes (`state_write_mode: "instructed"`). All other steps — including the verifier subagent — are unaffected by this degradation.
 
 ## Skills
 
@@ -34,7 +34,7 @@ Screens one CV or a batch of CVs against a job description (JD) and tells you wh
 - Parses the JD into **must-have** and **nice-to-have** requirements.
 - Fans out one Sonnet subagent per candidate CV for parallel evidence collection.
 - Invokes an Opus synthesis subagent to score, band, and rank the batch.
-- Runs a self-verification pass to confirm all evidence is cited and fairness guardrails were followed before presenting results.
+- Spawns an independent verifier subagent (always-on) to confirm all evidence is cited and fairness guardrails were followed before presenting results. On blocking findings, remediates and re-verifies (capped at N=3).
 - Bands each candidate **Strong / Moderate / Weak** with a **Recommend / Hold / Reject** call.
 - Persists all evidence, synthesis, and decision records in the `.tabp/` state directory.
 
