@@ -165,7 +165,7 @@ jobs:
           sys.exit(1 if failed else 0)
           EOF
 
-      - name: Validate committed .acs/settings.json against the schema
+      - name: Validate committed per-plugin settings.json against the schema
         run: |
           python3 -m pip install --quiet jsonschema
           python3 - <<'EOF'
@@ -203,7 +203,8 @@ jobs:
               Draft202012Validator.check_schema(schema)
               validator = Draft202012Validator(schema)
 
-              target = ".acs/settings.json"
+              plugin_name = os.path.basename(plugin_dir)
+              target = os.path.join("." + plugin_name, "settings.json")
               if not os.path.exists(target):
                   print(f"skip: no {target}")
                   continue
