@@ -1,12 +1,12 @@
 # TABP Toolkit
 
-A Claude Cowork plugin for the TABP team. A home for the team's skills — starting with CV screening, with room to add more.
+A Claude plugin for the TABP team, usable in both Claude Cowork and Claude Code. A home for the team's skills — starting with CV screening, with room to add more.
 
 ## Plugin shape
 
 The tabp plugin has grown beyond a simple skills folder. Its full shape is:
 
-- **`skills/`** — Cowork skill definitions (coordinator protocols). `screen-cvs/SKILL.md` now orchestrates a coordinator+subagents flow.
+- **`skills/`** — skill definitions (coordinator protocols). `screen-cvs/SKILL.md` now orchestrates a coordinator+subagents flow.
 - **`agents/`** — Reusable tabp-namespaced subagent charters spawned by the coordinator: `screen-cv-subagent.md` (Sonnet, one per CV), `synthesis-subagent.md` (Opus, once per run), and `screen-verifier-subagent.md` (Sonnet, independent verifier, always-on).
 - **`helpers/`** — `tabp_helper.py`: stdlib-only Python helper for atomic `.tabp/` state writes, spin-lock, schema validation, run history, and usage aggregation. Invoked via Bash; no external imports.
 - **`schemas/`** — JSON Schema contracts for run records, evidence, decisions, history, and lock files. Used by the helper for validation.
@@ -21,7 +21,33 @@ The `screen-cvs` coordinator follows this pattern per run:
 5. Spawns the independent verifier subagent (Step 5a), following `agents/screen-verifier-subagent.md`. The verifier runs always-on (no skip path) and returns a `pass` or `blocking` verdict. On blocking findings, the coordinator remediates and re-verifies, capped at N=3 total verifier invocations.
 6. Delivers results only after the verifier returns a clean `pass` verdict (Step 6). On cap-hit with unresolved findings, writes `verification_passed=false` and notifies the recruiter without presenting results.
 
-If the Cowork runtime denies Bash access, the coordinator falls back to direct file writes (`state_write_mode: "instructed"`). All other steps — including the verifier subagent — are unaffected by this degradation.
+If the runtime denies Bash access, the coordinator falls back to direct file writes (`state_write_mode: "instructed"`). All other steps — including the verifier subagent — are unaffected by this degradation.
+
+## Runtimes & project folder
+
+tabp runs in both **Claude Cowork** and **Claude Code**. In either runtime the
+helper takes `--project-dir <project-folder>` and keeps all state under
+`<project-folder>/.tabp/`. In Claude Code the coordinator passes the session's
+current working directory as `--project-dir <session-cwd>` and adds
+`--runtime claude-code`; in Cowork it passes the Cowork session's project folder (and may
+pass `--runtime cowork`, or omit the flag to let the helper auto-detect). The
+project folder **need not be a git repo** — the helper derives the `.tabp/`
+state root straight from `--project-dir` with no git dependency.
+
+### `.gitignore` guidance (Claude Code)
+
+When your Claude Code project folder *is* a git repo, exclude the tabp run state
+and settings from version control so run history, evidence records, and
+local-path-referencing settings are not accidentally committed:
+
+```
+# .gitignore — add to <project>/.gitignore
+.tabp/
+tabp settings.json
+```
+
+This keeps per-run `.tabp/` records and `tabp settings.json` out of the consumer
+repo.
 
 ## Skills
 
@@ -45,7 +71,7 @@ Screens one CV or a batch of CVs against a job description (JD) and tells you wh
 
 **How to use it**
 
-In Cowork, drop in the candidate CV file(s) (PDF or Word) and the job description (a file or pasted text), then ask something like:
+In your project folder, drop in the candidate CV file(s) (PDF or Word) and the job description (a file or pasted text), then ask something like:
 
 - "Screen these CVs against this JD."
 - "How well does this resume match the job description?"
@@ -82,7 +108,7 @@ run or all runs in a project.
 
 **How to use it**
 
-In Cowork, ask something like:
+Ask something like:
 
 - "Show me usage for this project."
 - "How much did CV screening cost?"
