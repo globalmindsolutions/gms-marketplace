@@ -213,7 +213,7 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
 Maps to PRD: [`prd.md`](prd.md#features-moscow)
 tabp Must-have screen-cvs feature and metrics T1–T5.
 
-Deliver the screen-cvs capability in Claude Cowork:
+Deliver the screen-cvs capability in Claude Cowork or Claude Code:
 
 - **JD parsing** — parse a job description into must-have vs nice-to-have requirements.
 - **Evidence-based scoring** — per requirement: Met/Partial/Missing determination with
@@ -228,7 +228,7 @@ Deliver the screen-cvs capability in Claude Cowork:
   (tool assists, does not decide); bias-relevant JD flags surfaced.
 - **Batch fan-out** — one Sonnet subagent per CV with Opus synthesis for the final
   ranked summary.
-- **Input handling** — reads CVs and JD from the Cowork project folder; falls back to
+- **Input handling** — reads CVs and JD from the project folder; falls back to
   chat attachments.
 
 **Success exit (release gate + ongoing adoption):**
@@ -254,9 +254,9 @@ tabp re-scoped Must-have capabilities and the engineering-rigor NFR (MAR-35 amen
 Deliver the fuller tabp plugin capabilities in tabp's own namespace:
 
 - **tabp settings.json** — configurable models and default CV/JD folder paths; stored
-  in the Cowork project folder.
+  in the project folder.
 - **.tabp/ workspace state** — run history and a per-screening archive (the `.xlsx`
-  scorecard and a JSON record per run); persisted in the Cowork project folder.
+  scorecard and a JSON record per run); persisted in the project folder.
 - **/tabp:usage skill** — per-run usage metrics: cost, time, and tokens.
 - **Resumable runs** — all intermediate states persisted as a human-reviewable audit
   trail; the run can be resumed from the persisted state.
@@ -271,8 +271,8 @@ source-grounded evidence (anti-hallucination), and decision recording for human 
 No `acs` naming or `acs:` prefixes in tabp's surface.
 
 **Deferral:** the MECHANISM (instruction-driven vs hook-gated) and verification of
-what the Cowork runtime actually supports (config resolution, hooks, artifacts,
-self-reported cost/tokens) are deferred to this epic's design phase.
+what both runtimes (Claude Cowork and Claude Code) actually support (config resolution,
+hooks, artifacts, self-reported cost/tokens) are deferred to this epic's design phase.
 
 **Implementation note:** the tabp-upgrade design and build are a separate future epic —
 this milestone defines what to deliver; the design and implementation tickets carry

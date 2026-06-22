@@ -44,7 +44,7 @@ that protected characteristics played no role.
 | **Solo developer** | Ship features end-to-end with one command (`/acs:ship`), trust the gates instead of self-discipline, resume after any interruption. |
 | **Tech lead** | Enforce a delivery process (design gates, TDD, review dimensions, PR size) uniformly across repos and teammates; inspect any ticket's full audit trail. |
 | **Team on a shared repo** | Parallel tickets in worktrees without state collisions; team-shared settings; tracker sync to Jira / GitHub Projects. |
-| **TABP recruiter / hiring team** | Screen one CV or a batch against a job description in Claude Cowork, receive evidence-based and reproducible Recommend/Hold/Reject recommendations with a downloadable scorecard, and demonstrate fairness to auditors. |
+| **TABP recruiter / hiring team** | Screen one CV or a batch against a job description in Claude Cowork or Claude Code, receive evidence-based and reproducible Recommend/Hold/Reject recommendations with a downloadable scorecard, and demonstrate fairness to auditors. |
 
 ## Goals & success metrics
 
@@ -114,8 +114,10 @@ feature sections here.
 
 ### Feature: tabp (recruiting/talent toolkit for the TABP team)
 
-Runs in **Claude Cowork** (not Claude Code). tabp is a fuller plugin; screen-cvs is
-one capability within it, targeting Cowork's project-folder-based workflow.
+Runs in **both Claude Cowork and Claude Code**. tabp is a fuller plugin; screen-cvs is
+one capability within it, targeting a project-folder-based workflow. In Claude Code the
+project folder need not be a git repo (dual-runtime support driven by MAR-40, per
+clarification C-1 on the MAR-36 epic).
 
 **Must have** *(urgent — next delivery)*
 - **screen-cvs** — screen one CV or a batch against a job description; parse the JD
@@ -125,12 +127,12 @@ one capability within it, targeting Cowork's project-folder-based workflow.
   Recommend/Hold/Reject recommendation; output an inline summary and a two-sheet Excel
   scorecard; apply fairness guardrails (job-relevant criteria only, decision-support
   framing); batch screening fans out one Sonnet subagent per CV with Opus synthesis;
-  inputs read from the Cowork project folder, falling back to chat attachments.
+  inputs read from the project folder, falling back to chat attachments.
   Traces T1, T2, T3, T4, T5.
 - **tabp settings.json** — configurable models and default CV/JD folder paths; stored
-  in the Cowork project folder.
+  in the project folder.
 - **.tabp/ workspace state** — run history and a per-screening archive (the `.xlsx`
-  scorecard and a JSON record per run); persisted in the Cowork project folder.
+  scorecard and a JSON record per run); persisted in the project folder.
 - **/tabp:usage skill** — surfaces per-run usage metrics: cost, time, and tokens.
 - **Resumable runs** — all intermediate states persisted as a human-reviewable audit
   trail; the run can be resumed from the persisted state.
@@ -158,25 +160,24 @@ proven quality patterns in tabp's own namespace:
   present-for-review step form the decision record.
 
 The specific mechanisms — message format, the exact reflection loop, hook-gating —
-are deferred to the tabp-upgrade epic design phase and verified against Cowork's
-actual capabilities.
+are deferred to the tabp-upgrade epic design phase and verified against what both
+runtimes (Claude Cowork and Claude Code) actually support.
 
 **Deferral:** the MECHANISM for the above capabilities — whether instruction-driven,
-hook-gated, or another approach — and the verification of what the Claude Cowork
-runtime actually supports (config resolution, hooks, rich artifacts, self-reported
-cost/tokens) are **deferred to the tabp-upgrade epic's design phase**. This PRD states
-the requirements (what); the design (how) is determined in the tabp-upgrade epic.
+hook-gated, or another approach — and the verification of what both runtimes (Claude
+Cowork and Claude Code) actually support (config resolution, hooks, rich artifacts,
+self-reported cost/tokens) are **deferred to the tabp-upgrade epic's design phase**.
+This PRD states the requirements (what); the design (how) is determined in the
+tabp-upgrade epic.
 
 **Won't have (now)** *(tabp feature scope)*
 - Integrations with ATS platforms; automated hiring decisions (tabp is
-  decision-support only, not a hiring authority); Claude Code runtime (tabp targets
-  Claude Cowork, not Claude Code).
+  decision-support only, not a hiring authority).
 
 ## Product-level NFRs
 
 These NFRs apply across all marketplace features. Each feature realizes them through
-its own mechanisms (acs via stdlib Python + hooks; tabp via its own Cowork-based plugin
-patterns).
+its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patterns).
 
 - **Determinism where possible**: ordering, gating, state writes, id allocation are scripts, never prose; gates fail closed.
 - **Portability**: hooks and helpers are stdlib-only Python ≥ 3.9; no network dependencies of their own. `/acs:init` Step 0b runs a toolchain preflight — it detects and offers to install the tools acs leans on (`git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli`) so onboarding fails up front with consent rather than mid-pipeline; the convention checker stays stdlib-only so no acs install is needed on the CI runner.
@@ -186,12 +187,13 @@ patterns).
 
 ## Constraints & assumptions
 
-- **acs feature:** Claude Code plugin API (skills/agents/hooks as documented) is the runtime for the acs pipeline. Different features may target different Claude runtimes — acs targets Claude Code; tabp targets Claude Cowork.
+- **acs feature:** Claude Code plugin API (skills/agents/hooks as documented) is the runtime for the acs pipeline. Different features may target different Claude runtimes — acs targets Claude Code; tabp targets both Claude Cowork and Claude Code.
 - Delivery is git + GitHub PRs (`gh` assumed); correctness must be checkable by automated tests for the strong-fit domains (see `docs/requirements/overview.md`).
 - Subagents cannot interact with the user — all user interaction happens in coordinators (drives the `needs_input` handoff design).
 - **acs feature — brownfield standardization is additive-only (C-2).** `/acs:standardize-project` operates on an existing repo by ADDITION only: it adds principles/standards docs, config, and missing readiness tooling (coverage/CI/pre-commit/e2e), and it MUST NOT move, rename, delete, or rewrite existing source files. Structural gaps versus the architecture project-structure target are surfaced as recommended follow-up tickets for the user to decide on — never executed as an automatic restructure. This guardrail is deliberate: a wholesale-restructure mandate is explicitly out of scope (it is the over-engineering this product reset once before — see Out of scope). The greenfield/brownfield split is fixed: `/acs:create-project` is greenfield-only and refuses on any repo with substantive sources; brownfield onboarding is `/acs:standardize-project`'s job (C-1).
-- **tabp feature:** tabp runs in Claude Cowork as a fuller plugin; inputs are read from
-  the Cowork project folder, falling back to chat attachments; the screen-cvs capability
+- **tabp feature:** tabp runs in both Claude Cowork and Claude Code as a fuller plugin; inputs are
+  read from the project folder (in Claude Code the folder need not be a git repo; dual-runtime
+  driven by MAR-40), falling back to chat attachments; the screen-cvs capability
   uses one Sonnet subagent per CV with Opus synthesis; outputs include a two-sheet Excel
   scorecard and a per-run `.tabp/` archive. tabp is not skills-only — the fuller feature
   shape is defined in the tabp feature section above.
