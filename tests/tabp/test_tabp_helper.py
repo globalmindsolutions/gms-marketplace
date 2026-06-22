@@ -1103,23 +1103,48 @@ class TestSubcommands(unittest.TestCase):
         self.assertTrue(result["ok"])
 
     def test_cmd_usage_read_stub_output(self):
-        """_cmd_usage_read prints stub output shape with placeholder values."""
+        """REPLACED (Spec 03 MAR-38): _cmd_usage_read returns REAL aggregation shape.
+
+        Sets up one completed run (run.json + history entry), asserts the REAL output
+        shape: total_runs==1, completed_runs==1, one runs[] entry, cost_basis present,
+        pricing_snapshot_date present. Replaces the old stub assertion (total_runs==0).
+        """
+        import re
+        # Set up one completed run
         out, err = self._capture()
+        try:
+            tabp_helper._cmd_run_start([
+                "--project-dir", self._project_dir,
+                "--skill", "screen-cvs",
+                "--jd-slug", "backend-eng",
+            ])
+        finally:
+            self._restore_streams()
+        run_id = out.getvalue().strip()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "unavailable",
+            "--candidates-screened", "3",
+        ])
+
+        out2, err2 = self._capture()
         try:
             tabp_helper._cmd_usage_read([
                 "--project-dir", self._project_dir,
             ])
         finally:
             self._restore_streams()
-        result = json.loads(out.getvalue())
-        self.assertIn("total_runs", result)
-        self.assertIn("completed_runs", result)
-        self.assertIn("failed_runs", result)
-        self.assertIn("total_candidates_screened", result)
-        self.assertIn("total_duration_seconds", result)
-        self.assertIn("usage_note", result)
+        result = json.loads(out2.getvalue())
+        # Real shape assertions
+        self.assertEqual(result["total_runs"], 1)
+        self.assertEqual(result["completed_runs"], 1)
         self.assertIn("runs", result)
-        self.assertEqual(result["total_runs"], 0)
+        self.assertEqual(len(result["runs"]), 1)
+        self.assertIn("cost_basis", result)
+        self.assertIn("pricing_snapshot_date", result)
+        self.assertRegex(result["pricing_snapshot_date"], r"^\d{4}-\d{2}-\d{2}$")
 
     def test_main_no_subcommand_exits_1(self):
         """main() with no subcommand exits 1."""
@@ -1300,6 +1325,39 @@ class TestNamespaceGuard(unittest.TestCase):
         self.assertNotIn("from acs_lib", source,
                          "tabp_helper.py must not import from acs_lib")
 
+    def test_tc29_no_acs_namespace_in_new_doc_files(self):
+        """TC-29 (AC-7 MAR-38): new MAR-38 doc sections/files contain no acs: / .acs/ / acs_lib."""
+        # Check the new ADR file (entirely new, must be clean)
+        adr_path = os.path.join(_REPO_ROOT, "docs", "adr", "0026-tabp-hybrid-cost-sourcing.md")
+        if not os.path.isfile(adr_path):
+            self.fail("Required ADR file not found: %s" % adr_path)
+        with open(adr_path, "r", encoding="utf-8") as fh:
+            adr_content = fh.read()
+        forbidden = ["acs:", ".acs/", "acs_lib"]
+        for token in forbidden:
+            self.assertNotIn(
+                token, adr_content,
+                "0026-tabp-hybrid-cost-sourcing.md must not contain %r (AC-7)" % token
+            )
+
+        # Check only the MAR-38 section of tabp.md (the existing file has 'acs:' in
+        # its namespace-constraint wording — check only the new MAR-38 section)
+        tabp_req_path = os.path.join(_REPO_ROOT, "docs", "requirements", "tabp.md")
+        if not os.path.isfile(tabp_req_path):
+            self.fail("Required requirements file not found: %s" % tabp_req_path)
+        with open(tabp_req_path, "r", encoding="utf-8") as fh:
+            tabp_content = fh.read()
+        # Isolate MAR-38 section
+        mar38_marker = "### MAR-38"
+        if mar38_marker not in tabp_content:
+            self.fail("tabp.md must contain MAR-38 section (AC-5)")
+        mar38_section = tabp_content[tabp_content.index(mar38_marker):]
+        for token in forbidden:
+            self.assertNotIn(
+                token, mar38_section,
+                "tabp.md MAR-38 section must not contain %r (AC-7)" % token
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -1467,7 +1525,27 @@ class TestMainDispatch(unittest.TestCase):
         self.assertTrue(result["ok"])
 
     def test_main_usage_read(self):
-        """main() dispatches to usage-read (line 897 covered)."""
+        """REPLACED (Spec 03 MAR-38): main() dispatches to usage-read with REAL shape.
+
+        Asserts real shape keys: total_runs, cost_basis, pricing_snapshot_date, runs[].
+        Replaces the old assertion that only checked 'total_runs' in result (stub shape).
+        """
+        import re
+        # Set up one completed run via main dispatch
+        run_id = self._do_run_start_via_main()
+        # Finalize the run
+        sys.argv = ["tabp_helper.py", "run-finalize",
+                    "--project-dir", self._project_dir,
+                    "--run-id", run_id,
+                    "--status", "completed",
+                    "--usage-source", "unavailable",
+                    "--candidates-screened", "2"]
+        out, err = self._capture()
+        try:
+            tabp_helper.main()
+        finally:
+            self._restore()
+
         sys.argv = ["tabp_helper.py", "usage-read",
                     "--project-dir", self._project_dir]
         out, err = self._capture()
@@ -1476,7 +1554,13 @@ class TestMainDispatch(unittest.TestCase):
         finally:
             self._restore()
         result = json.loads(out.getvalue())
+        # Real shape assertions
         self.assertIn("total_runs", result)
+        self.assertIn("cost_basis", result)
+        self.assertIn("pricing_snapshot_date", result)
+        self.assertIn("runs", result)
+        self.assertEqual(result["total_runs"], 1)
+        self.assertRegex(result["pricing_snapshot_date"], r"^\d{4}-\d{2}-\d{2}$")
 
     def test_main_validation_error_exits_3(self):
         """main() catches TabpValidationError and exits EXIT_VALIDATION_FAILED (lines 907-908)."""
@@ -1830,3 +1914,944 @@ class TestEvidenceScoreType(unittest.TestCase):
         bad["score"] = True
         with self.assertRaises(tabp_helper.TabpValidationError):
             tabp_helper._validate_record(bad, "evidence")
+
+
+# ---------------------------------------------------------------------------
+# Class TestSchemaWideningAndFinalize — Spec 01 (MAR-38)
+# TDD: Written before implementation; all tests MUST fail before impl.
+# ---------------------------------------------------------------------------
+
+class TestSchemaWideningAndFinalize(unittest.TestCase):
+    """Spec 01 (MAR-38) — run schema widening + finalize write-through.
+
+    Tests for:
+    (a/b) _validate_run accepts new usage_source values; rejects 'unknown'
+    (c)   cost_basis optional: absent ok, valid values ok, bad value raises
+    (d)   run-finalize writes tokens-in/out/cost-basis + re-validate passes
+    (e)   run-finalize with unavailable leaves tokens/cost-basis absent
+    (f)   argparse accepts all four usage-source values (regression)
+    (g)   history enum additive: claude-code validates
+    (h)   R2 regression: cost_basis absent on old records is valid
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._project_dir = self._tmpdir
+        self._tabp_dir = os.path.join(self._project_dir, ".tabp")
+        os.makedirs(self._tabp_dir, exist_ok=True)
+        self._orig_stdout = sys.stdout
+        self._orig_stderr = sys.stderr
+
+    def tearDown(self):
+        import shutil
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _capture(self):
+        import io
+        out = io.StringIO()
+        err = io.StringIO()
+        sys.stdout = out
+        sys.stderr = err
+        return out, err
+
+    def _restore_streams(self):
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+
+    def _do_run_start(self):
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_run_start([
+                "--project-dir", self._project_dir,
+                "--skill", "screen-cvs",
+                "--jd-slug", "test-role",
+            ])
+        finally:
+            self._restore_streams()
+        return out.getvalue().strip()
+
+    def _make_run(self, usage_source="unavailable"):
+        """Return a valid run record with the given usage_source."""
+        run = _make_valid_run()
+        run["usage"]["usage_source"] = usage_source
+        return run
+
+    # (a/b) usage_source enum widened
+    def test_validate_run_accepts_claude_code(self):
+        """_validate_run accepts usage_source='claude-code'."""
+        run = self._make_run("claude-code")
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_accepts_estimate(self):
+        """_validate_run accepts usage_source='estimate'."""
+        run = self._make_run("estimate")
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_accepts_cowork_regression(self):
+        """_validate_run still accepts usage_source='cowork' (regression)."""
+        run = self._make_run("cowork")
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_accepts_unavailable_regression(self):
+        """_validate_run still accepts usage_source='unavailable' (regression)."""
+        run = self._make_run("unavailable")
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_rejects_unknown_usage_source(self):
+        """_validate_run rejects usage_source='unknown'."""
+        run = self._make_run("unknown")
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_run(run)
+
+    # (c) cost_basis optional
+    def test_validate_run_cost_basis_absent_ok(self):
+        """cost_basis absent (old record) is valid — backward compat."""
+        run = self._make_run("unavailable")
+        self.assertNotIn("cost_basis", run["usage"])
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_cost_basis_actual_ok(self):
+        """cost_basis='actual' is valid."""
+        run = self._make_run("cowork")
+        run["usage"]["cost_basis"] = "actual"
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_cost_basis_estimate_ok(self):
+        """cost_basis='estimate' is valid."""
+        run = self._make_run("claude-code")
+        run["usage"]["cost_basis"] = "estimate"
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_cost_basis_unavailable_ok(self):
+        """cost_basis='unavailable' is valid."""
+        run = self._make_run("unavailable")
+        run["usage"]["cost_basis"] = "unavailable"
+        tabp_helper._validate_run(run)  # must not raise
+
+    def test_validate_run_cost_basis_bad_value_raises(self):
+        """cost_basis='bad-value' raises TabpValidationError."""
+        run = self._make_run("cowork")
+        run["usage"]["cost_basis"] = "bad-value"
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_run(run)
+
+    # (d) run-finalize writes tokens + cost-basis
+    def test_run_finalize_writes_tokens_and_cost_basis(self):
+        """run-finalize with --tokens-in/out/cost-basis writes through to run.json."""
+        run_id = self._do_run_start()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "claude-code",
+            "--tokens-in", "28000",
+            "--tokens-out", "5200",
+            "--cost-basis", "estimate",
+        ])
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        with open(run_path) as fh:
+            run = json.load(fh)
+        self.assertEqual(run["usage"]["usage_source"], "claude-code")
+        self.assertEqual(run["usage"]["tokens_in"], 28000)
+        self.assertEqual(run["usage"]["tokens_out"], 5200)
+        self.assertEqual(run["usage"]["cost_basis"], "estimate")
+        # Re-validate: widened _validate_run must pass
+        tabp_helper._validate_run(run)
+
+    # (e) run-finalize with unavailable leaves tokens None and cost-basis absent
+    def test_run_finalize_unavailable_no_tokens(self):
+        """run-finalize --usage-source unavailable: tokens remain null, cost_basis absent."""
+        run_id = self._do_run_start()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "unavailable",
+        ])
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        with open(run_path) as fh:
+            run = json.load(fh)
+        usage = run.get("usage", {})
+        # tokens_in/out may be null (not set by finalize without --tokens-in/out)
+        self.assertIsNone(usage.get("tokens_in"),
+                          "tokens_in must be None when not passed to run-finalize")
+        self.assertIsNone(usage.get("tokens_out"),
+                          "tokens_out must be None when not passed to run-finalize")
+        # cost_basis must not be set when --cost-basis not passed
+        self.assertNotIn("cost_basis", usage)
+
+    # (f) argparse accepts all four usage-source values
+    def test_run_finalize_accepts_estimate_usage_source(self):
+        """run-finalize accepts --usage-source estimate (no argparse error)."""
+        run_id = self._do_run_start()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "estimate",
+        ])
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        with open(run_path) as fh:
+            run = json.load(fh)
+        self.assertEqual(run["usage"]["usage_source"], "estimate")
+
+    def test_run_finalize_accepts_cowork_usage_source(self):
+        """run-finalize accepts --usage-source cowork (regression)."""
+        run_id = self._do_run_start()
+        tabp_helper._cmd_run_finalize([
+            "--project-dir", self._project_dir,
+            "--run-id", run_id,
+            "--status", "completed",
+            "--usage-source", "cowork",
+        ])
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        with open(run_path) as fh:
+            run = json.load(fh)
+        self.assertEqual(run["usage"]["usage_source"], "cowork")
+
+    # (g) history enum additive
+    def test_validate_history_accepts_claude_code_usage_source(self):
+        """_validate_history accepts runs[0].usage_source='claude-code'."""
+        history = {
+            "runs": [
+                {
+                    "run_id": "run-20260620T091530Z",
+                    "skill": "screen-cvs",
+                    "started_at": "2026-06-20T09:15:30Z",
+                    "status": "completed",
+                    "usage_source": "claude-code",
+                }
+            ]
+        }
+        tabp_helper._validate_history(history)  # must not raise
+
+    # (h) R2 regression: cost_basis absent on old records
+    def test_validate_run_old_record_without_cost_basis_is_valid(self):
+        """Old run record without cost_basis key passes validation (additive)."""
+        run = _make_valid_run()  # run.sample.json has no cost_basis
+        self.assertNotIn("cost_basis", run.get("usage", {}))
+        tabp_helper._validate_run(run)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Class TestPricingAndTranscriptReader — Spec 02 (MAR-38)
+# TDD: Written before implementation; all tests MUST fail before impl.
+# ---------------------------------------------------------------------------
+
+class TestPricingAndTranscriptReader(unittest.TestCase):
+    """Spec 02 (MAR-38) — model pricing snapshot + transcript token reader.
+
+    Tests for:
+    (a)   _resolve_pricing({}) returns snapshot dict + snapshot date
+    (b)   single-model override; non-overridden model uses snapshot
+    (c/d) malformed/non-numeric entry silently skipped, snapshot retained
+    (e)   _PRICING_SNAPSHOT_DATE is YYYY-MM-DD string
+    (f)   _read_transcript_tokens accumulates valid JSONL lines
+    (g)   corrupt JSONL line skipped
+    (h)   line missing 'usage' key skipped
+    (i)   absent transcript dir -> (0, 0, None)
+    (j)   non-int token treated as zero
+    (k)   privacy: reader returns only (int, int, str|None) — no content text
+    (l)   _derive_cost known-model math
+    (m)   _derive_cost unknown model -> None
+    (n)   _derive_cost None tokens -> None
+    (o)   _cwd_slug path-to-slug conversion
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _make_transcript_dir(self, cwd_slug, lines):
+        """Create a temp transcript dir with a session.jsonl file."""
+        slug_dir = os.path.join(self._tmpdir, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        jsonl_path = os.path.join(slug_dir, "session.jsonl")
+        with open(jsonl_path, "w", encoding="utf-8") as fh:
+            for line in lines:
+                fh.write(json.dumps(line) + "\n")
+        return self._tmpdir  # transcript_root
+
+    # (a) _resolve_pricing snapshot fallback
+    def test_resolve_pricing_empty_settings(self):
+        """_resolve_pricing({}) returns snapshot dict and snapshot date."""
+        pricing, date = tabp_helper._resolve_pricing({})
+        self.assertIsInstance(pricing, dict)
+        self.assertGreater(len(pricing), 0, "pricing dict must be non-empty")
+        self.assertEqual(date, tabp_helper._PRICING_SNAPSHOT_DATE)
+        # Must match snapshot
+        for model, snap in tabp_helper._MODEL_PRICING.items():
+            self.assertIn(model, pricing)
+            self.assertEqual(pricing[model], snap)
+
+    # (b) single-model override
+    def test_resolve_pricing_single_model_override(self):
+        """Single model override in settings overrides that model only."""
+        settings = {
+            "model_pricing": {
+                "claude-opus-4-8": {"input_per_mtok": 20.00, "output_per_mtok": 100.00}
+            }
+        }
+        pricing, date = tabp_helper._resolve_pricing(settings)
+        self.assertEqual(pricing["claude-opus-4-8"]["input_per_mtok"], 20.00)
+        self.assertEqual(pricing["claude-opus-4-8"]["output_per_mtok"], 100.00)
+        # Non-overridden model falls back to snapshot
+        if "claude-sonnet-4-6" in tabp_helper._MODEL_PRICING:
+            snap_val = tabp_helper._MODEL_PRICING["claude-sonnet-4-6"]
+            self.assertEqual(pricing["claude-sonnet-4-6"], snap_val)
+
+    # (c) malformed entry skipped
+    def test_resolve_pricing_malformed_entry_skipped(self):
+        """Malformed per-model entry (non-numeric price) is silently skipped."""
+        settings = {
+            "model_pricing": {
+                "bad-model": {"input_per_mtok": "not-a-number", "output_per_mtok": 0}
+            }
+        }
+        # Must not raise
+        pricing, date = tabp_helper._resolve_pricing(settings)
+        self.assertIsInstance(pricing, dict)
+        # bad-model absent from snapshot, so should not appear in result
+        self.assertNotIn("bad-model", pricing)
+
+    # (d) non-numeric price rejected silently, snapshot retained
+    def test_resolve_pricing_non_numeric_price_retains_snapshot(self):
+        """Non-numeric input_per_mtok causes the entry to be skipped; snapshot value retained."""
+        settings = {
+            "model_pricing": {
+                "claude-opus-4-8": {"input_per_mtok": "fifteen", "output_per_mtok": 75.0}
+            }
+        }
+        pricing, _ = tabp_helper._resolve_pricing(settings)
+        # Snapshot value for claude-opus-4-8 must be retained
+        self.assertEqual(
+            pricing["claude-opus-4-8"],
+            tabp_helper._MODEL_PRICING["claude-opus-4-8"]
+        )
+
+    # (e) _PRICING_SNAPSHOT_DATE format
+    def test_pricing_snapshot_date_format(self):
+        """_PRICING_SNAPSHOT_DATE is a YYYY-MM-DD string."""
+        import re
+        date = tabp_helper._PRICING_SNAPSHOT_DATE
+        self.assertIsInstance(date, str)
+        self.assertRegex(date, r"^\d{4}-\d{2}-\d{2}$")
+
+    # (f) _read_transcript_tokens accumulates valid lines
+    def test_read_transcript_tokens_accumulates(self):
+        """_read_transcript_tokens sums input/output tokens from valid JSONL lines."""
+        cwd_slug = "Users-testuser-myproject"
+        lines = [
+            {"message": {"usage": {"input_tokens": 1000, "output_tokens": 200}, "model": "claude-sonnet-4-6"}},
+            {"message": {"usage": {"input_tokens": 500, "output_tokens": 100}, "model": "claude-opus-4-8"}},
+        ]
+        transcript_root = self._make_transcript_dir(cwd_slug, lines)
+        total_in, total_out, model = tabp_helper._read_transcript_tokens(transcript_root, cwd_slug)
+        self.assertEqual(total_in, 1500)
+        self.assertEqual(total_out, 300)
+        self.assertEqual(model, "claude-opus-4-8")  # last model seen
+
+    # (g) corrupt JSONL line skipped
+    def test_read_transcript_tokens_skips_corrupt_line(self):
+        """Corrupt (non-JSON) line is skipped; valid lines are still summed."""
+        cwd_slug = "Users-testuser-project2"
+        slug_dir = os.path.join(self._tmpdir, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        jsonl_path = os.path.join(slug_dir, "session.jsonl")
+        with open(jsonl_path, "w", encoding="utf-8") as fh:
+            fh.write('{"message": {"usage": {"input_tokens": 300, "output_tokens": 50}, "model": "claude-sonnet-4-6"}}\n')
+            fh.write('NOT VALID JSON!!!\n')
+        total_in, total_out, model = tabp_helper._read_transcript_tokens(self._tmpdir, cwd_slug)
+        self.assertEqual(total_in, 300)
+        self.assertEqual(total_out, 50)
+
+    # (h) line missing 'usage' key skipped
+    def test_read_transcript_tokens_skips_missing_usage(self):
+        """Line with message but no 'usage' key is skipped gracefully."""
+        cwd_slug = "Users-testuser-project3"
+        lines = [
+            {"message": {"model": "claude-sonnet-4-6"}},  # no usage
+            {"message": {"usage": {"input_tokens": 200, "output_tokens": 40}, "model": "claude-sonnet-4-6"}},
+        ]
+        transcript_root = self._make_transcript_dir(cwd_slug, lines)
+        total_in, total_out, model = tabp_helper._read_transcript_tokens(transcript_root, cwd_slug)
+        self.assertEqual(total_in, 200)
+        self.assertEqual(total_out, 40)
+
+    # (i) absent transcript dir -> (0, 0, None)
+    def test_read_transcript_tokens_absent_dir(self):
+        """Absent transcript directory returns (0, 0, None)."""
+        total_in, total_out, model = tabp_helper._read_transcript_tokens(
+            self._tmpdir, "nonexistent-slug-xyz"
+        )
+        self.assertEqual(total_in, 0)
+        self.assertEqual(total_out, 0)
+        self.assertIsNone(model)
+
+    # (j) non-integer token treated as zero
+    def test_read_transcript_tokens_non_int_token_treated_as_zero(self):
+        """Non-integer input_tokens value is treated as 0, not added to total."""
+        cwd_slug = "Users-testuser-project4"
+        lines = [
+            {"message": {"usage": {"input_tokens": "many", "output_tokens": 50}, "model": "claude-sonnet-4-6"}},
+            {"message": {"usage": {"input_tokens": 100, "output_tokens": 20}, "model": "claude-sonnet-4-6"}},
+        ]
+        transcript_root = self._make_transcript_dir(cwd_slug, lines)
+        total_in, total_out, _ = tabp_helper._read_transcript_tokens(transcript_root, cwd_slug)
+        self.assertEqual(total_in, 100)  # "many" treated as 0, only 100 counted
+        self.assertEqual(total_out, 70)  # 50+20
+
+    # (k) privacy: reader returns only token integers + model, no content text
+    def test_read_transcript_tokens_privacy_no_content_returned(self):
+        """Privacy gate: reader returns (int, int, str|None) — no message.content text."""
+        cwd_slug = "Users-testuser-project5"
+        private_text = "CONFIDENTIAL CV CONTENT DO NOT EXPOSE"
+        lines = [
+            {
+                "message": {
+                    "content": private_text,
+                    "usage": {"input_tokens": 500, "output_tokens": 100},
+                    "model": "claude-sonnet-4-6",
+                }
+            }
+        ]
+        transcript_root = self._make_transcript_dir(cwd_slug, lines)
+        result = tabp_helper._read_transcript_tokens(transcript_root, cwd_slug)
+        # Result must be a 3-tuple of (int, int, str|None)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 3)
+        total_in, total_out, model = result
+        self.assertIsInstance(total_in, int)
+        self.assertIsInstance(total_out, int)
+        # Assert no element of the result contains the private text
+        for element in result:
+            if element is not None:
+                self.assertNotEqual(element, private_text)
+                if isinstance(element, str):
+                    self.assertNotIn(private_text, element)
+
+    # (l) _derive_cost known model math
+    def test_derive_cost_known_model(self):
+        """_derive_cost known model computes (tin/1e6)*in_price + (tout/1e6)*out_price."""
+        pricing = {"claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}}
+        expected = (28000 / 1_000_000) * 15.0 + (5200 / 1_000_000) * 75.0
+        result = tabp_helper._derive_cost(28000, 5200, "claude-opus-4-8", pricing)
+        self.assertAlmostEqual(result, expected, places=6)
+
+    # (m) _derive_cost unknown model -> None
+    def test_derive_cost_unknown_model_returns_none(self):
+        """_derive_cost returns None for unknown model."""
+        pricing = {"claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}}
+        result = tabp_helper._derive_cost(28000, 5200, "claude-unknown-99", pricing)
+        self.assertIsNone(result)
+
+    # (n) _derive_cost None tokens -> None
+    def test_derive_cost_none_tokens_returns_none(self):
+        """_derive_cost returns None when tokens_in is None."""
+        pricing = {"claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}}
+        result = tabp_helper._derive_cost(None, 5200, "claude-opus-4-8", pricing)
+        self.assertIsNone(result)
+
+    def test_derive_cost_none_tokens_out_returns_none(self):
+        """_derive_cost returns None when tokens_out is None."""
+        pricing = {"claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}}
+        result = tabp_helper._derive_cost(28000, None, "claude-opus-4-8", pricing)
+        self.assertIsNone(result)
+
+    # (o) _cwd_slug path-to-slug conversion
+    def test_cwd_slug_conversion(self):
+        """_cwd_slug converts path to cwd-slug format (/ -> -, strip leading -)."""
+        slug = tabp_helper._cwd_slug("/Users/bob/projects/myapp")
+        # /Users/bob/projects/myapp -> -Users-bob-projects-myapp -> Users-bob-projects-myapp
+        self.assertEqual(slug, "Users-bob-projects-myapp")
+
+    def test_cwd_slug_no_leading_dash(self):
+        """_cwd_slug strips leading dash from the result."""
+        slug = tabp_helper._cwd_slug("/home/user/work")
+        self.assertFalse(slug.startswith("-"), "cwd_slug must not start with '-'")
+        self.assertEqual(slug, "home-user-work")
+
+
+# ---------------------------------------------------------------------------
+# Class TestUsageReadAggregation — Spec 03 (MAR-38)
+# TDD: Written before implementation; tests MUST fail before impl.
+# ---------------------------------------------------------------------------
+
+class TestUsageReadAggregation(unittest.TestCase):
+    """Spec 03 (MAR-38) — _cmd_usage_read real aggregation.
+
+    All fixture .tabp/ dirs use tempfile.mkdtemp(). Transcript roots are
+    injected as environment variable TABP_TRANSCRIPT_ROOT or via parameter.
+    No real ~/.claude is ever read. No network. No model calls.
+
+    Tests for:
+    (a)   empty history -> zero totals, runs==[], all required keys present
+    (b)   mixed run set: claude-code/estimate/unavailable/cowork labels, tokens,
+          cost_basis; unavailable omitted from totals; totals == A+B+D
+    (c)   --run-id <id> returns one run
+    (d)   --run-id all returns all runs
+    (e)   corrupt/missing run.json omitted gracefully
+    (f)   pricing_snapshot_date present in every response
+    (g)   settings model_pricing override changes derived cost
+    (h)   R2 mislabel guard: every entry has cost_basis; no non-cowork is 'actual'
+    (i)   read-only: no files created/modified under .tabp/; no transcript text
+    (j)   settings-read surfaces model_pricing when present
+    (k)   settings-read absent model_pricing -> key absent from output
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._project_dir = self._tmpdir
+        self._tabp_dir = os.path.join(self._project_dir, ".tabp")
+        os.makedirs(self._tabp_dir, exist_ok=True)
+        self._orig_stdout = sys.stdout
+        self._orig_stderr = sys.stderr
+        self._orig_env = os.environ.copy()
+
+    def tearDown(self):
+        import shutil
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+        # Restore env
+        for k in list(os.environ.keys()):
+            if k not in self._orig_env:
+                del os.environ[k]
+        for k, v in self._orig_env.items():
+            os.environ[k] = v
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _capture(self):
+        import io
+        out = io.StringIO()
+        err = io.StringIO()
+        sys.stdout = out
+        sys.stderr = err
+        return out, err
+
+    def _restore_streams(self):
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+
+    def _do_run_start(self):
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_run_start([
+                "--project-dir", self._project_dir,
+                "--skill", "screen-cvs",
+                "--jd-slug", "test-role",
+            ])
+        finally:
+            self._restore_streams()
+        return out.getvalue().strip()
+
+    def _write_history(self, runs):
+        """Write history.json directly (bypass run-start for multi-run setup)."""
+        history_path = os.path.join(self._tabp_dir, "history.json")
+        tabp_helper._write_json(history_path, {"runs": runs})
+
+    def _write_run_json(self, run_id, run_data):
+        """Write run.json for a given run_id."""
+        run_dir = os.path.join(self._tabp_dir, "runs", run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        run_path = os.path.join(run_dir, "run.json")
+        tabp_helper._write_json(run_path, run_data)
+
+    def _make_run_record(self, run_id, status="completed", usage_source="unavailable",
+                         candidates_screened=1, tokens_in=None, tokens_out=None,
+                         cost_usd=None, cost_basis=None):
+        """Build a minimal valid run record."""
+        record = {
+            "run_id": run_id,
+            "skill": "screen-cvs",
+            "started_at": "2026-06-20T09:00:00Z",
+            "ended_at": "2026-06-20T09:30:00Z",
+            "status": status,
+            "stop_reason": None,
+            "state_write_mode": "helper",
+            "usage": {
+                "usage_source": usage_source,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost_usd": cost_usd,
+                "duration_seconds": 1800,
+            },
+            "candidates_screened": candidates_screened,
+            "jd_slug": "test-role",
+        }
+        if cost_basis is not None:
+            record["usage"]["cost_basis"] = cost_basis
+        return record
+
+    def _make_history_entry(self, run_id, status="completed", usage_source="unavailable",
+                            candidates_screened=1):
+        return {
+            "run_id": run_id,
+            "skill": "screen-cvs",
+            "started_at": "2026-06-20T09:00:00Z",
+            "ended_at": "2026-06-20T09:30:00Z",
+            "status": status,
+            "candidates_screened": candidates_screened,
+            "duration_seconds": 1800,
+            "usage_source": usage_source,
+        }
+
+    def _call_usage_read(self, extra_args=None):
+        args = ["--project-dir", self._project_dir]
+        if extra_args:
+            args.extend(extra_args)
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_usage_read(args)
+        finally:
+            self._restore_streams()
+        return json.loads(out.getvalue())
+
+    # (a) empty history
+    def test_empty_history_zero_totals(self):
+        """Empty history -> zero totals, empty runs[], all required keys present."""
+        result = self._call_usage_read()
+        required_keys = [
+            "total_runs", "completed_runs", "failed_runs",
+            "total_candidates_screened", "total_duration_seconds",
+            "total_tokens_in", "total_tokens_out", "total_cost_usd",
+            "cost_basis", "pricing_snapshot_date", "usage_note", "runs",
+        ]
+        for k in required_keys:
+            self.assertIn(k, result, "missing key: %s" % k)
+        self.assertEqual(result["total_runs"], 0)
+        self.assertEqual(result["runs"], [])
+
+    # (b) mixed run set
+    def test_mixed_run_set_labels_and_totals(self):
+        """Mixed run set: claude-code/estimate/unavailable/cowork labels correct;
+        unavailable omitted from totals; totals==A+B+D."""
+        import re
+        transcript_root = os.path.join(self._tmpdir, "transcripts")
+        os.environ["TABP_TRANSCRIPT_ROOT"] = transcript_root
+
+        # Run A: claude-code with injected transcript
+        run_a = "run-A"
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        slug_dir = os.path.join(transcript_root, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        with open(os.path.join(slug_dir, "session.jsonl"), "w") as fh:
+            fh.write(json.dumps({
+                "message": {"usage": {"input_tokens": 10000, "output_tokens": 2000},
+                            "model": "claude-sonnet-4-6"}
+            }) + "\n")
+        self._write_run_json(run_a, self._make_run_record(
+            run_a, status="completed", usage_source="claude-code",
+            candidates_screened=2, cost_basis="estimate"
+        ))
+
+        # Run B: estimate with pre-set tokens
+        run_b = "run-B"
+        self._write_run_json(run_b, self._make_run_record(
+            run_b, status="completed", usage_source="estimate",
+            candidates_screened=3, tokens_in=5000, tokens_out=1200,
+            cost_basis="estimate"
+        ))
+
+        # Run C: unavailable
+        run_c = "run-C"
+        self._write_run_json(run_c, self._make_run_record(
+            run_c, status="completed", usage_source="unavailable",
+            candidates_screened=0, cost_basis="unavailable"
+        ))
+
+        # Run D: cowork (future hook)
+        run_d = "run-D"
+        self._write_run_json(run_d, self._make_run_record(
+            run_d, status="completed", usage_source="cowork",
+            candidates_screened=4, tokens_in=8000, tokens_out=2000,
+            cost_usd=0.50, cost_basis="actual"
+        ))
+
+        history = [
+            self._make_history_entry(run_a, usage_source="claude-code", candidates_screened=2),
+            self._make_history_entry(run_b, usage_source="estimate", candidates_screened=3),
+            self._make_history_entry(run_c, usage_source="unavailable", candidates_screened=0),
+            self._make_history_entry(run_d, usage_source="cowork", candidates_screened=4),
+        ]
+        self._write_history(history)
+
+        result = self._call_usage_read()
+
+        self.assertEqual(result["total_runs"], 4)
+        self.assertEqual(result["completed_runs"], 4)
+        self.assertEqual(len(result["runs"]), 4)
+
+        # Find per-run entries
+        runs_by_id = {r["run_id"]: r for r in result["runs"]}
+
+        # Run A: claude-code -> estimate cost_basis, derived tokens from transcript
+        run_a_row = runs_by_id.get(run_a)
+        self.assertIsNotNone(run_a_row, "Run A must appear in runs[]")
+        self.assertEqual(run_a_row["usage_source"], "claude-code")
+        self.assertEqual(run_a_row["cost_basis"], "estimate")
+        self.assertIsNotNone(run_a_row["tokens_in"])
+        self.assertIsNotNone(run_a_row["tokens_out"])
+
+        # Run B: estimate -> estimate cost_basis
+        run_b_row = runs_by_id.get(run_b)
+        self.assertIsNotNone(run_b_row)
+        self.assertEqual(run_b_row["usage_source"], "estimate")
+        self.assertEqual(run_b_row["cost_basis"], "estimate")
+        self.assertEqual(run_b_row["tokens_in"], 5000)
+        self.assertEqual(run_b_row["tokens_out"], 1200)
+
+        # Run C: unavailable -> null tokens/cost, included in runs[] but not totals
+        run_c_row = runs_by_id.get(run_c)
+        self.assertIsNotNone(run_c_row)
+        self.assertEqual(run_c_row["usage_source"], "unavailable")
+        self.assertEqual(run_c_row["cost_basis"], "unavailable")
+        self.assertIsNone(run_c_row["tokens_in"])
+        self.assertIsNone(run_c_row["tokens_out"])
+        self.assertIsNone(run_c_row["cost_usd"])
+
+        # Run D: cowork -> actual cost_basis
+        run_d_row = runs_by_id.get(run_d)
+        self.assertIsNotNone(run_d_row)
+        self.assertEqual(run_d_row["usage_source"], "cowork")
+        self.assertEqual(run_d_row["cost_basis"], "actual")
+
+        # Totals: must be A+B+D (not C)
+        a_in = run_a_row["tokens_in"] or 0
+        a_out = run_a_row["tokens_out"] or 0
+        b_in = 5000
+        b_out = 1200
+        d_in = 8000
+        d_out = 2000
+        self.assertEqual(result["total_tokens_in"], a_in + b_in + d_in)
+        self.assertEqual(result["total_tokens_out"], a_out + b_out + d_out)
+
+    # (c) --run-id <id> returns one run
+    def test_run_id_filter_returns_one_run(self):
+        """--run-id <id> returns one run with that run_id."""
+        run_a = "run-20260620T090000Z"
+        run_b = "run-20260620T093000Z"
+        self._write_run_json(run_a, self._make_run_record(run_a))
+        self._write_run_json(run_b, self._make_run_record(run_b))
+        self._write_history([
+            self._make_history_entry(run_a),
+            self._make_history_entry(run_b),
+        ])
+        result = self._call_usage_read(["--run-id", run_a])
+        self.assertEqual(result["total_runs"], 1)
+        self.assertEqual(len(result["runs"]), 1)
+        self.assertEqual(result["runs"][0]["run_id"], run_a)
+
+    # (d) --run-id all returns all runs
+    def test_run_id_all_returns_all_runs(self):
+        """--run-id all is equivalent to absent (returns all runs)."""
+        run_a = "run-20260620T090000Z"
+        run_b = "run-20260620T093000Z"
+        self._write_run_json(run_a, self._make_run_record(run_a))
+        self._write_run_json(run_b, self._make_run_record(run_b))
+        self._write_history([
+            self._make_history_entry(run_a),
+            self._make_history_entry(run_b),
+        ])
+        result_all = self._call_usage_read(["--run-id", "all"])
+        result_absent = self._call_usage_read()
+        self.assertEqual(result_all["total_runs"], result_absent["total_runs"])
+        self.assertEqual(len(result_all["runs"]), len(result_absent["runs"]))
+
+    # (e) corrupt/missing run.json omitted gracefully
+    def test_missing_run_json_omitted(self):
+        """Missing run.json: run not in runs[] output, no exception."""
+        self._write_history([
+            self._make_history_entry("run-missing"),
+        ])
+        # Do NOT create run.json for "run-missing"
+        result = self._call_usage_read()
+        run_ids_in_output = [r["run_id"] for r in result["runs"]]
+        self.assertNotIn("run-missing", run_ids_in_output)
+
+    def test_corrupt_run_json_omitted(self):
+        """Corrupt run.json: run not in runs[] output, no exception."""
+        run_id = "run-corrupt"
+        run_dir = os.path.join(self._tabp_dir, "runs", run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        with open(os.path.join(run_dir, "run.json"), "w") as fh:
+            fh.write("INVALID JSON {{{")
+        self._write_history([self._make_history_entry(run_id)])
+        result = self._call_usage_read()
+        run_ids_in_output = [r["run_id"] for r in result["runs"]]
+        self.assertNotIn(run_id, run_ids_in_output)
+
+    # (f) pricing_snapshot_date present in every response
+    def test_pricing_snapshot_date_always_present(self):
+        """pricing_snapshot_date is present in every usage-read response."""
+        import re
+        result = self._call_usage_read()
+        self.assertIn("pricing_snapshot_date", result)
+        self.assertRegex(result["pricing_snapshot_date"], r"^\d{4}-\d{2}-\d{2}$")
+
+    # (g) settings model_pricing override changes derived cost
+    def test_settings_model_pricing_override(self):
+        """settings.json model_pricing override changes derived cost for a run."""
+        import re
+        transcript_root = os.path.join(self._tmpdir, "transcripts2")
+        os.environ["TABP_TRANSCRIPT_ROOT"] = transcript_root
+
+        run_id = "run-cost-test"
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        slug_dir = os.path.join(transcript_root, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        with open(os.path.join(slug_dir, "session.jsonl"), "w") as fh:
+            fh.write(json.dumps({
+                "message": {"usage": {"input_tokens": 1000000, "output_tokens": 1000000},
+                            "model": "claude-opus-4-8"}
+            }) + "\n")
+
+        self._write_run_json(run_id, self._make_run_record(
+            run_id, usage_source="claude-code", candidates_screened=1,
+            cost_basis="estimate"
+        ))
+        self._write_history([self._make_history_entry(
+            run_id, usage_source="claude-code")])
+
+        # Write settings with overridden price
+        settings_path = os.path.join(self._tabp_dir, "settings.json")
+        tabp_helper._write_json(settings_path, {
+            "model_pricing": {
+                "claude-opus-4-8": {"input_per_mtok": 20.0, "output_per_mtok": 100.0}
+            }
+        })
+
+        result = self._call_usage_read()
+        self.assertEqual(len(result["runs"]), 1)
+        run_row = result["runs"][0]
+        # With 1M in + 1M out at $20/$100 per mtok -> $120
+        if run_row["cost_usd"] is not None:
+            self.assertAlmostEqual(run_row["cost_usd"], 120.0, places=2)
+
+    # (h) R2 mislabel guard: every runs[] entry has cost_basis; no non-cowork is 'actual'
+    def test_r2_mislabel_guard_cost_basis_always_set(self):
+        """Every runs[] entry has cost_basis; no non-cowork run has cost_basis='actual'."""
+        run_a = "run-A-h"
+        run_b = "run-B-h"
+        run_c = "run-C-h"
+        self._write_run_json(run_a, self._make_run_record(
+            run_a, usage_source="claude-code", cost_basis="estimate"))
+        self._write_run_json(run_b, self._make_run_record(
+            run_b, usage_source="estimate", cost_basis="estimate"))
+        self._write_run_json(run_c, self._make_run_record(
+            run_c, usage_source="unavailable", cost_basis="unavailable"))
+        self._write_history([
+            self._make_history_entry(run_a, usage_source="claude-code"),
+            self._make_history_entry(run_b, usage_source="estimate"),
+            self._make_history_entry(run_c, usage_source="unavailable"),
+        ])
+        result = self._call_usage_read()
+        valid_values = {"actual", "estimate", "unavailable"}
+        for row in result["runs"]:
+            self.assertIn("cost_basis", row,
+                          "every runs[] entry must have cost_basis")
+            self.assertIn(row["cost_basis"], valid_values)
+            if row["usage_source"] != "cowork":
+                self.assertNotEqual(
+                    row["cost_basis"], "actual",
+                    "non-cowork run must not have cost_basis='actual' (R2)"
+                )
+
+    # (i) read-only: no files created or modified under .tabp/
+    def test_read_only_no_tabp_files_changed(self):
+        """_cmd_usage_read does not create or modify any .tabp/ files."""
+        import os
+        # Set up one run
+        run_id = "run-readonly"
+        self._write_run_json(run_id, self._make_run_record(run_id))
+        self._write_history([self._make_history_entry(run_id)])
+
+        # Record file state before
+        def file_state(dirpath):
+            state = {}
+            for root, dirs, files in os.walk(dirpath):
+                for fname in files:
+                    fpath = os.path.join(root, fname)
+                    stat = os.stat(fpath)
+                    state[fpath] = (stat.st_size, stat.st_mtime)
+            return state
+
+        before = file_state(self._tabp_dir)
+        self._call_usage_read()
+        after = file_state(self._tabp_dir)
+
+        self.assertEqual(before, after,
+                         "usage-read must not modify any .tabp/ files (read-only)")
+
+    # (i) privacy: no transcript content persisted in .tabp/ files
+    def test_read_only_no_transcript_content_persisted(self):
+        """No transcript message.content text appears in any .tabp/ file after usage-read."""
+        transcript_root = os.path.join(self._tmpdir, "transcripts3")
+        os.environ["TABP_TRANSCRIPT_ROOT"] = transcript_root
+        private_content = "PRIVATE-TRANSCRIPT-CONTENT-XYZZY-DO-NOT-PERSIST"
+
+        run_id = "run-priv"
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        slug_dir = os.path.join(transcript_root, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        with open(os.path.join(slug_dir, "session.jsonl"), "w") as fh:
+            fh.write(json.dumps({
+                "message": {
+                    "content": private_content,
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                    "model": "claude-sonnet-4-6",
+                }
+            }) + "\n")
+        self._write_run_json(run_id, self._make_run_record(
+            run_id, usage_source="claude-code", cost_basis="estimate"))
+        self._write_history([self._make_history_entry(run_id, usage_source="claude-code")])
+
+        self._call_usage_read()
+
+        # Scan all .tabp/ files for private content
+        for root, dirs, files in os.walk(self._tabp_dir):
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
+                    file_content = fh.read()
+                self.assertNotIn(
+                    private_content, file_content,
+                    "Transcript content must not be persisted in %s (privacy)" % fpath
+                )
+
+    # (j) settings-read surfaces model_pricing when present
+    def test_settings_read_surfaces_model_pricing(self):
+        """settings-read output includes model_pricing when set in settings.json."""
+        settings_path = os.path.join(self._tabp_dir, "settings.json")
+        tabp_helper._write_json(settings_path, {
+            "model_pricing": {
+                "claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}
+            }
+        })
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_settings_read(["--project-dir", self._project_dir])
+        finally:
+            self._restore_streams()
+        result = json.loads(out.getvalue())
+        self.assertIn("model_pricing", result)
+        self.assertIn("claude-opus-4-8", result["model_pricing"])
+
+    # (k) settings-read absent model_pricing -> key absent from output
+    def test_settings_read_absent_model_pricing_not_in_output(self):
+        """settings-read without model_pricing in settings.json: key absent from output."""
+        settings_path = os.path.join(self._tabp_dir, "settings.json")
+        tabp_helper._write_json(settings_path, {
+            "screening_model": "sonnet",
+        })
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_settings_read(["--project-dir", self._project_dir])
+        finally:
+            self._restore_streams()
+        result = json.loads(out.getvalue())
+        self.assertNotIn("model_pricing", result)

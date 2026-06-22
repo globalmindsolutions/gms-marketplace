@@ -4,7 +4,9 @@
   "title": "tabp run history",
   "description": "Append-only run history stored at <project>/.tabp/history.json. New runs are appended to the runs array; no entry is ever removed. runs[-1] is the current status. The append-only invariant is enforced at runtime by tabp_helper.py (spec 02), not by this schema.",
   "type": "object",
-  "required": ["runs"],
+  "required": [
+    "runs"
+  ],
   "properties": {
     "runs": {
       "type": "array",
@@ -12,7 +14,12 @@
       "description": "Append-only array of run summary objects. runs[-1] is the most recent run.",
       "items": {
         "type": "object",
-        "required": ["run_id", "skill", "started_at", "status"],
+        "required": [
+          "run_id",
+          "skill",
+          "started_at",
+          "status"
+        ],
         "properties": {
           "run_id": {
             "type": "string",
@@ -29,13 +36,23 @@
           },
           "ended_at": {
             "oneOf": [
-              {"type": "string", "format": "date-time"},
-              {"type": "null"}
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
             ],
             "description": "ISO-8601 datetime when the run ended. Null or absent while in_progress."
           },
           "status": {
-            "enum": ["in_progress", "completed", "failed", "interrupted"],
+            "enum": [
+              "in_progress",
+              "completed",
+              "failed",
+              "interrupted"
+            ],
             "description": "Run status at the time this summary was written."
           },
           "candidates_screened": {
@@ -49,13 +66,23 @@
           },
           "duration_seconds": {
             "oneOf": [
-              {"type": "number", "minimum": 0},
-              {"type": "null"}
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
             ],
             "description": "Wall-clock duration of the run in seconds."
           },
           "usage_source": {
-            "enum": ["cowork", "unavailable"],
+            "enum": [
+              "cowork",
+              "claude-code",
+              "estimate",
+              "unavailable"
+            ],
             "description": "Source of usage data for this run."
           }
         },

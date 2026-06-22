@@ -62,6 +62,24 @@ applies defaults for missing keys. Schema: `plugins/tabp/schemas/settings.schema
 (MAR-3). Key fields: `screening_model`, `synthesis_model`, `cv_folder`,
 `jd_folder`, `state_write_mode` (`"helper"` or `"instructed"`).
 
+**MAR-38 — `model_pricing` (runtime-read-only, no schema file):** an optional
+`model_pricing` block may appear in `settings.json` to override the built-in
+pricing snapshot on a per-model basis. No `settings.schema.json` is created for
+this key (DEV-1: MAR-3-owned schema boundary; would activate `ci.yml:197-199`).
+Format:
+```json
+{
+  "model_pricing": {
+    "claude-opus-4-8":   { "input_per_mtok": 15.00, "output_per_mtok": 75.00 },
+    "claude-sonnet-4-6": { "input_per_mtok":  3.00, "output_per_mtok": 15.00 }
+  }
+}
+```
+Values are USD per million tokens (numbers). No credentials or API keys.
+If absent, the built-in `_MODEL_PRICING` snapshot (dated `_PRICING_SNAPSHOT_DATE`)
+is used. Surfaced via `settings-read` output when present (`_cmd_settings_read`,
+MAR-38). Validated/sanitised at usage-read time by `_resolve_pricing`.
+
 ### `.tabp/` state record schemas
 
 All state files are written to `<project>/.tabp/` in the Cowork project folder.
@@ -82,10 +100,11 @@ Schema: `plugins/tabp/schemas/run.schema.json`
 | `status` | enum | `"in_progress"`, `"completed"`, `"failed"`, `"interrupted"`. |
 | `stop_reason` | string or null | Reason run stopped early. Null unless `failed` or `interrupted`. |
 | `state_write_mode` | enum | `"helper"` (tabp_helper.py subcommands) or `"instructed"` (degraded mode). |
-| `usage.usage_source` | enum | `"cowork"` (self-reported) or `"unavailable"`. |
+| `usage.usage_source` | enum | `"cowork"` (self-reported, cost_basis=actual), `"claude-code"` (transcript tokens, cost_basis=estimate), `"estimate"` (heuristic, cost_basis=estimate), `"unavailable"` (no data). |
 | `usage.tokens_in` | integer or null | Input token count. Null when `usage_source = "unavailable"`. |
 | `usage.tokens_out` | integer or null | Output token count. Null when `usage_source = "unavailable"`. |
 | `usage.cost_usd` | number or null | Cost in USD. Null when `usage_source = "unavailable"`. |
+| `usage.cost_basis` | enum (optional) | `"actual"` (self-reported by runtime), `"estimate"` (derived from tokens x pricing), `"unavailable"` (no cost data). Absent on legacy records — treated as `"unavailable"`. |
 | `usage.duration_seconds` | number or null | Wall-clock duration in seconds. |
 | `candidates_screened` | integer | Number of candidates screened. |
 | `jd_slug` | string | Job description slug. E.g. `"backend-engineer"`. |
@@ -141,7 +160,7 @@ Schema: `plugins/tabp/schemas/history.schema.json`
 | `runs[].candidates_screened` | integer (optional) | Number of candidates screened. |
 | `runs[].jd_slug` | string (optional) | Job description slug. |
 | `runs[].duration_seconds` | number or null (optional) | Wall-clock duration. |
-| `runs[].usage_source` | enum (optional) | `"cowork"` or `"unavailable"`. |
+| `runs[].usage_source` | enum (optional) | `"cowork"`, `"claude-code"`, `"estimate"`, or `"unavailable"`. |
 
 The append-only invariant (no deletion) is enforced at runtime by `tabp_helper.py`.
 
@@ -161,11 +180,10 @@ never auto-stolen. Released when the run transitions out of `in_progress`.
 
 ### `/tabp:usage` read contract output shape
 
-_Full aggregation logic owned by MAR-6. This section documents the read-contract
-output shape as defined in `design.md:619-642`._
+_Implemented in MAR-38. Replaces the MAR-6 placeholder stub._
 
-`tabp_helper.py usage-read [--run-id <id>|all]` aggregates from
-`history.json` + per-run `run.json` records and prints to stdout:
+`tabp_helper.py usage-read --project-dir <path> [--run-id <id>|all]` aggregates
+from `history.json` + per-run `run.json` records and prints to stdout:
 
 ```json
 {
@@ -174,7 +192,12 @@ output shape as defined in `design.md:619-642`._
   "failed_runs": 1,
   "total_candidates_screened": 47,
   "total_duration_seconds": 19205,
-  "usage_note": "Cost and token counts unavailable (Cowork usage reporting not confirmed).",
+  "total_tokens_in": 284000,
+  "total_tokens_out": 52000,
+  "total_cost_usd": 4.12,
+  "cost_basis": "estimate",
+  "pricing_snapshot_date": "2025-08-01",
+  "usage_note": "Cost is a derived estimate (tokens x pricing table snapshot 2025-08-01). Token counts are actuals from Claude Code transcript where available; estimate otherwise. Unavailable runs excluded from totals.",
   "runs": [
     {
       "run_id": "run-20260620T091530Z",
@@ -182,12 +205,27 @@ output shape as defined in `design.md:619-642`._
       "status": "completed",
       "candidates_screened": 5,
       "duration_seconds": 1902,
-      "usage_source": "unavailable"
+      "usage_source": "claude-code",
+      "tokens_in": 28000,
+      "tokens_out": 5200,
+      "cost_usd": 0.41,
+      "cost_basis": "estimate",
+      "usage_note": "Tokens: actuals from Claude Code transcript. Cost: derived estimate."
     }
   ]
 }
 ```
 
-When `usage_source = "cowork"`, per-run entries also include `tokens_in`,
-`tokens_out`, and `cost_usd`; aggregates appear in the top-level object.
-Read-only: no writes, no network calls, no re-screening.
+When `usage_source = "unavailable"`: `tokens_in`, `tokens_out`, `cost_usd` are
+`null`; `cost_basis` is `"unavailable"`; the run is included in `runs[]` but
+excluded from token/cost totals.
+
+When `usage_source = "cowork"`: `cost_basis = "actual"` (self-reported by
+Cowork runtime — forward hook, MAR-40).
+
+`pricing_snapshot_date` is always present (`_PRICING_SNAPSHOT_DATE` constant).
+`cost_basis` is the aggregate: `"actual"` if any non-unavailable run has actual,
+else `"estimate"`, else `"unavailable"`.
+
+Read-only: no writes, no network calls, no re-screening. No transcript text is
+persisted into `.tabp/` state files.

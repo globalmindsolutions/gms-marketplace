@@ -30,62 +30,114 @@
     },
     "ended_at": {
       "oneOf": [
-        {"type": "string", "format": "date-time"},
-        {"type": "null"}
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
       ],
       "description": "ISO-8601 datetime when the run ended. Null while in_progress."
     },
     "status": {
-      "enum": ["in_progress", "completed", "failed", "interrupted"],
+      "enum": [
+        "in_progress",
+        "completed",
+        "failed",
+        "interrupted"
+      ],
       "description": "Current run status. in_progress means the run is resumable."
     },
     "stop_reason": {
       "oneOf": [
-        {"type": "string"},
-        {"type": "null"}
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
       ],
       "description": "Reason the run stopped early. Null unless failed or interrupted."
     },
     "state_write_mode": {
-      "enum": ["helper", "instructed"],
+      "enum": [
+        "helper",
+        "instructed"
+      ],
       "description": "How state is written: 'helper' = tabp_helper.py shell subcommands; 'instructed' = coordinator instructed to write state files directly (Cowork degraded mode)."
     },
     "usage": {
       "type": "object",
       "description": "Usage metadata for this run.",
-      "required": ["usage_source"],
+      "required": [
+        "usage_source"
+      ],
       "properties": {
         "usage_source": {
-          "enum": ["cowork", "unavailable"],
-          "description": "Source of usage data: 'cowork' = Cowork self-reported; 'unavailable' = not self-reported."
+          "enum": [
+            "cowork",
+            "claude-code",
+            "estimate",
+            "unavailable"
+          ],
+          "description": "Source of usage data: 'cowork' = Cowork self-reported (future, cost_basis=actual); 'claude-code' = tokens read from Claude Code transcript (cost_basis=estimate); 'estimate' = heuristic token estimate (cost_basis=estimate); 'unavailable' = no usage data."
         },
         "tokens_in": {
           "oneOf": [
-            {"type": "integer", "minimum": 0},
-            {"type": "null"}
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Input token count. Null if usage_source is unavailable."
         },
         "tokens_out": {
           "oneOf": [
-            {"type": "integer", "minimum": 0},
-            {"type": "null"}
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Output token count. Null if usage_source is unavailable."
         },
         "cost_usd": {
           "oneOf": [
-            {"type": "number", "minimum": 0},
-            {"type": "null"}
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Cost in USD. Null if usage_source is unavailable."
         },
         "duration_seconds": {
           "oneOf": [
-            {"type": "number", "minimum": 0},
-            {"type": "null"}
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Wall-clock duration of the run in seconds."
+        },
+        "cost_basis": {
+          "enum": [
+            "actual",
+            "estimate",
+            "unavailable"
+          ],
+          "description": "Basis for the cost figure: 'actual' = self-reported by the runtime; 'estimate' = derived from tokens x pricing; 'unavailable' = no cost data."
         }
       },
       "additionalProperties": true

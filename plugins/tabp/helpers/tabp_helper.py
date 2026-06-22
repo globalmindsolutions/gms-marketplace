@@ -372,7 +372,10 @@ def _validate_run(record):
               candidates_screened, jd_slug.
     Enum: status in {in_progress, completed, failed, interrupted}.
     Enum: state_write_mode in {helper, instructed}.
-    Enum: usage.usage_source in {cowork, unavailable}.
+    Enum: usage.usage_source in {cowork, claude-code, estimate, unavailable}.
+    Optional: usage.cost_basis in {actual, estimate, unavailable} (absent = ok).
+    MAR-38: widened from two-value to four-value usage_source enum; added
+            optional cost_basis check.
     """
     for field in ("run_id", "skill", "started_at", "status",
                   "state_write_mode", "usage", "candidates_screened", "jd_slug"):
@@ -387,11 +390,13 @@ def _validate_run(record):
         raise TabpValidationError(
             "tabp: validation error: run.usage must be an object"
         )
-    _require(usage, "usage_source", "run.usage")
-    if usage["usage_source"] not in ("cowork", "unavailable"):
-        raise TabpValidationError(
-            "tabp: validation error: run.usage.usage_source must be 'cowork' or 'unavailable'"
-        )
+    _require_enum(usage, "usage_source",
+                  {"cowork", "claude-code", "estimate", "unavailable"},
+                  "run.usage")
+    if "cost_basis" in usage:
+        _require_enum(usage, "cost_basis",
+                      {"actual", "estimate", "unavailable"},
+                      "run.usage")
 
 
 def _validate_evidence(record):
@@ -750,11 +755,15 @@ def _cmd_run_finalize(args):
     Args: --project-dir <path> --run-id <id>
           --status <completed|failed|interrupted>
           [--candidates-screened <n>]
-          [--usage-source <cowork|unavailable>]
+          [--usage-source <cowork|claude-code|estimate|unavailable>]
+          [--tokens-in <int>]
+          [--tokens-out <int>]
+          [--cost-basis <actual|estimate|unavailable>]
           [--stop-reason <text>]
 
     Updates run.json (status, ended_at, optional fields), updates matching
     history entry, releases lock. Validates run.json with _validate_run.
+    MAR-38: widened --usage-source to four values; added --tokens-in/out/cost-basis.
     Design ref: design.md:263, 775.
     """
     import argparse
@@ -765,7 +774,14 @@ def _cmd_run_finalize(args):
                         choices=["completed", "failed", "interrupted"])
     parser.add_argument("--candidates-screened", type=int, default=None)
     parser.add_argument("--usage-source", default=None,
-                        choices=["cowork", "unavailable"])
+                        choices=["cowork", "claude-code", "estimate", "unavailable"])
+    parser.add_argument("--tokens-in", type=int, default=None,
+                        dest="tokens_in")
+    parser.add_argument("--tokens-out", type=int, default=None,
+                        dest="tokens_out")
+    parser.add_argument("--cost-basis", default=None,
+                        choices=["actual", "estimate", "unavailable"],
+                        dest="cost_basis")
     parser.add_argument("--stop-reason", default=None)
     parsed = parser.parse_args(args)
 
@@ -789,6 +805,12 @@ def _cmd_run_finalize(args):
         run_record["candidates_screened"] = parsed.candidates_screened
     if parsed.usage_source is not None:
         run_record.setdefault("usage", {})["usage_source"] = parsed.usage_source
+    if parsed.tokens_in is not None:
+        run_record.setdefault("usage", {})["tokens_in"] = parsed.tokens_in
+    if parsed.tokens_out is not None:
+        run_record.setdefault("usage", {})["tokens_out"] = parsed.tokens_out
+    if parsed.cost_basis is not None:
+        run_record.setdefault("usage", {})["cost_basis"] = parsed.cost_basis
 
     _validate_run(run_record)
     _write_json(run_path, run_record)
@@ -891,30 +913,201 @@ def _cmd_validate(args):
 
 
 def _cmd_usage_read(args):
-    """usage-read subcommand — CONTRACT STUB ONLY (full aggregation: MAR-6).
+    """usage-read subcommand — real aggregation (MAR-38).
 
-    Args: --project-dir <path> [--run-id <id>]
+    Args: --project-dir <path> [--run-id <id>|all]
 
-    Prints the read-contract output shape (design.md:619-642) with placeholder
-    values and exits 0. The aggregation body (reading history.json and each
-    run.json) is owned by MAR-6; this stub provides a stable entry point for
-    spec-03 and MAR-6.
+    Reads history.json and per-run run.json records; aggregates token counts,
+    cost, and candidate totals. Emits the documented output shape to stdout.
+    Read-only: no _write_json calls, no history mutations, no transcript writes.
+
+    Output shape: total_runs, completed_runs, failed_runs,
+    total_candidates_screened, total_duration_seconds, total_tokens_in,
+    total_tokens_out, total_cost_usd, cost_basis, pricing_snapshot_date,
+    usage_note, runs[].
+
+    Design ref: design.md:307-348, :456-491. MAR-38 replaces the MAR-6 stub.
     """
-    # Stub: print the design.md:619-642 output shape with placeholder values
-    stub_output = {
-        "total_runs": 0,
-        "completed_runs": 0,
-        "failed_runs": 0,
-        "total_candidates_screened": 0,
-        "total_duration_seconds": 0,
-        "usage_note": (
-            "Cost and token counts unavailable "
-            "(Cowork usage reporting not confirmed). "
-            "[usage-read stub — full aggregation delivered in MAR-6]"
-        ),
-        "runs": [],
+    import argparse
+    parser = argparse.ArgumentParser(prog="tabp_helper usage-read")
+    parser.add_argument("--project-dir", required=True)
+    parser.add_argument("--run-id", default=None, dest="run_id")
+    parsed = parser.parse_args(args)
+
+    project_dir = parsed.project_dir
+    tabp_dir = _tabp_dir_from_project(project_dir)
+
+    # Step 1: Read settings + resolve pricing
+    settings_path = os.path.join(tabp_dir, "settings.json")
+    file_settings = _read_json(settings_path)
+    settings = dict(_SETTINGS_DEFAULTS)
+    if isinstance(file_settings, dict):
+        for key in _SETTINGS_DEFAULTS:
+            if key in file_settings:
+                settings[key] = file_settings[key]
+        if "model_pricing" in file_settings:
+            settings["model_pricing"] = file_settings["model_pricing"]
+    pricing, snapshot_date = _resolve_pricing(settings)
+
+    # Step 2: Read history
+    history_path = os.path.join(tabp_dir, "history.json")
+    history = _read_history(history_path)
+    all_runs = history.get("runs", [])
+
+    # Step 3: Filter runs
+    run_id_filter = parsed.run_id
+    if run_id_filter and run_id_filter != "all":
+        filtered_runs = [r for r in all_runs if r.get("run_id") == run_id_filter]
+    else:
+        filtered_runs = all_runs
+
+    # Step 4: Determine transcript root (injectable via TABP_TRANSCRIPT_ROOT env)
+    transcript_root = os.environ.get(
+        "TABP_TRANSCRIPT_ROOT",
+        os.path.expanduser("~/.claude/projects")
+    )
+    cwd_slug = _cwd_slug(project_dir)
+
+    # Step 5: Process each run
+    runs_output = []
+    agg_total_runs = 0
+    agg_completed = 0
+    agg_failed = 0
+    agg_candidates = 0
+    agg_duration = 0.0
+    agg_tokens_in = 0
+    agg_tokens_out = 0
+    agg_cost = 0.0
+    cost_basis_flags = set()  # tracks which cost_basis values appear in non-unavailable runs
+
+    for hist_entry in filtered_runs:
+        run_id = hist_entry.get("run_id", "")
+        run_dir = _run_dir(tabp_dir, run_id)
+        run_path = os.path.join(run_dir, "run.json")
+
+        run_record = _read_json(run_path)
+        if not isinstance(run_record, dict):
+            # Missing or corrupt run.json — skip entirely (design.md step 5b)
+            continue
+
+        usage = run_record.get("usage") or {}
+        usage_source = usage.get("usage_source", "unavailable")
+        cost_basis = usage.get("cost_basis", "unavailable")
+        status = run_record.get("status", "")
+        candidates = run_record.get("candidates_screened", 0) or 0
+        duration = usage.get("duration_seconds")
+        started_at = run_record.get("started_at")
+        ended_at = run_record.get("ended_at")
+
+        # Per-source dispatch (design.md step 5e)
+        tokens_in = None
+        tokens_out = None
+        cost_usd = None
+        run_note = ""
+
+        if usage_source == "claude-code":
+            # Read actuals from Claude Code transcript (injectable root, privacy-safe)
+            t_in, t_out, model = _read_transcript_tokens(
+                transcript_root, cwd_slug, started_at, ended_at
+            )
+            if t_in > 0 or t_out > 0:
+                tokens_in = t_in
+                tokens_out = t_out
+            else:
+                # Transcript dir absent or empty — fall back to run.json tokens
+                tokens_in = usage.get("tokens_in")
+                tokens_out = usage.get("tokens_out")
+                model = None
+            cost_usd = _derive_cost(tokens_in, tokens_out, model, pricing)
+            cost_basis = "estimate"  # always derived, never self-reported (AC-2)
+            run_note = "Tokens: actuals from Claude Code transcript. Cost: derived estimate."
+
+        elif usage_source == "estimate":
+            tokens_in = usage.get("tokens_in")
+            tokens_out = usage.get("tokens_out")
+            model = None
+            cost_usd = _derive_cost(tokens_in, tokens_out, model, pricing)
+            cost_basis = "estimate"
+            run_note = "Token estimate; cost derived via pricing snapshot."
+
+        elif usage_source == "cowork":
+            tokens_in = usage.get("tokens_in")
+            tokens_out = usage.get("tokens_out")
+            cost_usd = usage.get("cost_usd")
+            cost_basis = "actual"  # self-reported by runtime (forward hook)
+            run_note = "Cowork self-reported usage."
+
+        else:  # unavailable
+            tokens_in = None
+            tokens_out = None
+            cost_usd = None
+            cost_basis = "unavailable"
+            run_note = "Usage data unavailable for this run."
+
+        # Build per-run row (always included in runs[])
+        run_row = {
+            "run_id": run_id,
+            "started_at": started_at,
+            "status": status,
+            "candidates_screened": candidates,
+            "duration_seconds": duration,
+            "usage_source": usage_source,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "cost_usd": cost_usd,
+            "cost_basis": cost_basis,
+            "usage_note": run_note,
+        }
+        runs_output.append(run_row)
+
+        # Aggregate totals (counters)
+        agg_total_runs += 1
+        if status == "completed":
+            agg_completed += 1
+        elif status in ("failed", "interrupted"):
+            agg_failed += 1
+        agg_candidates += candidates
+        agg_duration += (duration or 0.0)
+
+        # Omit unavailable from token/cost totals (design.md:344)
+        if usage_source != "unavailable":
+            agg_tokens_in += (tokens_in or 0)
+            agg_tokens_out += (tokens_out or 0)
+            agg_cost += (cost_usd or 0.0)
+            cost_basis_flags.add(cost_basis)
+
+    # Step 6: Aggregate cost_basis determination
+    if "actual" in cost_basis_flags:
+        agg_cost_basis = "actual"
+    elif "estimate" in cost_basis_flags:
+        agg_cost_basis = "estimate"
+    else:
+        agg_cost_basis = "unavailable"
+
+    # Step 7: Build usage_note
+    usage_note = (
+        "Cost is a derived estimate (tokens x pricing table snapshot %s). "
+        "Token counts are actuals from Claude Code transcript where available; "
+        "estimate otherwise. Unavailable runs excluded from totals."
+        % snapshot_date
+    )
+
+    # Step 8: Emit output (read-only — no _write_json calls)
+    output = {
+        "total_runs": agg_total_runs,
+        "completed_runs": agg_completed,
+        "failed_runs": agg_failed,
+        "total_candidates_screened": agg_candidates,
+        "total_duration_seconds": agg_duration,
+        "total_tokens_in": agg_tokens_in,
+        "total_tokens_out": agg_tokens_out,
+        "total_cost_usd": agg_cost,
+        "cost_basis": agg_cost_basis,
+        "pricing_snapshot_date": snapshot_date,
+        "usage_note": usage_note,
+        "runs": runs_output,
     }
-    sys.stdout.write(json.dumps(stub_output, indent=2, ensure_ascii=False) + "\n")
+    sys.stdout.write(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
 
 
 # Documented tabp settings defaults. Mirrors the screen-cvs SKILL.md step-1
@@ -926,6 +1119,153 @@ _SETTINGS_DEFAULTS = {
     "jd_folder": "./jds",
     "state_write_mode": "helper",
 }
+
+# ---------------------------------------------------------------------------
+# Pricing snapshot (Spec 02 — MAR-38)
+# Built-in dated pricing table; settings model_pricing may override per model.
+# Privacy: pricing holds ONLY model names + numeric prices. No credentials.
+# ---------------------------------------------------------------------------
+
+_PRICING_SNAPSHOT_DATE = "2025-08-01"
+"""Date of the built-in pricing snapshot (YYYY-MM-DD). Surfaced in usage-read."""
+
+_MODEL_PRICING = {
+    "claude-opus-4-8":   {"input_per_mtok": 15.00, "output_per_mtok": 75.00},
+    "claude-sonnet-4-6": {"input_per_mtok":  3.00, "output_per_mtok": 15.00},
+}
+"""Built-in pricing snapshot (USD per million tokens). Override via settings.json."""
+
+
+def _resolve_pricing(settings):
+    """Resolve the effective pricing dict and snapshot date.
+
+    Args:
+        settings (dict): resolved settings dict (may contain 'model_pricing').
+
+    Returns:
+        (pricing_dict, snapshot_date) where pricing_dict is a copy of
+        _MODEL_PRICING with any valid settings overrides applied.
+
+    Layering: settings model_pricing entries override the snapshot, per model.
+    Malformed or non-numeric entries are silently skipped (R5 additive safety).
+    The snapshot_date is always _PRICING_SNAPSHOT_DATE regardless of overrides.
+    Privacy: only numeric prices and string model names are ever stored.
+    """
+    import copy as _copy
+    pricing = _copy.deepcopy(_MODEL_PRICING)
+    model_pricing = settings.get("model_pricing") if isinstance(settings, dict) else None
+    if isinstance(model_pricing, dict):
+        for model, entry in model_pricing.items():
+            if not isinstance(entry, dict):
+                continue  # skip malformed entries
+            in_p = entry.get("input_per_mtok")
+            out_p = entry.get("output_per_mtok")
+            if not isinstance(in_p, (int, float)) or isinstance(in_p, bool):
+                continue  # non-numeric — silently skip
+            if not isinstance(out_p, (int, float)) or isinstance(out_p, bool):
+                continue  # non-numeric — silently skip
+            pricing[model] = {"input_per_mtok": float(in_p), "output_per_mtok": float(out_p)}
+    return pricing, _PRICING_SNAPSHOT_DATE
+
+
+def _cwd_slug(project_dir):
+    """Convert a project directory absolute path to a Claude Code cwd slug.
+
+    The cwd slug format used in ~/.claude/projects/ replaces '/' with '-'
+    and strips a leading '-'. Example: '/Users/bob/myapp' -> 'Users-bob-myapp'.
+
+    Privacy: returns a path-derived string only — no content, no credentials.
+    """
+    slug = project_dir.replace("/", "-")
+    if slug.startswith("-"):
+        slug = slug[1:]
+    return slug
+
+
+def _read_transcript_tokens(transcript_root, cwd_slug, started_at=None, ended_at=None):
+    """Read token counts from Claude Code JSONL transcript files.
+
+    Scans *.jsonl files in transcript_root/<cwd_slug>/ and accumulates
+    message.usage.input_tokens and message.usage.output_tokens (integers only).
+    Also tracks the last non-None message.model seen.
+
+    Privacy guarantee (design.md:50): reads ONLY integer token counts and
+    the model name string. Never reads message.content, prompt text, CV
+    content, or response body. Returns ONLY (int, int, str|None).
+
+    Args:
+        transcript_root (str): path to the Claude Code projects root
+            (injectable — tests NEVER use the real ~/.claude path).
+        cwd_slug (str): cwd slug for the project (e.g. 'Users-bob-myapp').
+        started_at (str|None): ISO-8601 start time for filtering (not yet used).
+        ended_at (str|None): ISO-8601 end time for filtering (not yet used).
+
+    Returns:
+        (total_in, total_out, model_name_or_None)
+        Returns (0, 0, None) when the transcript directory does not exist
+        (auto-detect: directory presence signals whether Claude Code path applies).
+    """
+    import glob as _glob
+    transcript_dir = os.path.join(transcript_root, cwd_slug)
+    if not os.path.isdir(transcript_dir):
+        return (0, 0, None)
+
+    total_in = 0
+    total_out = 0
+    last_model = None
+
+    for jsonl_path in sorted(_glob.glob(os.path.join(transcript_dir, "*.jsonl"))):
+        try:
+            with open(jsonl_path, "r", encoding="utf-8") as fh:
+                for raw_line in fh:
+                    try:
+                        obj = json.loads(raw_line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue  # corrupt line — skip
+                    message = obj.get("message")
+                    if not isinstance(message, dict):
+                        continue
+                    usage = message.get("usage")
+                    if not isinstance(usage, dict):
+                        continue
+                    # Privacy: ONLY read integer token counts
+                    in_tok = usage.get("input_tokens", 0)
+                    out_tok = usage.get("output_tokens", 0)
+                    if isinstance(in_tok, int) and not isinstance(in_tok, bool):
+                        total_in += in_tok
+                    if isinstance(out_tok, int) and not isinstance(out_tok, bool):
+                        total_out += out_tok
+                    # Track last non-None model name
+                    model_name = message.get("model")
+                    if model_name is not None:
+                        last_model = model_name
+        except OSError:
+            continue  # unreadable file — skip
+
+    return (total_in, total_out, last_model)
+
+
+def _derive_cost(tokens_in, tokens_out, model, pricing):
+    """Compute derived cost in USD from token counts and pricing table.
+
+    Args:
+        tokens_in (int|None): input token count.
+        tokens_out (int|None): output token count.
+        model (str|None): model name (e.g. 'claude-opus-4-8').
+        pricing (dict): pricing dict from _resolve_pricing.
+
+    Returns:
+        float: derived cost in USD, or None if model is unknown or tokens are None.
+
+    Cost is ALWAYS derived (tokens x pricing) — never self-reported.
+    Unknown model returns None; caller labels cost_basis accordingly.
+    """
+    if tokens_in is None or tokens_out is None:
+        return None
+    if model not in pricing:
+        return None
+    entry = pricing[model]
+    return (tokens_in / 1_000_000) * entry["input_per_mtok"]          + (tokens_out / 1_000_000) * entry["output_per_mtok"]
 
 
 def _cmd_settings_read(args):
@@ -954,6 +1294,9 @@ def _cmd_settings_read(args):
         for key in _SETTINGS_DEFAULTS:
             if key in file_settings:
                 resolved[key] = file_settings[key]
+        # MAR-38: pass through model_pricing if present (runtime-read-only; no schema file, DEV-1)
+        if "model_pricing" in file_settings:
+            resolved["model_pricing"] = file_settings["model_pricing"]
 
     sys.stdout.write(json.dumps(resolved, indent=2, ensure_ascii=False) + "\n")
 
