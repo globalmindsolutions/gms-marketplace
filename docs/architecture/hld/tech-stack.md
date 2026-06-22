@@ -2,7 +2,7 @@
 
 | Layer | Technology | Why |
 |-------|------------|-----|
-| acs Skills (16) | Markdown SKILL.md, Claude Code plugin skill format | acs coordinator protocols; user-invocable as `/acs:<name>` (16 skills; tabp has 1 skill — screen-cvs — via Cowork, counted separately (the /tabp:usage skill is MAR-39 scope, not yet shipped)) |
+| acs Skills (16) | Markdown SKILL.md, Claude Code plugin skill format | acs coordinator protocols; user-invocable as `/acs:<name>` (16 skills; tabp has 2 skills (screen-cvs, /tabp:usage) via Cowork, counted separately) |
 | Subagents (27) | Markdown agent definitions | Separate contexts per reflection phase; tool allowlists in frontmatter |
 | Hooks & helpers | **Python ≥ 3.9, stdlib only** | Deterministic gating/persistence with zero consumer-machine installs |
 | State | JSON (pretty-printed, atomic writes), JSON Schema 2020-12 | Human-auditable, machine-validated |

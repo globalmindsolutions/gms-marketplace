@@ -278,3 +278,88 @@ This invariant is enforced in the aggregation loop and tested by
 | `plugins/tabp/schemas/run.schema.json` | JSON Schema Draft 2020-12 | WIDENED `usage.usage_source` enum to four values; ADDED optional `usage.cost_basis` field |
 | `plugins/tabp/schemas/history.schema.json` | JSON Schema Draft 2020-12 | WIDENED `runs[].usage_source` enum to four values |
 | `docs/adr/0026-tabp-hybrid-cost-sourcing.md` | ADR | NEW — records D3a (transcript-actuals) and D3b (dated snapshot pricing + settings override) |
+
+---
+
+## Feature area: tabp usage skill (MAR-39)
+
+### /tabp:usage skill — Show cost, time, and token usage for screening runs
+
+The tabp plugin ships a second skill, `/tabp:usage`, as a thin presentation layer
+over the `usage-read` aggregation that MAR-38 delivered. MAR-39 adds no new
+aggregation logic, no new Python production code, and no changes to the helper
+or schemas.
+
+The skill lives at `plugins/tabp/skills/usage/SKILL.md` and is auto-discovered
+by the runtime (skills auto-discover from `skills/<name>/SKILL.md`; no explicit
+`skills` array in `plugin.json` is required).
+
+#### Acceptance criteria (shipped — MAR-39 spec 01)
+
+- **AC-1**: A new `/tabp:usage` skill exists at `plugins/tabp/skills/usage/SKILL.md`
+  with frontmatter (`name: usage` and a `description` that triggers on
+  usage/cost/tokens/spend requests), instructing the coordinator to invoke
+  `python3 plugins/tabp/helpers/tabp_helper.py usage-read --project-dir <project-folder>
+  [--run-id <id>|all]` and render the result. The skill is registered via
+  auto-discovery (no `skills` array in `plugin.json`).
+
+- **AC-2**: The skill renders BOTH per-run and aggregate TOTALS for cost (USD),
+  time (`duration_seconds`), and tokens (in/out), surfacing `usage_source`,
+  `cost_basis`, and `pricing_snapshot_date` so a derived cost is clearly labeled
+  as an estimate and never presented as an actual billed amount.
+
+- **AC-3**: Honest degradation: when usage data is unavailable
+  (`usage_source="unavailable"`, or the helper/Bash is unavailable), the skill
+  renders "—" for null fields, presents the `usage_note` from the helper, and
+  never fabricates cost or token figures.
+
+- **AC-4**: Documentation: a new `docs/architecture/lld/flows/tabp-usage-read.md`
+  (Mermaid sequence diagram for the read flow) is added;
+  `docs/architecture/hld/c4-container.md` and `docs/architecture/hld/tech-stack.md`
+  skill count updated 1→2; `plugins/tabp/README.md` documents the new skill with
+  a `### usage` subsection.
+
+- **AC-5**: Namespace clean (see AC-6 contract at `docs/requirements/tabp.md:32-35`):
+  no foreign namespace prefix, no foreign state-path token, no foreign library
+  import appears in the new skill or any changed tabp artifact. All files stay
+  within the tabp namespace. Structural tests in
+  `tests/tabp/test_tabp_usage_skill.py` assert file existence, required
+  frontmatter/sections, and the namespace guard. The full suite remains green
+  (90% line-coverage target vacuously satisfied — no new executable Python added).
+
+#### Presentation-only scope
+
+MAR-39 is presentation only. It consumes the `usage-read` aggregation
+(shipped in MAR-38) without modification:
+
+- **No changes** to `tabp_helper.py`, `contracts.md`, `plugin.json`, `data-model.md`,
+  or `plugins/tabp/schemas/`.
+- **No new aggregation logic** — the skill renders the JSON output of
+  `tabp_helper.py usage-read` as-is.
+- **No e2e test flows** required — the skill is a coordinator-only read path
+  with no interactive state changes; asserted at the structural level only.
+
+#### Cost-transparency NFR
+
+Any cost figure where `cost_basis="estimate"` must be labeled as an estimate
+and never presented as an actual charge. The `pricing_snapshot_date` must be
+surfaced so the reader knows which pricing snapshot was used. This is enforced
+by Step 3 (Honesty rule) in `plugins/tabp/skills/usage/SKILL.md`.
+
+#### Honest-degradation NFR
+
+When usage data is unavailable for a run, the skill renders "—" for null
+token/cost fields and displays the `usage_note`. It fabricates nothing. When
+the helper/Bash is entirely unavailable, the skill states that usage data is
+not accessible and fabricates nothing.
+
+#### Contract surface (MAR-39 delivery)
+
+| File | Kind | Change |
+|---|---|---|
+| `plugins/tabp/skills/usage/SKILL.md` | Coordinator protocol (SKILL.md) | NEW — /tabp:usage skill with frontmatter, usage-read invocation, per-run + totals rendering, honesty rule, degradation path, guardrails |
+| `docs/architecture/lld/flows/tabp-usage-read.md` | LLD flow doc (Mermaid sequence) | NEW — /tabp:usage read flow with step annotations |
+| `docs/architecture/hld/c4-container.md` | HLD C4 container diagram | EDIT line 13: `tabp_skills` skill count 1→2 (added /tabp:usage) |
+| `docs/architecture/hld/tech-stack.md` | HLD tech-stack table | EDIT line 5: skill count 1→2; removed "not yet shipped" clause |
+| `plugins/tabp/README.md` | Plugin README | EDIT: added `### usage` subsection under `## Skills`; refreshed "usage stubs" → "usage aggregation" |
+| `tests/tabp/test_tabp_usage_skill.py` | Structural test module (stdlib unittest) | NEW — TU-01..TU-30 asserting file presence, frontmatter, invocation markers, rendering markers, honesty/degradation, namespace guard |
