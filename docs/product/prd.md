@@ -17,8 +17,13 @@ discoverability, and consistent quality across all plugins.
 
 The **acs** feature delivers: every software change — from product definition to
 merged PR — driven through one auditable, resumable, hook-enforced agentic
-pipeline, on any consumer repository, with the human owning exactly two things:
-requirement decisions and the merge button.
+pipeline, on any consumer repository, with the human owning **requirement
+decisions**. Merge is **gated, not ungoverned**: `/acs:merge-pr` is invocable by the
+user *or* an authorized agent/model, and a merge happens only when the readiness gate
+(CI, approvals, conflicts, protections) **and** the repo's branch protection pass, by
+whoever invokes — failures are report-only and every attempt is audited;
+agent-invoked merges additionally require an **approved** review. `/acs:ship` still
+deliberately stops at create-pr so a reviewer sees the PR before merge.
 
 ## Problem
 
@@ -227,3 +232,15 @@ feature section above replaces the skills-only framing with the fuller-plugin sh
 The tabp-upgrade epic (a separate future ticket) owns the design and build of the new
 capabilities; the MECHANISM and Cowork-runtime verification are deferred to that
 epic's design phase.
+
+**Reversal note (MAR-42):** this amendment reverses the prior Vision guardrail that the
+human owns "the merge button" — i.e. that `/acs:merge-pr` is invocable only by a human. Per
+MAR-42 (design approved; **ADR-0027** — "merge-pr is agent/model-invocable; readiness gate +
+branch protection are the merge brakes"), `/acs:merge-pr` is now agent/model-invocable. The
+human still owns **requirement decisions**. The safety guarantee shifts from "a human must
+press merge" to "merge happens only when the readiness gate (CI/approvals/conflicts/
+protections) and the repo's branch protection pass, by whoever invokes; failures are
+report-only; every attempt is audited," with agent-invoked merges additionally requiring an
+approved review (m6). `/acs:ship` still deliberately stops at create-pr (review separation, not
+a merge prohibition). This is a product-level Vision change only; the detailed `/acs:merge-pr`
+behavior lives in `docs/requirements/skills.md` and the skill prose and is delivered by MAR-42.
