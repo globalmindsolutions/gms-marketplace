@@ -15,6 +15,18 @@ the notes.
 
 ## [Unreleased]
 
+### Changed
+
+- **`/acs:merge-pr` is now agent/model-invocable (MAR-42).** Removed
+  `disable-model-invocation` from the skill; the readiness gate (CI, approvals,
+  conflicts, protections) and the repo's branch protection are the merge brakes,
+  by whoever invokes. Because invocation source (agent vs user) is not reliably
+  detectable, an **approving review is now required for every merge** (mitigation
+  m6, the require-APPROVED-for-all fallback; see
+  [ADR 0027](../../docs/adr/0027-merge-pr-agent-invocable.md)) — including on
+  repos that require no review. `/acs:ship` still stops at create-pr. Authorised
+  by the PRD Vision amendment in MAR-45.
+
 ### Fixed
 
 - **`acs-conventions` workflow no longer cancels its own required check (MAR-43).**
