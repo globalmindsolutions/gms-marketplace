@@ -68,7 +68,7 @@ requirements.
 `/create-ticket` → `/create-design` (when the ticket needs design) →
 `/create-spec` → `/code` → `/create-pr` in sequence, pausing for user
 clarifications wherever a skill requires them, and MUST **stop before
-`/merge-pr`** — merging stays a user action.
+`/merge-pr`** — the PR is landed separately after review.
 
 - Every hook gate still applies: `/ship` adds orchestration only and MUST NOT
   bypass pre/post hooks.

@@ -344,5 +344,5 @@ succeeded. Same labels, same order, `none` where empty; under /acs:ship your fin
 - **Findings**: <open findings / clarifications, or "none">
 - **Artifacts**: <partition files, repo paths, branch, PR URL>
 - **Metrics**: iterations <n>/3 · <wall time> · ~<tokens in/out> · ~$<cost_usd>
-- **Next**: review the PR yourself, then `/acs:merge-pr <ticket-id>` — merging stays a user action
+- **Next**: review the PR, then `/acs:merge-pr <ticket-id>` — a separate, reviewed step
 ```
