@@ -2855,3 +2855,346 @@ class TestUsageReadAggregation(unittest.TestCase):
             self._restore_streams()
         result = json.loads(out.getvalue())
         self.assertNotIn("model_pricing", result)
+
+
+# ---------------------------------------------------------------------------
+# Class TestRuntimeFlag — spec 01 (MAR-40): --runtime flag + runtime resolution
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeFlag(unittest.TestCase):
+    """Spec 01 (MAR-40, AC-2 primary / AC-1 / AC-9) — the --runtime flag,
+    _resolve_runtime, and the usage-read transcript-source override.
+
+    All fixture .tabp/ dirs use tempfile.mkdtemp(). Transcript roots are
+    injected via parameter or the TABP_TRANSCRIPT_ROOT env var — the real
+    ~/.claude path is NEVER read (test harness constraint).
+
+    Tests (each mapped to the spec 01 Test plan item / AC):
+    1. Explicit --runtime claude-code honored over auto-detect          (AC-2)
+    2. Explicit --runtime cowork honored over auto-detect               (AC-2)
+    3. Auto-detect: transcript dir present -> "claude-code"             (AC-2)
+    4. Auto-detect: transcript dir absent  -> "cowork"                  (AC-2)
+    5. Invalid --runtime bogus exits non-zero (argparse choices)        (AC-2)
+    6. No-git .tabp/ resolution under a plain mkdtemp() dir             (AC-1)
+    7. usage-read override: --runtime cowork suppresses transcript read (AC-2)
+    8. Absent-flag back-compat: usage-read + run-finalize unchanged     (AC-2)
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._project_dir = self._tmpdir
+        self._tabp_dir = os.path.join(self._project_dir, ".tabp")
+        os.makedirs(self._tabp_dir, exist_ok=True)
+        self._orig_stdout = sys.stdout
+        self._orig_stderr = sys.stderr
+        self._orig_env = os.environ.copy()
+
+    def tearDown(self):
+        import shutil
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+        for k in list(os.environ.keys()):
+            if k not in self._orig_env:
+                del os.environ[k]
+        for k, v in self._orig_env.items():
+            os.environ[k] = v
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _capture(self):
+        import io
+        out = io.StringIO()
+        err = io.StringIO()
+        sys.stdout = out
+        sys.stderr = err
+        return out, err
+
+    def _restore_streams(self):
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+
+    def _make_transcript_dir(self, cwd_slug, lines):
+        """Create a temp transcript dir with a session.jsonl; return its root."""
+        root = os.path.join(self._tmpdir, "transcripts")
+        slug_dir = os.path.join(root, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        with open(os.path.join(slug_dir, "session.jsonl"), "w", encoding="utf-8") as fh:
+            for line in lines:
+                fh.write(json.dumps(line) + "\n")
+        return root
+
+    def _write_history(self, runs):
+        history_path = os.path.join(self._tabp_dir, "history.json")
+        tabp_helper._write_json(history_path, {"runs": runs})
+
+    def _write_run_json(self, run_id, run_data):
+        run_dir = os.path.join(self._tabp_dir, "runs", run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        tabp_helper._write_json(os.path.join(run_dir, "run.json"), run_data)
+
+    def _make_run_record(self, run_id, status="completed", usage_source="unavailable",
+                         tokens_in=None, tokens_out=None, cost_basis=None):
+        record = {
+            "run_id": run_id,
+            "skill": "screen-cvs",
+            "started_at": "2026-06-20T09:00:00Z",
+            "ended_at": "2026-06-20T09:30:00Z",
+            "status": status,
+            "stop_reason": None,
+            "state_write_mode": "helper",
+            "usage": {
+                "usage_source": usage_source,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost_usd": None,
+                "duration_seconds": 1800,
+            },
+            "candidates_screened": 1,
+            "jd_slug": "test-role",
+        }
+        if cost_basis is not None:
+            record["usage"]["cost_basis"] = cost_basis
+        return record
+
+    def _make_history_entry(self, run_id, status="completed", usage_source="unavailable"):
+        return {
+            "run_id": run_id,
+            "skill": "screen-cvs",
+            "started_at": "2026-06-20T09:00:00Z",
+            "ended_at": "2026-06-20T09:30:00Z",
+            "status": status,
+            "candidates_screened": 1,
+            "duration_seconds": 1800,
+            "usage_source": usage_source,
+        }
+
+    def _call_usage_read(self, extra_args=None):
+        args = ["--project-dir", self._project_dir]
+        if extra_args:
+            args.extend(extra_args)
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_usage_read(args)
+        finally:
+            self._restore_streams()
+        return json.loads(out.getvalue())
+
+    # --- 1. Explicit --runtime claude-code wins over auto-detect (AC-2) -----
+    def test_explicit_claude_code_wins_when_transcript_absent(self):
+        """_resolve_runtime('claude-code', dir, root) -> 'claude-code' even
+        when no transcript dir exists for the slug (explicit flag wins)."""
+        empty_root = os.path.join(self._tmpdir, "no-transcripts")
+        os.makedirs(empty_root, exist_ok=True)
+        result = tabp_helper._resolve_runtime(
+            "claude-code", self._project_dir, transcript_root=empty_root
+        )
+        self.assertEqual(result, "claude-code")
+
+    # --- 2. Explicit --runtime cowork wins over auto-detect (AC-2) ----------
+    def test_explicit_cowork_wins_when_transcript_present(self):
+        """_resolve_runtime('cowork', dir, root) -> 'cowork' even when a
+        transcript dir for the slug IS present (explicit flag wins)."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 10, "output_tokens": 5},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        result = tabp_helper._resolve_runtime(
+            "cowork", self._project_dir, transcript_root=root
+        )
+        self.assertEqual(result, "cowork")
+
+    # --- 3. Auto-detect: transcript dir present -> claude-code (AC-2) -------
+    def test_autodetect_present_returns_claude_code(self):
+        """Flag absent (None) and <root>/<slug>/ exists -> 'claude-code'."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 1, "output_tokens": 1},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        result = tabp_helper._resolve_runtime(
+            None, self._project_dir, transcript_root=root
+        )
+        self.assertEqual(result, "claude-code")
+
+    # --- 4. Auto-detect: transcript dir absent -> cowork (AC-2) -------------
+    def test_autodetect_absent_returns_cowork(self):
+        """Flag absent (None) and no transcript dir for the slug -> 'cowork'."""
+        empty_root = os.path.join(self._tmpdir, "empty-root")
+        os.makedirs(empty_root, exist_ok=True)
+        result = tabp_helper._resolve_runtime(
+            None, self._project_dir, transcript_root=empty_root
+        )
+        self.assertEqual(result, "cowork")
+
+    # --- 5. Invalid --runtime value rejected by argparse (AC-2) -------------
+    def test_invalid_runtime_value_rejected(self):
+        """usage-read --runtime bogus exits non-zero (argparse choices)."""
+        out, err = self._capture()
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                tabp_helper._cmd_usage_read([
+                    "--project-dir", self._project_dir,
+                    "--runtime", "bogus",
+                ])
+        finally:
+            self._restore_streams()
+        self.assertNotEqual(ctx.exception.code, 0)
+
+    # --- 6. No-git .tabp/ resolution under a plain mkdtemp() dir (AC-1) -----
+    def test_no_git_tabp_resolution_run_start(self):
+        """run-start under a plain (non-git) tempfile.mkdtemp() dir writes the
+        .tabp/ run tree with no git call and no error (AC-1, D4 no-git)."""
+        plain_dir = tempfile.mkdtemp()
+        try:
+            out, err = self._capture()
+            try:
+                tabp_helper._cmd_run_start([
+                    "--project-dir", plain_dir,
+                    "--skill", "screen-cvs",
+                    "--jd-slug", "test-role",
+                ])
+            finally:
+                self._restore_streams()
+            run_id = out.getvalue().strip()
+            self.assertTrue(run_id.startswith("run-"))
+            tabp_dir = os.path.join(plain_dir, ".tabp")
+            self.assertTrue(os.path.isdir(tabp_dir), ".tabp/ must exist")
+            self.assertTrue(
+                os.path.isfile(os.path.join(tabp_dir, "runs", run_id, "run.json")),
+                "run.json must be written under .tabp/runs/<run_id>/"
+            )
+            # No git repo was created or required.
+            self.assertFalse(os.path.isdir(os.path.join(plain_dir, ".git")))
+            # _tabp_dir_from_project performs no git call — pure path join.
+            self.assertEqual(
+                tabp_helper._tabp_dir_from_project(plain_dir),
+                os.path.join(plain_dir, ".tabp")
+            )
+        finally:
+            import shutil
+            shutil.rmtree(plain_dir, ignore_errors=True)
+
+    # --- 7. usage-read override: --runtime cowork suppresses transcript -----
+    def test_usage_read_cowork_override_suppresses_transcript(self):
+        """A run stored as usage_source='claude-code' with a populated
+        transcript dir: --runtime cowork falls back to run.json tokens, while
+        --runtime claude-code reads transcript actuals; the two differ."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 99999, "output_tokens": 88888},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        os.environ["TABP_TRANSCRIPT_ROOT"] = root
+
+        run_id = "run-override"
+        self._write_run_json(run_id, self._make_run_record(
+            run_id, usage_source="claude-code",
+            tokens_in=111, tokens_out=222, cost_basis="estimate"
+        ))
+        self._write_history([self._make_history_entry(run_id, usage_source="claude-code")])
+
+        cc_result = self._call_usage_read(["--runtime", "claude-code"])
+        cc_row = cc_result["runs"][0]
+        # claude-code: transcript actuals win
+        self.assertEqual(cc_row["tokens_in"], 99999)
+        self.assertEqual(cc_row["tokens_out"], 88888)
+
+        cowork_result = self._call_usage_read(["--runtime", "cowork"])
+        cw_row = cowork_result["runs"][0]
+        # cowork override: transcript read suppressed, run.json tokens used
+        self.assertEqual(cw_row["tokens_in"], 111)
+        self.assertEqual(cw_row["tokens_out"], 222)
+        # cost_basis stays 'estimate' (still derived; no relabel to actual)
+        self.assertEqual(cw_row["cost_basis"], "estimate")
+
+        self.assertNotEqual(
+            (cc_row["tokens_in"], cc_row["tokens_out"]),
+            (cw_row["tokens_in"], cw_row["tokens_out"]),
+            "transcript-read vs override must produce different token counts"
+        )
+
+    # --- 8. Absent-flag back-compat: byte-for-byte unchanged (AC-2) ---------
+    def test_absent_flag_usage_read_backcompat(self):
+        """usage-read with NO --runtime auto-detects today's behavior:
+        transcript dir present -> reads actuals (== explicit claude-code)."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 4321, "output_tokens": 1234},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        os.environ["TABP_TRANSCRIPT_ROOT"] = root
+
+        run_id = "run-backcompat"
+        self._write_run_json(run_id, self._make_run_record(
+            run_id, usage_source="claude-code",
+            tokens_in=5, tokens_out=6, cost_basis="estimate"
+        ))
+        self._write_history([self._make_history_entry(run_id, usage_source="claude-code")])
+
+        absent = self._call_usage_read()  # no --runtime
+        explicit = self._call_usage_read(["--runtime", "claude-code"])
+        self.assertEqual(absent["runs"], explicit["runs"],
+                         "absent flag must reproduce auto-detect == claude-code path")
+        # transcript actuals are read (today's behavior)
+        self.assertEqual(absent["runs"][0]["tokens_in"], 4321)
+        self.assertEqual(absent["runs"][0]["tokens_out"], 1234)
+
+    def test_absent_flag_run_finalize_backcompat(self):
+        """run-finalize with NO --runtime behaves exactly as before:
+        writes status/usage_source/tokens to run.json unchanged."""
+        run_id = "run-finalize-bc"
+        self._write_run_json(run_id, self._make_run_record(
+            run_id, status="in_progress", usage_source="unavailable"
+        ))
+        self._write_history([self._make_history_entry(
+            run_id, status="in_progress", usage_source="unavailable")])
+
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_run_finalize([
+                "--project-dir", self._project_dir,
+                "--run-id", run_id,
+                "--status", "completed",
+                "--usage-source", "estimate",
+                "--tokens-in", "700",
+                "--tokens-out", "300",
+                "--cost-basis", "estimate",
+            ])
+        finally:
+            self._restore_streams()
+
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        record = tabp_helper._read_json(run_path)
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["usage"]["usage_source"], "estimate")
+        self.assertEqual(record["usage"]["tokens_in"], 700)
+        self.assertEqual(record["usage"]["tokens_out"], 300)
+        # No new runtime field persisted (accept-and-ignore for state subcommands).
+        self.assertNotIn("runtime", record["usage"])
+        self.assertNotIn("runtime", record)
+
+
+    # --- 9. transcript_root=None default uses TABP_TRANSCRIPT_ROOT env -------
+    def test_resolve_runtime_default_root_from_env(self):
+        """_resolve_runtime(None, dir) with transcript_root omitted resolves the
+        root from TABP_TRANSCRIPT_ROOT (never the real ~/.claude path)."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 1, "output_tokens": 1},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        os.environ["TABP_TRANSCRIPT_ROOT"] = root
+        # transcript_root omitted -> default-resolution branch is exercised.
+        self.assertEqual(
+            tabp_helper._resolve_runtime(None, self._project_dir),
+            "claude-code"
+        )
+        # Same project under an env root with no slug dir -> cowork.
+        empty_root = os.path.join(self._tmpdir, "env-empty")
+        os.makedirs(empty_root, exist_ok=True)
+        os.environ["TABP_TRANSCRIPT_ROOT"] = empty_root
+        self.assertEqual(
+            tabp_helper._resolve_runtime(None, self._project_dir),
+            "cowork"
+        )

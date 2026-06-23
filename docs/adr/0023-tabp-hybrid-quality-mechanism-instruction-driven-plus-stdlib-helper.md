@@ -64,3 +64,35 @@ The helper is:
   disciplined": a SKILL.md error that skips a helper call is not fail-closed.
   Mitigation: the self-verification pass re-reads `.tabp/` state before
   presenting (spec 03, MAR-2); if state is absent, verification fails.
+
+## Amendment (MAR-40, 2026-06-22)
+
+**Scope extended to dual-runtime (Cowork + Claude Code).** The original Accepted
+decision above (hybrid instruction-driven orchestration + tabp-namespaced
+stdlib-Python helper) is preserved unchanged and is only extended here. As of
+MAR-40, the tabp plugin runs under both Cowork *and* Claude Code, not Cowork
+only (the original Context line "runs in the Cowork runtime — not in Claude
+Code" reflects the pre-MAR-40 scope and is retained as the historical record).
+
+What changes:
+
+- **Runtime selection.** The runtime is selected by an explicit
+  `--runtime {cowork,claude-code}` flag on the coordinator-invoked
+  `tabp_helper.py` subcommands, with an auto-detect fallback when the flag is
+  absent. The detection decision is recorded separately in **ADR-0027**
+  (dual-runtime detection).
+- **Mechanism unchanged.** The hybrid mechanism itself is unchanged across both
+  runtimes: instruction-driven orchestration for judgment and coordination; the
+  stdlib-only helper for the deterministic `.tabp/` operations. The Option C
+  rationale (Cowork hook support unverified) still holds — no `PreToolUse` gate
+  is introduced for either runtime.
+- **Degradation preserved.** The Bash-denied degradation path (`state_write_mode:
+  "instructed"`) still applies under either runtime; only the actor that may deny
+  Bash is generalized from "Cowork" to "the runtime".
+
+This amendment extends the decision; it does not rewrite it. The
+tabp-namespace constraint stated in the Decision section above (the rule that no
+foreign-namespace prefix, no foreign state-path token, and no foreign-library
+import appear in the helper — constraint AC-6) continues to bind all MAR-40
+changes. See also ADR-0024 (state location, MAR-40 amendment) and ADR-0027
+(dual-runtime detection).

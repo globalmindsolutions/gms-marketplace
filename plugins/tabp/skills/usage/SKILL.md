@@ -33,7 +33,7 @@ python3 plugins/tabp/helpers/tabp_helper.py usage-read \
 ```
 
 - When `--run-id` is omitted, all runs in the project are returned.
-- `<project-folder>` is the recruiter's Cowork project folder (the folder that
+- `<project-folder>` is the recruiter's project folder (the folder that
   contains the `.tabp/` state directory).
 - Capture the JSON output (printed to stdout) for rendering in Step 1.
 
