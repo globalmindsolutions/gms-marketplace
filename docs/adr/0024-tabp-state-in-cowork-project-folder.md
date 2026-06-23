@@ -66,3 +66,45 @@ state root. No out-of-repo workspace path is needed or configured.
 - If a future use case introduces tabp runs across multiple concurrent worktrees
   of the same git repo (unlikely given Cowork's single-project model), this
   decision must be revisited and a new ADR created.
+
+## Amendment (MAR-40, 2026-06-22)
+
+**Claude Code cwd-as-project-dir convention added alongside the Cowork rule.**
+The original Accepted decision above — store all tabp `.tabp/` state and
+`tabp settings.json` in the project folder at `<project-dir>/.tabp/`, deriving
+the state root from `--project-dir` — is preserved unchanged. The Cowork
+rationale above (no git-worktree collision; PRD-mandated co-location with
+inputs; isolation via separate project folders) is retained in full. This
+amendment adds the Claude Code case alongside it; it does not delete the Cowork
+rationale.
+
+What changes for Claude Code:
+
+- **cwd as `--project-dir`.** Under Claude Code the coordinator passes the
+  session's current working directory as `--project-dir <session-cwd>`. The
+  state root is `<session-cwd>/.tabp/`, computed exactly as in the original
+  decision — `--project-dir` remains the single source of the state path.
+- **No git dependency.** The helper derives `<project-dir>/.tabp/` via
+  `_tabp_dir_from_project` with NO git call and NO git assumption. The Claude
+  Code project folder therefore **need not be a git repo** (and, like a Cowork
+  project folder, is not required to be one). No out-of-repo workspace path is
+  introduced — ADR-0003's outside-repo rule still does not apply to tabp.
+- **`.gitignore` guidance.** When a Claude Code project folder *is* a git repo,
+  users are advised to exclude the tabp run state and settings from version
+  control so run history, evidence records, and local-path-referencing settings
+  are not accidentally committed:
+
+  ```
+  # .gitignore — add to <project>/.gitignore
+  .tabp/
+  tabp settings.json
+  ```
+
+  This guidance is documented for consumers in `plugins/tabp/README.md`
+  (cross-reference: the README "Runtimes & project folder" / `.gitignore`
+  guidance subsection).
+
+Runtime selection itself (the explicit `--runtime` flag and auto-detect
+fallback) is recorded in ADR-0027 (dual-runtime detection); the dual-runtime
+scope of the hybrid mechanism is recorded in ADR-0023's MAR-40 amendment. This
+amendment extends the state-location decision; it does not rewrite it.

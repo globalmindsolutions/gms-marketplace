@@ -576,11 +576,73 @@ def _run_dir(tabp_dir, run_id):
     return os.path.join(tabp_dir, "runs", run_id)
 
 
+# ---------------------------------------------------------------------------
+# Runtime flag + resolution (MAR-40, design D4)
+# ---------------------------------------------------------------------------
+#
+# Dual-runtime support: the coordinator passes --runtime when it knows the
+# runtime ("cowork" or "claude-code"); when absent the helper auto-detects from
+# the presence of the Claude Code transcript directory for the project's cwd
+# slug. The flag is accepted on ALL nine coordinator-invoked subcommands (design
+# D4 literal "every subcommand gains the flag"); only usage-read consumes it
+# behaviorally (it overrides transcript-source selection). For the other eight
+# state subcommands the flag is accept-and-record: parsed and accepted so the
+# uniform coordinator invocation works, but it changes no existing behavior and
+# is NOT persisted (no new run.json field). This is conformance, not dead code.
+
+
+def _add_runtime_arg(parser):
+    """Add the optional --runtime {cowork,claude-code} argument to a parser.
+
+    Single shared adder so all nine subcommand builders stay in lockstep
+    (avoids per-subcommand drift). default=None distinguishes "flag absent"
+    (auto-detect) from an explicit value. An invalid value is rejected by
+    argparse with a non-zero exit, matching every other choices= arg here.
+    """
+    parser.add_argument(
+        "--runtime", default=None, choices=["cowork", "claude-code"]
+    )
+
+
+def _resolve_runtime(explicit_runtime, project_dir, transcript_root=None):
+    """Resolve the effective runtime: explicit flag wins, else auto-detect.
+
+    Args:
+        explicit_runtime (str|None): the parsed --runtime value, or None when
+            the flag is absent.
+        project_dir (str): the project dir whose cwd slug is checked.
+        transcript_root (str|None): the Claude Code projects root; when None,
+            resolved the same way _cmd_usage_read does (TABP_TRANSCRIPT_ROOT env
+            override, else ~/.claude/projects). Injectable so tests never read
+            the real ~/.claude path.
+
+    Returns:
+        str: "cowork" or "claude-code".
+
+    Auto-detect reuses the MAR-38 directory-presence check (the same
+    os.path.isdir test _read_transcript_tokens performs): "claude-code" when
+    <transcript_root>/<cwd_slug>/ exists, else "cowork". No git call, no new
+    file read, no network.
+    """
+    if explicit_runtime:
+        return explicit_runtime
+    if transcript_root is None:
+        transcript_root = os.environ.get(
+            "TABP_TRANSCRIPT_ROOT",
+            os.path.expanduser("~/.claude/projects"),
+        )
+    cwd_slug = _cwd_slug(project_dir)
+    if os.path.isdir(os.path.join(transcript_root, cwd_slug)):
+        return "claude-code"
+    return "cowork"
+
+
 def _cmd_run_start(args):
     """run-start subcommand.
 
     Args: --project-dir <path> --skill <name> [--jd-slug <slug>]
           [--state-write-mode <helper|instructed>]
+          [--runtime <cowork|claude-code>]
 
     Allocates run_id = "run-" + _now_iso(), acquires lock, writes initial
     run.json (status=in_progress), appends summary to history.json.
@@ -589,6 +651,7 @@ def _cmd_run_start(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper run-start")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--skill", required=True)
     parser.add_argument("--jd-slug", default="")
     parser.add_argument("--state-write-mode", default="helper",
@@ -647,7 +710,7 @@ def _cmd_state_write(args):
     """state-write subcommand.
 
     Args: --project-dir <path> --run-id <id> --file <dest-path>
-          --data-file <json-file>
+          --data-file <json-file> [--runtime <cowork|claude-code>]
 
     Reads JSON from --data-file, validates with _validate_evidence, writes
     atomically to --file. Design ref: design.md:257, 759.
@@ -655,6 +718,7 @@ def _cmd_state_write(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper state-write")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--file", required=True, dest="dest_file")
     parser.add_argument("--data-file", required=True)
@@ -672,7 +736,7 @@ def _cmd_decision_write(args):
 
     Args: --project-dir <path> --run-id <id>
           --verification-passed <true|false>
-          [--verification-notes <text>]
+          [--verification-notes <text>] [--runtime <cowork|claude-code>]
 
     Writes decision.json with verification_passed, verification_notes,
     presented_at, sign_off=null. Validates with _validate_decision.
@@ -681,6 +745,7 @@ def _cmd_decision_write(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper decision-write")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--verification-passed", required=True)
     parser.add_argument("--verification-notes", default=None)
@@ -714,7 +779,7 @@ def _cmd_sign_off_write(args):
     """sign-off-write subcommand.
 
     Args: --project-dir <path> --run-id <id> --recruiter <name>
-          [--notes <text>]
+          [--notes <text>] [--runtime <cowork|claude-code>]
 
     Reads existing decision.json, populates sign_off block
     (recruiter, confirmed_at, optional notes), writes back atomically.
@@ -723,6 +788,7 @@ def _cmd_sign_off_write(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper sign-off-write")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--recruiter", required=True)
     parser.add_argument("--notes", default=None)
@@ -759,7 +825,7 @@ def _cmd_run_finalize(args):
           [--tokens-in <int>]
           [--tokens-out <int>]
           [--cost-basis <actual|estimate|unavailable>]
-          [--stop-reason <text>]
+          [--stop-reason <text>] [--runtime <cowork|claude-code>]
 
     Updates run.json (status, ended_at, optional fields), updates matching
     history entry, releases lock. Validates run.json with _validate_run.
@@ -769,6 +835,7 @@ def _cmd_run_finalize(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper run-finalize")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--status", required=True,
                         choices=["completed", "failed", "interrupted"])
@@ -838,7 +905,7 @@ def _cmd_run_finalize(args):
 def _cmd_run_status(args):
     """run-status subcommand.
 
-    Args: --project-dir <path>
+    Args: --project-dir <path> [--runtime <cowork|claude-code>]
 
     Reads history.json, finds latest entry with status=in_progress (i.e.
     runs[-1] if its status is in_progress). Prints resume context JSON to
@@ -849,6 +916,7 @@ def _cmd_run_status(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper run-status")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parsed = parser.parse_args(args)
 
     tabp_dir = _tabp_dir_from_project(parsed.project_dir)
@@ -887,6 +955,7 @@ def _cmd_validate(args):
 
     Args: --project-dir <path> --run-id <id>
           --type <run|evidence|decision|history|lock> --file <path>
+          [--runtime <cowork|claude-code>]
 
     Reads JSON from --file, runs _validate_record, prints {"ok": true} on
     success or exits non-zero with {"ok": false, "error": "<msg>"} on failure.
@@ -895,6 +964,7 @@ def _cmd_validate(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper validate")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--type", required=True, dest="record_type",
                         choices=["run", "evidence", "decision", "history", "lock"])
@@ -916,6 +986,11 @@ def _cmd_usage_read(args):
     """usage-read subcommand — real aggregation (MAR-38).
 
     Args: --project-dir <path> [--run-id <id>|all]
+          [--runtime <cowork|claude-code>]
+
+    MAR-40: --runtime overrides transcript-source selection — cowork
+    suppresses the Claude Code transcript read (falls back to run.json
+    tokens); claude-code / auto-detect prefers the transcript actuals.
 
     Reads history.json and per-run run.json records; aggregates token counts,
     cost, and candidate totals. Emits the documented output shape to stdout.
@@ -931,6 +1006,7 @@ def _cmd_usage_read(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper usage-read")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", default=None, dest="run_id")
     parsed = parser.parse_args(args)
 
@@ -967,6 +1043,16 @@ def _cmd_usage_read(args):
         os.path.expanduser("~/.claude/projects")
     )
     cwd_slug = _cwd_slug(project_dir)
+
+    # Step 4b: Resolve effective runtime (MAR-40 D4). Explicit --runtime
+    # wins; else auto-detect from transcript-dir presence. This OVERRIDES
+    # the per-run usage_source dispatch for claude-code-sourced runs only:
+    # --runtime cowork suppresses the transcript read (fall back to
+    # run.json-stored tokens), --runtime claude-code / auto-detect prefers
+    # the transcript path. cost_basis labeling is unchanged.
+    effective_runtime = _resolve_runtime(
+        parsed.runtime, project_dir, transcript_root
+    )
 
     # Step 5: Process each run
     runs_output = []
@@ -1006,15 +1092,24 @@ def _cmd_usage_read(args):
         run_note = ""
 
         if usage_source == "claude-code":
-            # Read actuals from Claude Code transcript (injectable root, privacy-safe)
-            t_in, t_out, model = _read_transcript_tokens(
-                transcript_root, cwd_slug, started_at, ended_at
-            )
+            # MAR-40 override: when the effective runtime is cowork, do NOT
+            # attempt the transcript read even for a claude-code-sourced run
+            # — treat it as if the transcript is unavailable and fall back to
+            # the run.json-stored tokens (same path as an absent transcript
+            # dir). claude-code / auto-detect prefers the transcript actuals.
+            if effective_runtime == "cowork":
+                t_in, t_out, model = 0, 0, None
+            else:
+                # Read actuals from Claude Code transcript (injectable root, privacy-safe)
+                t_in, t_out, model = _read_transcript_tokens(
+                    transcript_root, cwd_slug, started_at, ended_at
+                )
             if t_in > 0 or t_out > 0:
                 tokens_in = t_in
                 tokens_out = t_out
             else:
-                # Transcript dir absent or empty — fall back to run.json tokens
+                # Transcript dir absent or empty (or cowork override) — fall
+                # back to run.json tokens
                 tokens_in = usage.get("tokens_in")
                 tokens_out = usage.get("tokens_out")
                 model = None
@@ -1271,7 +1366,7 @@ def _derive_cost(tokens_in, tokens_out, model, pricing):
 def _cmd_settings_read(args):
     """settings-read subcommand.
 
-    Args: --project-dir <path>
+    Args: --project-dir <path> [--runtime <cowork|claude-code>]
 
     Resolves tabp settings from <project>/.tabp/settings.json layered over the
     documented defaults (_SETTINGS_DEFAULTS), and prints the resolved settings
@@ -1283,6 +1378,7 @@ def _cmd_settings_read(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper settings-read")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parsed = parser.parse_args(args)
 
     tabp_dir = _tabp_dir_from_project(parsed.project_dir)

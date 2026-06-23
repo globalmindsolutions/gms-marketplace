@@ -363,3 +363,101 @@ not accessible and fabricates nothing.
 | `docs/architecture/hld/tech-stack.md` | HLD tech-stack table | EDIT line 5: skill count 1→2; removed "not yet shipped" clause |
 | `plugins/tabp/README.md` | Plugin README | EDIT: added `### usage` subsection under `## Skills`; refreshed "usage stubs" → "usage aggregation" |
 | `tests/tabp/test_tabp_usage_skill.py` | Structural test module (stdlib unittest) | NEW — TU-01..TU-30 asserting file presence, frontmatter, invocation markers, rendering markers, honesty/degradation, namespace guard |
+
+---
+
+## Feature area: tabp dual-runtime (MAR-40)
+
+### Dual-runtime support (Claude Cowork + Claude Code)
+
+The tabp plugin runs under both the Claude Cowork runtime and the Claude Code
+runtime. State location and the helper contract are runtime-agnostic: every
+`tabp_helper.py` subcommand takes `--project-dir <project-folder>` and keeps all
+state under `<project-folder>/.tabp/`, regardless of runtime. This feature area
+records the behavior shipped by MAR-40 (parent epic MAR-36, design D4/D5).
+
+### Behavior-defining decisions and constraints
+
+**Runtime selection (`--runtime` flag).** Each coordinator-invoked
+`tabp_helper.py` subcommand accepts an optional `--runtime {cowork,claude-code}`
+flag. When the flag is present, the named runtime is used. When it is absent,
+the helper auto-detects the runtime by the presence of the per-session
+transcript directory (`~/.claude/projects/<cwd-slug>/`): present → `claude-code`,
+absent → `cowork`. An invalid `--runtime` value is rejected with a non-zero exit
+(argparse choices). The flag is deterministic and unit-tested; the transcript
+root is injectable for testing so tests never read the real home-directory path.
+
+**cwd-as-project-dir (Claude Code).** In Claude Code the coordinator passes the
+session's current working directory as `--project-dir <session-cwd>` and adds
+`--runtime claude-code`. The project folder **need not be a git repo** — the
+helper derives `<project-dir>/.tabp/` directly from `--project-dir` (via
+`_tabp_dir_from_project`) with no git assumption and no git call. In Cowork the
+coordinator passes the Cowork project folder; the state-location decision is
+unchanged from earlier behavior.
+
+**Back-compatibility.** When `--runtime` is absent, behavior is unchanged from
+the prior Cowork-only path (auto-detect resolves to `cowork` when no transcript
+directory is present). No `run.json`/`history.json` schema field is added by
+this feature; the `usage_source` enum (including the retained `"cowork"` value
+and the Cowork self-reported future-actuals hook) is unchanged.
+
+**`usage-read` runtime override.** For the `usage-read` subcommand the resolved
+runtime gates whether the Claude Code transcript actuals are read:
+`--runtime claude-code` (or auto-detect to `claude-code`) reads transcript
+tokens when available; `--runtime cowork` suppresses the transcript read and
+falls back to the per-run tokens recorded in `run.json`.
+
+**`.gitignore` guidance.** For Claude Code users whose project folder is a git
+repo, the README documents excluding `.tabp/` run state and `tabp settings.json`
+from version control so run history, evidence records, and local-path-referencing
+settings are not accidentally committed.
+
+**Namespace constraint (epic AC-6 / MAR-40 AC-9).** All MAR-40 changes — the
+helper flag code, the reworded skill/README/`plugin.json` prose, the amended
+ADRs, the new ADR-0027, and the architecture-doc updates — stay within the tabp
+namespace. No foreign-namespace prefix token, no foreign state-path token, and
+no foreign-library import is introduced (consistent with the AC-6 contract at
+`docs/requirements/tabp.md:32-35`).
+
+#### Acceptance criteria (shipped — MAR-40)
+
+- **AC-1** — Claude Code resolves `--project-dir` to the session cwd and requires
+  no git repo; the helper's `.tabp/` derivation (`_tabp_dir_from_project`)
+  carries no git dependency. Asserted by a unit test and documented in
+  `screen-cvs/SKILL.md` Step 0 and ADR-0024's MAR-40 amendment.
+- **AC-2** — `tabp_helper.py` accepts an optional `--runtime {cowork,claude-code}`
+  flag on the coordinator-invoked subcommands; absent, it auto-detects from the
+  transcript-directory presence; the flag and fallback are unit-tested.
+- **AC-3** — `screen-cvs` Step 0 and the usage docs are reworded
+  runtime-agnostically; "Cowork project folder" becomes "project folder"; the
+  project folder need not be a git repo; the Claude Code coordinator passes
+  `--project-dir <session-cwd>` and `--runtime claude-code`.
+- **AC-4** — `.gitignore` guidance is documented for Claude Code users so
+  `.tabp/` run state and `tabp settings.json` are not accidentally committed.
+- **AC-5** — ADR-0023 is amended in place: scope extended to dual-runtime, the
+  `--runtime` flag noted, amendment dated (MAR-40).
+- **AC-6** — ADR-0024 is amended in place: the Claude Code cwd-as-project-dir
+  convention documented, `.gitignore` guidance noted, amendment dated (MAR-40).
+- **AC-7** — A new ADR-0027 records the dual-runtime detection decision: explicit
+  `--runtime` flag + auto-detect fallback + cwd-as-project-dir convention.
+- **AC-8** — The architecture doc set is updated for dual-runtime:
+  `tech-stack.md` runtime framing becomes "Cowork + Claude Code";
+  `c4-container.md` gains a dual-runtime relationship edge and the agent-count
+  drift is repaired, consistent with the existing `tabp-usage-read` flow doc.
+- **AC-9** — No foreign-namespace prefix, no foreign state-path token, and no
+  foreign-library import appears in any tabp artifact touched by MAR-40.
+
+#### Contract surface (MAR-40 delivery)
+
+| File | Kind | Change |
+|---|---|---|
+| `plugins/tabp/helpers/tabp_helper.py` | Python stdlib helper | EDIT — added `_add_runtime_arg`, `_resolve_runtime`, `--runtime` on the coordinator subcommands, and the `usage-read` runtime override (no git dependency in `.tabp/` derivation) |
+| `plugins/tabp/skills/screen-cvs/SKILL.md` | Coordinator protocol (SKILL.md) | EDIT — Step 0 reworded runtime-agnostically; Claude Code `--runtime claude-code` / `--project-dir <session-cwd>` note; no-git assertion; Bash-denied note generalized to "the runtime" |
+| `plugins/tabp/skills/usage/SKILL.md` | Coordinator protocol (SKILL.md) | EDIT — "recruiter's Cowork project folder" → "recruiter's project folder" (retained `usage_source` enum and the Cowork self-reported note unchanged) |
+| `plugins/tabp/README.md` | Plugin README | EDIT — dual-runtime framing; new "Runtimes & project folder" and `.gitignore` guidance subsections |
+| `plugins/tabp/.claude-plugin/plugin.json` | Plugin manifest | EDIT — description runtime clause → "Claude Cowork and Claude Code" |
+| `docs/adr/0023-tabp-hybrid-quality-mechanism-instruction-driven-plus-stdlib-helper.md` | ADR | EDIT — appended MAR-40 amendment extending scope to dual-runtime |
+| `docs/adr/0024-tabp-state-in-cowork-project-folder.md` | ADR | EDIT — appended MAR-40 amendment documenting cwd-as-project-dir + no-git + `.gitignore` guidance |
+| `docs/adr/0027-tabp-dual-runtime-detection.md` | ADR | NEW — records the dual-runtime detection decision (explicit flag + auto-detect + cwd-as-project-dir) |
+| `docs/architecture/hld/tech-stack.md` | HLD tech-stack table | EDIT — tabp runtime framing → "Cowork + Claude Code" |
+| `docs/architecture/hld/c4-container.md` | HLD C4 container diagram | EDIT — added `Rel(tabp_skills, cc, …)` dual-runtime edge; repaired `tabp_agents` count 2→3 (added `screen-verifier-subagent`) |
