@@ -47,7 +47,9 @@ Use these exact `dimension` attribute values:
    or changed runtime flow named by the ticket and plan; an ER diagram exists
    when the data model changes; each diagram is syntactically plausible
    (fenced as a `mermaid` code block, valid diagram keyword, declared
-   participants actually used in the arrows). `### Decision records` is
+   participants actually used in the arrows, no `;` in any `sequenceDiagram`
+   message or note text, `erDiagram` multi-key attributes comma-separated
+   like `PK,FK` not `PK FK`). `### Decision records` is
    present if and only if the task constraints say `adr_path` is configured.
 
 Also verify against the PLAN (`iter-<n>-plan.md` from `<inputs>`): every

@@ -30,14 +30,14 @@ sequenceDiagram
         SS->>WS: lock, pointer, in_progress run, ledger
         SS-->>CO: context JSON (settings, ticket, reconcile, models)
         opt reconcile / handoff resume
-            CO->>WS: read runs[-1], phase artifacts; re-verify recorded work
+            CO->>WS: read runs[-1], phase artifacts, re-verify recorded work
         end
         loop reflection (max 3 iterations)
             CO->>PL: XML <task phase="plan">
             PL->>WS: iter-n-plan.md
             PL-->>CO: XML <result> (validated)
             opt open questions
-                CO->>Dev: clarify (ledger first; record answers)
+                CO->>Dev: clarify (ledger first, record answers)
             end
             CO->>EX: XML <task phase="execute"> (parallel if file maps disjoint)
             EX->>WS: iter-n-execute.json (+ repo edits, commits)
@@ -49,7 +49,7 @@ sequenceDiagram
         end
         CO->>WS: phases/<skill>/result.json
         CO->>POST: --result-file result.json
-        POST->>WS: finalize run, ledger, index, metrics; release lock
+        POST->>WS: finalize run, ledger, index, metrics, release lock
         CO-->>Dev: standard completion report
     end
 ```

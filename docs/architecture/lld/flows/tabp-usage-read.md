@@ -37,7 +37,7 @@ sequenceDiagram
     end
     TH->>TH: aggregate totals (sum tokens, cost, duration, candidates_screened)
     TH-->>CO: usage JSON (per-run entries + totals + cost_basis + pricing_snapshot_date + usage_note)
-    CO-->>REC: render usage table (per-run: run_id, date, candidates, duration, cost, basis; totals row)
+    CO-->>REC: render usage table (per-run: run_id, date, candidates, duration, cost, basis, plus totals row)
 ```
 
 No writes. No re-screening. No network calls.

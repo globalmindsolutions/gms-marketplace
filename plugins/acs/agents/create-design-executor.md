@@ -50,7 +50,13 @@ from the artifacts alone.
      backward compatibility, rollback plan (or "single-step deploy, no
      migration" with justification).
 3. Reference architecture docs by path; never copy them wholesale. All
-   diagrams are Mermaid in fenced code blocks. For an epic, design at the epic
+   diagrams are Mermaid in fenced code blocks. The GitHub renderer is strict —
+   a block with a syntax error renders as an error box, so: no `;` in
+   `sequenceDiagram` message or note text (it is a statement separator and
+   breaks the parse — use a comma or "—"); `erDiagram` attributes with multiple
+   key constraints are comma-separated, never space-separated (`string run_id
+   PK,FK`, not `PK FK`); quote flowchart node labels containing `()`, `[]`,
+   `:`, `,`, or `<br/>`; one statement per line. For an epic, design at the epic
    level — child tickets inherit this design in their /acs:create-spec; never
    split content into child partitions.
 4. If your `<objective>` assigns a research note instead of the design

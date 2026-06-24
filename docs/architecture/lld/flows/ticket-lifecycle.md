@@ -33,10 +33,10 @@ sequenceDiagram
     alt not ready
         CO-->>Dev: report-only — what blocks, no auto-fix
     else ready
-        CO->>GH: merge (configured strategy, default squash); delete branch
-        CO->>CO: clean worktree if one was used; tracker sync to Done
+        CO->>GH: merge (configured strategy, default squash), then delete branch
+        CO->>CO: clean worktree if one was used, then tracker sync to Done
         CO->>POST: result document
-        POST->>WS: ticket done; epic auto-done when last child;<br/>clear pointers; metrics (pr merged)
+        POST->>WS: ticket done, epic auto-done when last child,<br/>clear pointers, metrics (pr merged)
         POST->>WS: move partition -> archive/SHOP-123/
         CO-->>Dev: completion report (cleanup performed, archive path)
     end
