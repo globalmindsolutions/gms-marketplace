@@ -17,8 +17,13 @@ discoverability, and consistent quality across all plugins.
 
 The **acs** feature delivers: every software change — from product definition to
 merged PR — driven through one auditable, resumable, hook-enforced agentic
-pipeline, on any consumer repository, with the human owning exactly two things:
-requirement decisions and the merge button.
+pipeline, on any consumer repository, with the human owning **requirement
+decisions**. Merge is **gated, not ungoverned**: `/acs:merge-pr` is invocable by the
+user *or* an authorized agent/model, and a merge happens only when the readiness gate
+(CI, approvals, conflicts, protections) **and** the repo's branch protection pass, by
+whoever invokes — failures are report-only and every attempt is audited;
+agent-invoked merges additionally require an **approved** review. `/acs:ship` still
+deliberately stops at create-pr so a reviewer sees the PR before merge.
 
 ## Problem
 
@@ -44,7 +49,7 @@ that protected characteristics played no role.
 | **Solo developer** | Ship features end-to-end with one command (`/acs:ship`), trust the gates instead of self-discipline, resume after any interruption. |
 | **Tech lead** | Enforce a delivery process (design gates, TDD, review dimensions, PR size) uniformly across repos and teammates; inspect any ticket's full audit trail. |
 | **Team on a shared repo** | Parallel tickets in worktrees without state collisions; team-shared settings; tracker sync to Jira / GitHub Projects. |
-| **TABP recruiter / hiring team** | Screen one CV or a batch against a job description in Claude Cowork, receive evidence-based and reproducible Recommend/Hold/Reject recommendations with a downloadable scorecard, and demonstrate fairness to auditors. |
+| **TABP recruiter / hiring team** | Screen one CV or a batch against a job description in Claude Cowork or Claude Code, receive evidence-based and reproducible Recommend/Hold/Reject recommendations with a downloadable scorecard, and demonstrate fairness to auditors. |
 
 ## Goals & success metrics
 
@@ -61,6 +66,7 @@ that protected characteristics played no role.
 | G7 — Observability | Dashboard renders all 6 panels (throughput, pipeline funnel, cost/time per step, coverage vs target, review iterations, token burn by role) in ≤ 5 s for ≤ 50 tickets; reads only workspace artifacts; requires no network calls and no new config beyond `.acs/settings.json`. In-session status lines, when wired, preserve 100% of Claude Code's default status-line fields and add acs state on top (zero default fields lost), render in < 100 ms per refresh, and never crash — any failure falls back to a valid line. |
 | G8 — Skill quality coverage | Structure, gating, and routing covered for 100% of skills (free, every PR); every critical-path skill has behavioral (artifact-level) eval coverage; no new skill ships without ≥ a trigger eval (CI guardrail). |
 | G9 — Enforceable conventions | The configured branch/PR/commit formats are enforceable as a required merge gate on the consumer repo, blocking non-exempt violating PRs even when they bypassed `/acs:create-pr` (escape hatch: the `acs-exempt` label / release-branch allowlist). MAR-9 (PR #50, pending merge) completes the consumer side of that escape hatch: a legitimate non-ticket exempt PR lands via the sanctioned `/acs:merge-pr --pr` path (same readiness + branch/worktree cleanup as the ticket path, no ticket/partition/tracker/archive; it refuses and redirects ticket-backed PRs), and `/acs:init` Step 7e writes an idempotent `CLAUDE.md` acs-managed block that makes the pipeline the *default* for in-repo agent sessions (steering changes through `/acs:ship` rather than ad-hoc PRs). The gate itself is existence-proven by the live required-check ruleset on this repo's own `main` (ruleset 17602044, `active`; "Branch / PR / commit conventions" is a required status-check context). |
+| G10 — Standards conformance & repo standardization | New design/code conforms to the principles + standards doc sets, verifier-checked: **100% of `/code` runs whose changeset touches a standards-governed area produce zero unwaived standards-conformance findings** (a violation is a blocking finding, never a silent pass), measured per release on the dogfood repo. Brownfield onboarding is additive and reviewable: **`/acs:standardize-project` lands its setup as exactly one reviewed PR that adds only docs/config/tooling and moves or renames zero existing source files** (0 source relocations; verified by the PR diff), with every target-layout structural gap emitted as a recommended follow-up ticket rather than an in-place move. |
 
 ### tabp feature — success metrics
 
@@ -104,14 +110,19 @@ feature sections here.
 **Could have**
 - Scheduled background tracker sync; cross-machine handoff (shared workspace); additional description templates.
 - acs maintains the `quality/` and `operations/` doc sets for consumers (test strategy + release/ops runbooks) via `/acs:create-quality` and `/acs:create-operations`, plus `/acs:test` — a schedulable regression runner that triages failures and opens a ticket per regression (closed loop). *(Proposed — see [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md).)*
+- **acs maintains the `principles/` and `standards/` doc sets for consumers** — engineering principles (e.g. `/acs:create-principles` → `principles/`) and coding standards/conventions (e.g. `/acs:create-standards` → `standards/`), each a product-level producer skill with its own planner/executor/verifier triad and acs-shipped templates, following the one-skill-per-set pattern of `/acs:create-architecture` and the proposed `/acs:create-quality` / `/acs:create-operations` (see [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md)). These sets sit between architecture and design in the conformance chain: **PRD → architecture → standards → design → specs → code**, each level verified against the one above it. Design and code MUST conform to the standards docs; the `/code` `code-verifier`'s technical-standards dimension and the design verifiers check conformance and block violations (no silent waivers). Traces G10 (+ the Tech-lead persona). *(Proposed — extends the chain at workflow.md and docs/README; see Constraints.)*
+- **Architecture doc set gains an explicit project-structure target** — the `/acs:create-architecture` output set adds a project-structure document (the intended repo layout, derived from the C4 container/component views) as the canonical target a repo is expected to match. It is the layout `/acs:standardize-project` audits an existing repo against. Traces G10.
+- **`/acs:standardize-project` — brownfield standardization (separate from `/acs:create-project`, which stays greenfield-only)** — audits an EXISTING repo against its principles + standards doc sets, the architecture project-structure target, and acs-readiness tooling (coverage/CI/pre-commit/e2e harness, the same set `/acs:create-project` scaffolds greenfield), then **additively** sets up the missing docs/config/tooling as **one reviewed PR**. It NEVER moves or renames existing source; structural gaps versus the target layout become **recommended follow-up tickets**, not in-place moves. Traces G10 (+ the Tech-lead persona). *(Proposed; additive-only — see the C-2 guardrail in Constraints & assumptions.)*
 
 **Won't have (now)** *(acs feature scope)*
 - Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes for the acs pipeline.
 
 ### Feature: tabp (recruiting/talent toolkit for the TABP team)
 
-Runs in **Claude Cowork** (not Claude Code). tabp is a fuller plugin; screen-cvs is
-one capability within it, targeting Cowork's project-folder-based workflow.
+Runs in **both Claude Cowork and Claude Code**. tabp is a fuller plugin; screen-cvs is
+one capability within it, targeting a project-folder-based workflow. In Claude Code the
+project folder need not be a git repo (dual-runtime support driven by MAR-40, per
+clarification C-1 on the MAR-36 epic).
 
 **Must have** *(urgent — next delivery)*
 - **screen-cvs** — screen one CV or a batch against a job description; parse the JD
@@ -121,12 +132,12 @@ one capability within it, targeting Cowork's project-folder-based workflow.
   Recommend/Hold/Reject recommendation; output an inline summary and a two-sheet Excel
   scorecard; apply fairness guardrails (job-relevant criteria only, decision-support
   framing); batch screening fans out one Sonnet subagent per CV with Opus synthesis;
-  inputs read from the Cowork project folder, falling back to chat attachments.
+  inputs read from the project folder, falling back to chat attachments.
   Traces T1, T2, T3, T4, T5.
 - **tabp settings.json** — configurable models and default CV/JD folder paths; stored
-  in the Cowork project folder.
+  in the project folder.
 - **.tabp/ workspace state** — run history and a per-screening archive (the `.xlsx`
-  scorecard and a JSON record per run); persisted in the Cowork project folder.
+  scorecard and a JSON record per run); persisted in the project folder.
 - **/tabp:usage skill** — surfaces per-run usage metrics: cost, time, and tokens.
 - **Resumable runs** — all intermediate states persisted as a human-reviewable audit
   trail; the run can be resumed from the persisted state.
@@ -154,25 +165,24 @@ proven quality patterns in tabp's own namespace:
   present-for-review step form the decision record.
 
 The specific mechanisms — message format, the exact reflection loop, hook-gating —
-are deferred to the tabp-upgrade epic design phase and verified against Cowork's
-actual capabilities.
+are deferred to the tabp-upgrade epic design phase and verified against what both
+runtimes (Claude Cowork and Claude Code) actually support.
 
 **Deferral:** the MECHANISM for the above capabilities — whether instruction-driven,
-hook-gated, or another approach — and the verification of what the Claude Cowork
-runtime actually supports (config resolution, hooks, rich artifacts, self-reported
-cost/tokens) are **deferred to the tabp-upgrade epic's design phase**. This PRD states
-the requirements (what); the design (how) is determined in the tabp-upgrade epic.
+hook-gated, or another approach — and the verification of what both runtimes (Claude
+Cowork and Claude Code) actually support (config resolution, hooks, rich artifacts,
+self-reported cost/tokens) are **deferred to the tabp-upgrade epic's design phase**.
+This PRD states the requirements (what); the design (how) is determined in the
+tabp-upgrade epic.
 
 **Won't have (now)** *(tabp feature scope)*
 - Integrations with ATS platforms; automated hiring decisions (tabp is
-  decision-support only, not a hiring authority); Claude Code runtime (tabp targets
-  Claude Cowork, not Claude Code).
+  decision-support only, not a hiring authority).
 
 ## Product-level NFRs
 
 These NFRs apply across all marketplace features. Each feature realizes them through
-its own mechanisms (acs via stdlib Python + hooks; tabp via its own Cowork-based plugin
-patterns).
+its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patterns).
 
 - **Determinism where possible**: ordering, gating, state writes, id allocation are scripts, never prose; gates fail closed.
 - **Portability**: hooks and helpers are stdlib-only Python ≥ 3.9; no network dependencies of their own. `/acs:init` Step 0b runs a toolchain preflight — it detects and offers to install the tools acs leans on (`git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli`) so onboarding fails up front with consent rather than mid-pipeline; the convention checker stays stdlib-only so no acs install is needed on the CI runner.
@@ -182,11 +192,13 @@ patterns).
 
 ## Constraints & assumptions
 
-- **acs feature:** Claude Code plugin API (skills/agents/hooks as documented) is the runtime for the acs pipeline. Different features may target different Claude runtimes — acs targets Claude Code; tabp targets Claude Cowork.
+- **acs feature:** Claude Code plugin API (skills/agents/hooks as documented) is the runtime for the acs pipeline. Different features may target different Claude runtimes — acs targets Claude Code; tabp targets both Claude Cowork and Claude Code.
 - Delivery is git + GitHub PRs (`gh` assumed); correctness must be checkable by automated tests for the strong-fit domains (see `docs/requirements/overview.md`).
 - Subagents cannot interact with the user — all user interaction happens in coordinators (drives the `needs_input` handoff design).
-- **tabp feature:** tabp runs in Claude Cowork as a fuller plugin; inputs are read from
-  the Cowork project folder, falling back to chat attachments; the screen-cvs capability
+- **acs feature — brownfield standardization is additive-only (C-2).** `/acs:standardize-project` operates on an existing repo by ADDITION only: it adds principles/standards docs, config, and missing readiness tooling (coverage/CI/pre-commit/e2e), and it MUST NOT move, rename, delete, or rewrite existing source files. Structural gaps versus the architecture project-structure target are surfaced as recommended follow-up tickets for the user to decide on — never executed as an automatic restructure. This guardrail is deliberate: a wholesale-restructure mandate is explicitly out of scope (it is the over-engineering this product reset once before — see Out of scope). The greenfield/brownfield split is fixed: `/acs:create-project` is greenfield-only and refuses on any repo with substantive sources; brownfield onboarding is `/acs:standardize-project`'s job (C-1).
+- **tabp feature:** tabp runs in both Claude Cowork and Claude Code as a fuller plugin; inputs are
+  read from the project folder (in Claude Code the folder need not be a git repo; dual-runtime
+  driven by MAR-40), falling back to chat attachments; the screen-cvs capability
   uses one Sonnet subagent per CV with Opus synthesis; outputs include a two-sheet Excel
   scorecard and a per-run `.tabp/` archive. tabp is not skills-only — the fuller feature
   shape is defined in the tabp feature section above.
@@ -203,6 +215,14 @@ implementation (plugin.json, screen-cvs skill, marketplace.json entry, CI
 version-coupling removal) is a separate follow-up ticket — this PRD defines the
 feature; the build is out of scope here.
 
+Automatic wholesale repository restructuring is out of scope. Brownfield
+standardization (`/acs:standardize-project`) is additive-only by constraint
+(C-2 above): it never moves or renames existing source. Re-laying-out an
+existing codebase to match the architecture project-structure target is a
+human-decided follow-up, surfaced as recommended tickets — not something acs
+performs automatically. This guardrail exists to avoid repeating the abandoned
+MAR-16..24 over-engineering reset.
+
 **Reversal note (MAR-35):** this amendment reverses the prior "tabp is skills-only"
 product decision that was previously stated in this PRD and in MAR-26 design C-arch-5
 (skills-only plugin shape). tabp remains a **FEATURE of the one GMS Marketplace
@@ -212,3 +232,15 @@ feature section above replaces the skills-only framing with the fuller-plugin sh
 The tabp-upgrade epic (a separate future ticket) owns the design and build of the new
 capabilities; the MECHANISM and Cowork-runtime verification are deferred to that
 epic's design phase.
+
+**Reversal note (MAR-42):** this amendment reverses the prior Vision guardrail that the
+human owns "the merge button" — i.e. that `/acs:merge-pr` is invocable only by a human. Per
+MAR-42 (design approved; **ADR-0027** — "merge-pr is agent/model-invocable; readiness gate +
+branch protection are the merge brakes"), `/acs:merge-pr` is now agent/model-invocable. The
+human still owns **requirement decisions**. The safety guarantee shifts from "a human must
+press merge" to "merge happens only when the readiness gate (CI/approvals/conflicts/
+protections) and the repo's branch protection pass, by whoever invokes; failures are
+report-only; every attempt is audited," with agent-invoked merges additionally requiring an
+approved review (m6). `/acs:ship` still deliberately stops at create-pr (review separation, not
+a merge prohibition). This is a product-level Vision change only; the detailed `/acs:merge-pr`
+behavior lives in `docs/requirements/skills.md` and the skill prose and is delivered by MAR-42.

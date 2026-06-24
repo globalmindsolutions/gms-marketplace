@@ -94,3 +94,370 @@ for tabp. It is excluded from this spec.
 Executable validation of live state files is performed by `tabp_helper.py` (spec 02,
 MAR-2). The schema files here are the contract source; the helper loads them at
 runtime.
+
+---
+
+## Feature area: tabp independent verifier (MAR-37)
+
+Every `screen-cvs` run is re-judged by an independent verifier subagent before
+results are presented to the recruiter. This behavior implements the
+engineering-rigor NFR (`prd.md:141-154`) and fulfils the upgrade-path note
+deferred in MAR-2 (`SKILL.md:173-177` prior to MAR-37).
+
+### Behavioral contract
+
+**Always-on.** The verifier runs on every `screen-cvs` run with no skip path.
+There is no condition under which the verifier invocation is bypassed (AC-4,
+MAR-37). The coordinator spawns the verifier in Step 5a of
+`plugins/tabp/skills/screen-cvs/SKILL.md` before any results are presented.
+
+**Artifact-only, isolated context.** The verifier subagent
+(`plugins/tabp/agents/screen-verifier-subagent.md`) operates in a separate spawn
+context from the coordinator. It receives only persisted artifacts — parsed JD
+requirements, all `evidence-*.json` records, the synthesis result,
+`references/scoring-rubric.md`, and `references/fairness-guidelines.md` — passed
+inline in the task payload. The coordinator must NOT include its own reasoning,
+framing, or in-progress evaluation notes. The verifier is isolated from the
+coordinator's perspective (AC-1, D1, ADR-0025).
+
+**Five-check re-judgment (AC-2).** The verifier independently re-applies:
+
+1. Evidence citations — every judgment cites a non-empty, specific CV source.
+2. Must-have gate correctness — `Missing` judgments on must-haves map to
+   `must_have_gate="Missing:<list>"` and `recommendation` in `{Hold, Reject}`.
+3. Score/band/recommendation rubric consistency — thresholds and recommendation
+   mapping applied identically per the rubric.
+4. No protected or proxy criteria — no judgment references protected
+   characteristics or their proxies.
+5. Cross-candidate consistency — identical rubric weighting and fairness rules
+   applied to every candidate.
+
+**Structured `pass | blocking` verdict.** The verifier returns a JSON object:
+
+```json
+{"status": "pass" | "blocking", "blocking_findings": [...]}
+```
+
+Each entry in `blocking_findings` carries `candidate_id`, `finding_type`,
+`requirement`, and `detail`.
+
+**Remediate-and-re-verify loop capped at N=3 (AC-3, D2, ADR-0025).** If the
+verdict is `blocking`, the coordinator remediates the flagged issues (re-spawning
+affected `screen-cv-subagent` instances for evidence/fairness findings, or
+re-running the synthesis subagent for rubric/consistency findings) and re-spawns
+the verifier. The loop is capped at **N=3 total verifier invocations** (including
+the initial one). This guarantees termination.
+
+**Present-only-after-clean rule (AC-3).** Results (Step 6 — inline summary and
+Excel scorecard) are delivered to the recruiter ONLY after the verifier returns a
+clean `pass` verdict.
+
+**Cap-hit behavior (AC-4).** If the N=3 cap is reached with unresolved blocking
+findings, the coordinator:
+- Writes `decision.json` with `verification_passed: false` and the unresolved
+  `blocking_findings` in `verification_notes`.
+- Does NOT proceed to Step 6 result delivery.
+- Notifies the recruiter of the unresolved verification issues and advises against
+  scorecard use without manual review.
+
+**Independent verdict recorded in `decision.json`.** The `verification_passed`
+and `verification_notes` fields in `decision.json` record the independent verifier
+verdict (not a coordinator self-attestation). On a clean `pass`,
+`verification_passed: true`. On cap-hit, `verification_passed: false` with
+unresolved findings in `verification_notes`. This is the semantic meaning of
+those fields from MAR-37 onwards (ADR-0025, C-3).
+
+**No state writes by the verifier.** The verifier does not invoke
+`tabp_helper.py`, does not write to `.tabp/`, and does not make Bash calls. Its
+only output is the verdict JSON returned to the coordinator. State persistence
+(updated evidence records on remediation, the decision record) is performed by
+the coordinator.
+
+**Namespace constraint (AC-5/AC-6).** The verifier charter and all MAR-37
+changes to SKILL.md, the flow doc, the README, and the ADR use the tabp namespace
+exclusively — no `acs:` prefix, no `.tabp/`-adjacent foreign paths, no helper
+imports from other plugins.
+
+### Contract surface (MAR-37 delivery)
+
+| File | Kind | Change |
+|---|---|---|
+| `plugins/tabp/agents/screen-verifier-subagent.md` | Subagent charter | NEW — defines the verifier's role, artifact-only input contract, five re-judgment checks, and `pass\|blocking` output contract |
+| `plugins/tabp/skills/screen-cvs/SKILL.md` Step 5a | Coordinator instruction | REPLACED — coordinator self-verification retired; independent verifier spawn + remediate loop (N=3) inserted |
+| `plugins/tabp/skills/screen-cvs/SKILL.md` Step 5b | Coordinator instruction | UPDATED — records independent verifier verdict (`verification_passed`), not a coordinator self-attestation |
+| `plugins/tabp/schemas/decision.schema.json` | JSON Schema | UPDATED — `verification_passed` and `verification_notes` descriptions updated to reflect independent verifier step |
+| `docs/adr/0025-tabp-independent-verifier-subagent.md` | ADR | NEW — records D1 (inline-artifact input), D2 (N=3 cap), always-on rule, and residual risk |
+
+---
+
+## Feature area: tabp hybrid cost sourcing (MAR-38)
+
+### MAR-38 hybrid cost model for usage-read aggregation
+
+The `usage-read` subcommand (`tabp_helper.py _cmd_usage_read`) delivers real
+aggregation over `history.json` and each `run.json`, replacing the MAR-6
+placeholder stub that shipped with the tabp foundation.
+
+#### Four usage_source semantics
+
+The `usage.usage_source` field in `run.json` now carries one of four values,
+each with defined semantics:
+
+| `usage_source` | Meaning | `cost_basis` | Token source |
+|---|---|---|---|
+| `"claude-code"` | Run executed under Claude Code runtime | `"estimate"` | Actuals from `~/.claude/projects/<cwd-slug>/*.jsonl` (MAR-38 auto-detect) |
+| `"estimate"` | Heuristic token estimate (e.g. Cowork estimate) | `"estimate"` | Pre-written tokens in `run.json usage.tokens_in/out` |
+| `"cowork"` | Cowork self-reported usage (future hook, MAR-40) | `"actual"` | Self-reported in `run.json usage.tokens_in/out/cost_usd` |
+| `"unavailable"` | No usage data available | `"unavailable"` | None — omitted from aggregate totals |
+
+Runs with `usage_source="unavailable"` appear in the `runs[]` array but are
+excluded from `total_tokens_in`, `total_tokens_out`, and `total_cost_usd`.
+
+#### settings.json `model_pricing` (no schema file)
+
+The tabp `settings.json` file accepts an optional `model_pricing` block:
+
+```json
+{
+  "model_pricing": {
+    "claude-opus-4-8":   { "input_per_mtok": 15.00, "output_per_mtok": 75.00 },
+    "claude-sonnet-4-6": { "input_per_mtok":  3.00, "output_per_mtok": 15.00 }
+  }
+}
+```
+
+Values are USD per million tokens. If absent, the built-in `_MODEL_PRICING`
+snapshot (frozen at `_PRICING_SNAPSHOT_DATE`) is used as the fallback.
+
+**No `settings.schema.json` is created for this key** (DEV-1: the tabp settings
+schema is owned by MAR-3; creating it prematurely activates the CI
+settings-schema validation gate at `ci.yml:197-199`). The `model_pricing`
+block is a runtime-read-only contract — read by `_resolve_pricing`, passed
+through `settings-read` output when present, and documented here. Malformed
+or non-numeric per-model entries are silently skipped (R5 additive safety).
+
+#### Claude Code transcript reader privacy
+
+The transcript reader (`_read_transcript_tokens`) reads ONLY:
+- `message.usage.input_tokens` (integer)
+- `message.usage.output_tokens` (integer)
+- `message.model` (string)
+
+It never reads `message.content`, any prompt text, CV content, or response
+body. The return value is `(total_in: int, total_out: int, model: str|None)`.
+No transcript content is persisted into `.tabp/` state files.
+
+The transcript root defaults to `~/.claude/projects` and is injectable via the
+`TABP_TRANSCRIPT_ROOT` environment variable (for testing — tests never read the
+real `~/.claude` path).
+
+#### `run-finalize` new arguments (MAR-38)
+
+The `run-finalize` subcommand accepts three new optional arguments:
+
+- `--tokens-in <int>`: input token count to write into `run.json usage.tokens_in`
+- `--tokens-out <int>`: output token count to write into `run.json usage.tokens_out`
+- `--cost-basis <actual|estimate|unavailable>`: cost basis label
+
+The `--usage-source` argument is widened from two values to four:
+`cowork`, `claude-code`, `estimate`, `unavailable`.
+
+#### cost_basis labeling invariant (R2)
+
+Cost derived from tokens x pricing is NEVER labeled `cost_basis="actual"`.
+Only `usage_source="cowork"` (Cowork self-reported, future hook) may carry
+`"actual"`. All derived costs (`claude-code`, `estimate`) carry `"estimate"`.
+This invariant is enforced in the aggregation loop and tested by
+`test_r2_mislabel_guard_cost_basis_always_set` in `TestUsageReadAggregation`.
+
+#### Contract surface (MAR-38 delivery)
+
+| File | Kind | Change |
+|---|---|---|
+| `plugins/tabp/helpers/tabp_helper.py` | Python stdlib helper | REPLACED `_cmd_usage_read` stub with real aggregation; added `_MODEL_PRICING`, `_PRICING_SNAPSHOT_DATE`, `_resolve_pricing`, `_cwd_slug`, `_read_transcript_tokens`, `_derive_cost`; extended `_cmd_run_finalize` args; extended `_cmd_settings_read` for `model_pricing` pass-through |
+| `plugins/tabp/schemas/run.schema.json` | JSON Schema Draft 2020-12 | WIDENED `usage.usage_source` enum to four values; ADDED optional `usage.cost_basis` field |
+| `plugins/tabp/schemas/history.schema.json` | JSON Schema Draft 2020-12 | WIDENED `runs[].usage_source` enum to four values |
+| `docs/adr/0026-tabp-hybrid-cost-sourcing.md` | ADR | NEW — records D3a (transcript-actuals) and D3b (dated snapshot pricing + settings override) |
+
+---
+
+## Feature area: tabp usage skill (MAR-39)
+
+### /tabp:usage skill — Show cost, time, and token usage for screening runs
+
+The tabp plugin ships a second skill, `/tabp:usage`, as a thin presentation layer
+over the `usage-read` aggregation that MAR-38 delivered. MAR-39 adds no new
+aggregation logic, no new Python production code, and no changes to the helper
+or schemas.
+
+The skill lives at `plugins/tabp/skills/usage/SKILL.md` and is auto-discovered
+by the runtime (skills auto-discover from `skills/<name>/SKILL.md`; no explicit
+`skills` array in `plugin.json` is required).
+
+#### Acceptance criteria (shipped — MAR-39 spec 01)
+
+- **AC-1**: A new `/tabp:usage` skill exists at `plugins/tabp/skills/usage/SKILL.md`
+  with frontmatter (`name: usage` and a `description` that triggers on
+  usage/cost/tokens/spend requests), instructing the coordinator to invoke
+  `python3 plugins/tabp/helpers/tabp_helper.py usage-read --project-dir <project-folder>
+  [--run-id <id>|all]` and render the result. The skill is registered via
+  auto-discovery (no `skills` array in `plugin.json`).
+
+- **AC-2**: The skill renders BOTH per-run and aggregate TOTALS for cost (USD),
+  time (`duration_seconds`), and tokens (in/out), surfacing `usage_source`,
+  `cost_basis`, and `pricing_snapshot_date` so a derived cost is clearly labeled
+  as an estimate and never presented as an actual billed amount.
+
+- **AC-3**: Honest degradation: when usage data is unavailable
+  (`usage_source="unavailable"`, or the helper/Bash is unavailable), the skill
+  renders "—" for null fields, presents the `usage_note` from the helper, and
+  never fabricates cost or token figures.
+
+- **AC-4**: Documentation: a new `docs/architecture/lld/flows/tabp-usage-read.md`
+  (Mermaid sequence diagram for the read flow) is added;
+  `docs/architecture/hld/c4-container.md` and `docs/architecture/hld/tech-stack.md`
+  skill count updated 1→2; `plugins/tabp/README.md` documents the new skill with
+  a `### usage` subsection.
+
+- **AC-5**: Namespace clean (see AC-6 contract at `docs/requirements/tabp.md:32-35`):
+  no foreign namespace prefix, no foreign state-path token, no foreign library
+  import appears in the new skill or any changed tabp artifact. All files stay
+  within the tabp namespace. Structural tests in
+  `tests/tabp/test_tabp_usage_skill.py` assert file existence, required
+  frontmatter/sections, and the namespace guard. The full suite remains green
+  (90% line-coverage target vacuously satisfied — no new executable Python added).
+
+#### Presentation-only scope
+
+MAR-39 is presentation only. It consumes the `usage-read` aggregation
+(shipped in MAR-38) without modification:
+
+- **No changes** to `tabp_helper.py`, `contracts.md`, `plugin.json`, `data-model.md`,
+  or `plugins/tabp/schemas/`.
+- **No new aggregation logic** — the skill renders the JSON output of
+  `tabp_helper.py usage-read` as-is.
+- **No e2e test flows** required — the skill is a coordinator-only read path
+  with no interactive state changes; asserted at the structural level only.
+
+#### Cost-transparency NFR
+
+Any cost figure where `cost_basis="estimate"` must be labeled as an estimate
+and never presented as an actual charge. The `pricing_snapshot_date` must be
+surfaced so the reader knows which pricing snapshot was used. This is enforced
+by Step 3 (Honesty rule) in `plugins/tabp/skills/usage/SKILL.md`.
+
+#### Honest-degradation NFR
+
+When usage data is unavailable for a run, the skill renders "—" for null
+token/cost fields and displays the `usage_note`. It fabricates nothing. When
+the helper/Bash is entirely unavailable, the skill states that usage data is
+not accessible and fabricates nothing.
+
+#### Contract surface (MAR-39 delivery)
+
+| File | Kind | Change |
+|---|---|---|
+| `plugins/tabp/skills/usage/SKILL.md` | Coordinator protocol (SKILL.md) | NEW — /tabp:usage skill with frontmatter, usage-read invocation, per-run + totals rendering, honesty rule, degradation path, guardrails |
+| `docs/architecture/lld/flows/tabp-usage-read.md` | LLD flow doc (Mermaid sequence) | NEW — /tabp:usage read flow with step annotations |
+| `docs/architecture/hld/c4-container.md` | HLD C4 container diagram | EDIT line 13: `tabp_skills` skill count 1→2 (added /tabp:usage) |
+| `docs/architecture/hld/tech-stack.md` | HLD tech-stack table | EDIT line 5: skill count 1→2; removed "not yet shipped" clause |
+| `plugins/tabp/README.md` | Plugin README | EDIT: added `### usage` subsection under `## Skills`; refreshed "usage stubs" → "usage aggregation" |
+| `tests/tabp/test_tabp_usage_skill.py` | Structural test module (stdlib unittest) | NEW — TU-01..TU-30 asserting file presence, frontmatter, invocation markers, rendering markers, honesty/degradation, namespace guard |
+
+---
+
+## Feature area: tabp dual-runtime (MAR-40)
+
+### Dual-runtime support (Claude Cowork + Claude Code)
+
+The tabp plugin runs under both the Claude Cowork runtime and the Claude Code
+runtime. State location and the helper contract are runtime-agnostic: every
+`tabp_helper.py` subcommand takes `--project-dir <project-folder>` and keeps all
+state under `<project-folder>/.tabp/`, regardless of runtime. This feature area
+records the behavior shipped by MAR-40 (parent epic MAR-36, design D4/D5).
+
+### Behavior-defining decisions and constraints
+
+**Runtime selection (`--runtime` flag).** Each coordinator-invoked
+`tabp_helper.py` subcommand accepts an optional `--runtime {cowork,claude-code}`
+flag. When the flag is present, the named runtime is used. When it is absent,
+the helper auto-detects the runtime by the presence of the per-session
+transcript directory (`~/.claude/projects/<cwd-slug>/`): present → `claude-code`,
+absent → `cowork`. An invalid `--runtime` value is rejected with a non-zero exit
+(argparse choices). The flag is deterministic and unit-tested; the transcript
+root is injectable for testing so tests never read the real home-directory path.
+
+**cwd-as-project-dir (Claude Code).** In Claude Code the coordinator passes the
+session's current working directory as `--project-dir <session-cwd>` and adds
+`--runtime claude-code`. The project folder **need not be a git repo** — the
+helper derives `<project-dir>/.tabp/` directly from `--project-dir` (via
+`_tabp_dir_from_project`) with no git assumption and no git call. In Cowork the
+coordinator passes the Cowork project folder; the state-location decision is
+unchanged from earlier behavior.
+
+**Back-compatibility.** When `--runtime` is absent, behavior is unchanged from
+the prior Cowork-only path (auto-detect resolves to `cowork` when no transcript
+directory is present). No `run.json`/`history.json` schema field is added by
+this feature; the `usage_source` enum (including the retained `"cowork"` value
+and the Cowork self-reported future-actuals hook) is unchanged.
+
+**`usage-read` runtime override.** For the `usage-read` subcommand the resolved
+runtime gates whether the Claude Code transcript actuals are read:
+`--runtime claude-code` (or auto-detect to `claude-code`) reads transcript
+tokens when available; `--runtime cowork` suppresses the transcript read and
+falls back to the per-run tokens recorded in `run.json`.
+
+**`.gitignore` guidance.** For Claude Code users whose project folder is a git
+repo, the README documents excluding `.tabp/` run state and `tabp settings.json`
+from version control so run history, evidence records, and local-path-referencing
+settings are not accidentally committed.
+
+**Namespace constraint (epic AC-6 / MAR-40 AC-9).** All MAR-40 changes — the
+helper flag code, the reworded skill/README/`plugin.json` prose, the amended
+ADRs, the new ADR-0027, and the architecture-doc updates — stay within the tabp
+namespace. No foreign-namespace prefix token, no foreign state-path token, and
+no foreign-library import is introduced (consistent with the AC-6 contract at
+`docs/requirements/tabp.md:32-35`).
+
+#### Acceptance criteria (shipped — MAR-40)
+
+- **AC-1** — Claude Code resolves `--project-dir` to the session cwd and requires
+  no git repo; the helper's `.tabp/` derivation (`_tabp_dir_from_project`)
+  carries no git dependency. Asserted by a unit test and documented in
+  `screen-cvs/SKILL.md` Step 0 and ADR-0024's MAR-40 amendment.
+- **AC-2** — `tabp_helper.py` accepts an optional `--runtime {cowork,claude-code}`
+  flag on the coordinator-invoked subcommands; absent, it auto-detects from the
+  transcript-directory presence; the flag and fallback are unit-tested.
+- **AC-3** — `screen-cvs` Step 0 and the usage docs are reworded
+  runtime-agnostically; "Cowork project folder" becomes "project folder"; the
+  project folder need not be a git repo; the Claude Code coordinator passes
+  `--project-dir <session-cwd>` and `--runtime claude-code`.
+- **AC-4** — `.gitignore` guidance is documented for Claude Code users so
+  `.tabp/` run state and `tabp settings.json` are not accidentally committed.
+- **AC-5** — ADR-0023 is amended in place: scope extended to dual-runtime, the
+  `--runtime` flag noted, amendment dated (MAR-40).
+- **AC-6** — ADR-0024 is amended in place: the Claude Code cwd-as-project-dir
+  convention documented, `.gitignore` guidance noted, amendment dated (MAR-40).
+- **AC-7** — A new ADR-0027 records the dual-runtime detection decision: explicit
+  `--runtime` flag + auto-detect fallback + cwd-as-project-dir convention.
+- **AC-8** — The architecture doc set is updated for dual-runtime:
+  `tech-stack.md` runtime framing becomes "Cowork + Claude Code";
+  `c4-container.md` gains a dual-runtime relationship edge and the agent-count
+  drift is repaired, consistent with the existing `tabp-usage-read` flow doc.
+- **AC-9** — No foreign-namespace prefix, no foreign state-path token, and no
+  foreign-library import appears in any tabp artifact touched by MAR-40.
+
+#### Contract surface (MAR-40 delivery)
+
+| File | Kind | Change |
+|---|---|---|
+| `plugins/tabp/helpers/tabp_helper.py` | Python stdlib helper | EDIT — added `_add_runtime_arg`, `_resolve_runtime`, `--runtime` on the coordinator subcommands, and the `usage-read` runtime override (no git dependency in `.tabp/` derivation) |
+| `plugins/tabp/skills/screen-cvs/SKILL.md` | Coordinator protocol (SKILL.md) | EDIT — Step 0 reworded runtime-agnostically; Claude Code `--runtime claude-code` / `--project-dir <session-cwd>` note; no-git assertion; Bash-denied note generalized to "the runtime" |
+| `plugins/tabp/skills/usage/SKILL.md` | Coordinator protocol (SKILL.md) | EDIT — "recruiter's Cowork project folder" → "recruiter's project folder" (retained `usage_source` enum and the Cowork self-reported note unchanged) |
+| `plugins/tabp/README.md` | Plugin README | EDIT — dual-runtime framing; new "Runtimes & project folder" and `.gitignore` guidance subsections |
+| `plugins/tabp/.claude-plugin/plugin.json` | Plugin manifest | EDIT — description runtime clause → "Claude Cowork and Claude Code" |
+| `docs/adr/0023-tabp-hybrid-quality-mechanism-instruction-driven-plus-stdlib-helper.md` | ADR | EDIT — appended MAR-40 amendment extending scope to dual-runtime |
+| `docs/adr/0024-tabp-state-in-cowork-project-folder.md` | ADR | EDIT — appended MAR-40 amendment documenting cwd-as-project-dir + no-git + `.gitignore` guidance |
+| `docs/adr/0027-tabp-dual-runtime-detection.md` | ADR | NEW — records the dual-runtime detection decision (explicit flag + auto-detect + cwd-as-project-dir) |
+| `docs/architecture/hld/tech-stack.md` | HLD tech-stack table | EDIT — tabp runtime framing → "Cowork + Claude Code" |
+| `docs/architecture/hld/c4-container.md` | HLD C4 container diagram | EDIT — added `Rel(tabp_skills, cc, …)` dual-runtime edge; repaired `tabp_agents` count 2→3 (added `screen-verifier-subagent`) |

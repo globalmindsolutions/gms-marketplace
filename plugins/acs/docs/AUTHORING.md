@@ -15,7 +15,7 @@ win — change them first, then the implementation.
 | `name` | Equals the directory name, kebab-case. Users invoke `/acs:<name>`. |
 | `description` | 1–2 sentences: what it does **and when to use it** — this text is what drives model auto-invocation, so write the trigger condition into it ("Use when …"). Keep it under ~2 lines; details belong in the body. |
 | `argument-hint` | Always set for skills taking arguments (`"[ticket-id]"`, `"<request or remote-key>"`). |
-| `disable-model-invocation` | `true` **only** for user-action-only skills (`merge-pr`, `update`). Everything else stays model-invocable — `/ship` invokes each step skill via the Skill tool. |
+| `disable-model-invocation` | `true` **only** for user-action-only skills (`update`). Everything else stays model-invocable — `/ship` invokes each step skill via the Skill tool. |
 | `disallowed-tools` | `Edit, NotebookEdit` on every hooked skill and `/ship`: coordinators orchestrate — they Write workspace files but never edit repo source themselves (a fix is a remediation iteration through the executor, not a coordinator hot-patch). `/init` and `/handoff` stay unrestricted (user-present utility skills; `/init` legitimately edits `.gitignore`). |
 | `model` / `effort` / `context` / `agent` | **Do not set.** Hooked skills must run in the invoking context so they can talk to the user; `context: fork` would break clarifying questions. Model/effort for *subagents* comes from `settings.json`, not frontmatter. |
 

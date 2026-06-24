@@ -97,7 +97,7 @@ examples given in the requirements; exact names to confirm.
 | `/create-spec` | `/create-ticket` completed; ticket file exists; if the ticket (or its parent epic) needs design, that design is completed. |
 | `/code` | `/create-spec` completed; specs exist. |
 | `/create-pr` | `/code` completed **and its verifier passed** (no blocking findings) — the automatic remediation loop inside `/code` runs until this holds ([workflow.md](workflow.md#review-feedback-loop)). |
-| `/merge-pr` | A PR reference is recorded: `/create-pr` completed (pipeline tickets), or the product-level skill completed with the PR reference in its state file (delivery tickets — [skills.md](skills.md#product-level-delivery-tickets)). Also **user-invoked only**. |
+| `/merge-pr` | A PR reference is recorded: `/create-pr` completed (pipeline tickets), or the product-level skill completed with the PR reference in its state file (delivery tickets — [skills.md](skills.md#product-level-delivery-tickets)). |
 
 ## Runtime & resolution rules
 

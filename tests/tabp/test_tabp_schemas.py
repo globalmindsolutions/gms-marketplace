@@ -461,7 +461,8 @@ class TestSettingsSchema(unittest.TestCase):
 
     def test_tc_ss_02_settings_schema_structure(self):
         """TC-SS-02 (AC-2): settings.schema.json has additionalProperties:false,
-        no required array, five expected property names, and state_write_mode enum.
+        no required array, the five core property names, and state_write_mode enum.
+        (model_pricing is an additional allowed runtime-read-only key — MAR-38/DEV-1.)
         """
         path = os.path.join(SCHEMAS_DIR, "settings.schema.json")
         doc, _ = _load_json(path)

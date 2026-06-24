@@ -69,7 +69,7 @@ Purpose: drive the whole pipeline from one command.
 - `/ship <prompt>` MUST run the workflow skills in order —
   `/create-ticket` → `/create-design` (when the ticket needs design) →
   `/create-spec` → `/code` → `/create-pr` — and stop before `/merge-pr`,
-  which stays a user action
+  which a reviewer lands as a separate step
   ([workflow.md](workflow.md#umbrella-command-ship)).
 - MUST NOT bypass any pre/post hook; it adds orchestration only.
 - SHOULD be resumable: re-running it for a ticket continues from the first
@@ -527,9 +527,12 @@ Purpose: ship the implementation as a pull request.
 
 Purpose: land the change.
 
-- `/merge-pr` is a **user action**: it MUST only run when the user explicitly
-  invokes it, after they have reviewed the PR themselves. The pipeline never
-  triggers it automatically.
+- `/merge-pr` is **agent/model-invocable** (MAR-42): it MAY be invoked by the
+  user or an authorized agent. The readiness gate (CI, approvals, conflicts,
+  branch protection) is the brake — a merge proceeds only when it passes plus
+  the repo's branch protection, by whoever invokes; an **approving review is
+  required** (mitigation m6). `/acs:ship` still stops at `/create-pr` and never
+  invokes `/merge-pr` itself. A failed readiness check is report-only.
 - MUST review PR readiness — **[ASSUMPTION]** at minimum: CI status, review
   approvals, merge conflicts, branch protection requirements.
 - Product-level delivery tickets (PRD, architecture, scaffold) merge like

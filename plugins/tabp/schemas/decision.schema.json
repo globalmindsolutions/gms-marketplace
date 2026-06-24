@@ -16,11 +16,11 @@
     },
     "verification_passed": {
       "type": "boolean",
-      "description": "Whether the self-verification step passed before presenting results."
+      "description": "Whether the independent verifier subagent step passed before presenting results."
     },
     "verification_notes": {
       "type": "string",
-      "description": "Free-text notes from the self-verification step."
+      "description": "Free-text notes from the independent verifier subagent step."
     },
     "presented_at": {
       "type": "string",

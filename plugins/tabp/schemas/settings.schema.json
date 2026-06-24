@@ -24,6 +24,10 @@
     "state_write_mode": {
       "enum": ["helper", "instructed"],
       "description": "How state is written. helper = tabp_helper.py; instructed = coordinator writes directly (degraded mode). Default: helper."
+    },
+    "model_pricing": {
+      "type": "object",
+      "description": "Optional runtime-read-only per-model pricing override (USD per million tokens), keyed by model id. Read by the usage path; surfaced by settings-read when present. Malformed per-model entries are silently skipped at read time. See docs/requirements/tabp.md (model_pricing, no schema file / DEV-1)."
     }
   },
   "additionalProperties": false

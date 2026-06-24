@@ -66,6 +66,15 @@ from the start.
    - jd_folder = `./jds`
    - state_write_mode = `helper`
 
+   **Runtime note.** tabp runs under both Claude Cowork and Claude Code. The
+   `--project-dir` argument is the project folder in either runtime. In Claude
+   Code the coordinator passes the session's current working directory as
+   `--project-dir <session-cwd>` and adds `--runtime claude-code`; in Cowork it
+   passes the Cowork session's project folder (and may pass `--runtime cowork`, or omit
+   the flag to let the helper auto-detect). The project folder **need not be a
+   git repo** — the helper derives `<project-dir>/.tabp/` directly from
+   `--project-dir` with no git assumption.
+
 2. **Start the run record.** Invoke:
    ```
    python3 plugins/tabp/helpers/tabp_helper.py run-start \
@@ -77,9 +86,9 @@ from the start.
    This acquires the `.tabp/` lock and writes an `in_progress` run record to
    `.tabp/runs/<run-id>/run.json`.
 
-3. **Degradation path.** If Cowork denies Bash access (the helper invocation
-   fails or is unavailable), proceed without the helper. Write an initial
-   `run.json` directly into the project folder's `.tabp/runs/<run-id>/`
+3. **Degradation path.** If the runtime denies Bash access (the helper
+   invocation fails or is unavailable), proceed without the helper. Write an
+   initial `run.json` directly into the project folder's `.tabp/runs/<run-id>/`
    directory using the file-write capability, setting
    `"state_write_mode": "instructed"`. Record the run identifier and continue
    through the remaining steps using direct file writes wherever a helper
@@ -168,63 +177,101 @@ Compute the weighted match score per the rubric (must-haves weighted heavily; an
 
 For a batch, rank candidates by score (tie-break by number of must-haves met).
 
-## Step 5a — Self-verification pass (present only after pass)
+## Step 5a — Independent verification (present only after clean verdict)
 
-Before presenting any results to the recruiter, run a single coordinator
-self-verification pass. This is the AC-3 gate: results are presented ONLY
-after this pass produces no blocking findings.
+Before presenting any results to the recruiter, spawn an independent verifier
+subagent. This is the AC-3 gate: results are presented ONLY after the verifier
+returns a clean `pass` verdict. The verifier runs on every `screen-cvs` run with
+no skip path (always-on).
 
-**What to re-verify:**
+**Always-on rule:** There is no condition under which the verifier invocation is
+bypassed. Every run must complete Step 5a before proceeding to Step 5b and
+Step 6.
 
-1. **Evidence citations.** For every judgment across all evidence records,
-   confirm the `evidence` field is non-empty and names a specific CV source
-   (role, project, skill, or section). An empty or absent citation is a
-   blocking finding.
+### 1. Spawn the verifier
 
-2. **Fairness guardrails.** Confirm that protected characteristics were not
-   used, inferred, or commented upon in any judgment. Confirm that identical
-   criteria were applied to every candidate. Confirm that employment gaps
-   were treated neutrally. Any fairness violation is a blocking finding.
+After the Opus synthesis subagent returns (Step 3a), before writing any decision
+record, spawn one Sonnet verifier subagent following the charter at
+`plugins/tabp/agents/screen-verifier-subagent.md`. Pass exactly the six inline
+inputs:
 
-3. **Must-have gates.** Confirm that any candidate with a `Missing` judgment
-   on a must-have requirement has a `must_have_gate` value of
-   `"Missing:<list>"` and a `recommendation` of `Hold` or `Reject`. A
-   discrepancy is a blocking finding.
+- `run_id` — the active run identifier
+- `jd_requirements` — the parsed requirement list from Step 2
+- `evidence_records` — all completed `evidence-<candidate-id>.json` records
+- `synthesis_result` — the ranked batch result from the Opus synthesis subagent
+- `scoring_rubric` — the full content of `references/scoring-rubric.md`
+- `fairness_guidelines` — the full content of `references/fairness-guidelines.md`
 
-4. **Rubric consistency.** Confirm that the scoring formula from
-   `references/scoring-rubric.md` was applied uniformly — same weighting and
-   same band thresholds (Strong 80-100, Moderate 60-79, Weak 0-59) for all
-   candidates. An inconsistency is a blocking finding.
+Do NOT include coordinator reasoning, in-progress evaluation notes, or any
+framing of the evidence in the task payload. The verifier operates in isolation
+from the coordinator's perspective.
 
-**If blocking findings exist:**
+### 2. Evaluate the verdict
 
-- Re-evaluate the flagged candidates or judgments.
-- Correct the finding (update the evidence record and re-score where needed).
-- Re-run the self-verification pass until no blocking findings remain.
+Receive the verifier's JSON response:
 
-**Present results only after the pass finds no blocking findings.**
+```json
+{"status": "pass" | "blocking", "blocking_findings": [...]}
+```
 
-After the pass is complete (no blocking findings), proceed to Step 5b to record
-the decision before delivering results.
+- If `status` is `pass` and `blocking_findings` is empty: proceed directly to
+  Step 5b and then Step 6.
+- If `status` is `blocking`: enter the remediate-and-re-verify loop (step 3).
 
-**Upgrade path (not implemented here):** an independent Sonnet sub-agent
-verifier may be added in a future iteration (assumption C-7) to provide more
-independence than a single coordinator pass. The charter for that verifier would
-follow the same `plugins/tabp/agents/` convention as the screening and
-synthesis charters defined in this spec.
+### 3. Remediate-and-re-verify loop (capped at N=3 total verifier invocations)
+
+The loop cap is **N=3 total verifier invocations** (including the initial one in
+step 1 above). If the second or third invocation still returns `blocking`, the
+loop exits after the third.
+
+On each `blocking` verdict:
+
+a. Examine the `blocking_findings` array. For each finding:
+   - For `evidence_citation_missing` or `fairness_violation` findings: re-spawn
+     the affected `screen-cv-subagent` instance(s) and pass the updated evidence
+     records back to the verifier.
+   - For `rubric_inconsistency` or `consistency_violation` findings: re-run the
+     synthesis subagent with the current evidence records to obtain a corrected
+     synthesis result.
+   - For `must_have_gate_error` findings: correct the affected evidence record's
+     `must_have_gate` and `recommendation` fields directly.
+
+b. Persist any updated evidence records via `state-write` before re-verifying.
+
+c. Re-spawn the verifier with the updated artifacts. This counts as one
+   additional verifier invocation toward the N=3 cap.
+
+d. Evaluate the new verdict. If `pass`, proceed to Step 5b. If still `blocking`
+   and fewer than N=3 total invocations have been made, repeat from (a). If
+   N=3 invocations have been made and the verdict is still `blocking`, exit the
+   loop (the cap is hit).
+
+### 4. Gate on clean verdict
+
+Present results to the recruiter (Step 6) **only** if the final verifier
+verdict is `pass`. If the N=3 cap is hit with unresolved blocking findings, do
+NOT proceed to Step 6 result delivery — go to Step 5b to record the failure and
+notify the recruiter.
+
+**Degradation path.** When the runtime denies Bash access, all `state-write`
+calls become coordinator direct file writes as documented in the Step 0
+degradation path. The verifier still runs — it is a subagent, not a helper call
+— and the `state_write_mode="instructed"` flag is already set. This is
+unchanged.
 
 ## Step 5b — Record the decision
 
-After the self-verification pass produces no blocking findings, record the
-decision before presenting results.
+After Step 5a completes (whether with a clean `pass` or with unresolved
+blocking findings at the N=3 cap), record the independent verifier verdict
+before taking any further action.
 
-1. **Write the decision record.** Invoke:
+1. **Clean pass — verification succeeded.** Invoke:
    ```
    python3 plugins/tabp/helpers/tabp_helper.py decision-write \
      --project-dir <project-folder> \
      --run-id <run_id> \
      --verification-passed true \
-     --verification-notes "<summary of the self-verification pass outcome>"
+     --verification-notes "<summary of the independent verifier verdict: pass on iteration N>"
    ```
    The helper writes `.tabp/runs/<run_id>/decision.json` atomically with:
    - `verification_passed: true`
@@ -232,11 +279,21 @@ decision before presenting results.
    - `presented_at`: the current UTC timestamp (set by the helper)
    - `sign_off: null`
 
-2. **If verification failed (blocking findings not resolved).** Write with
-   `--verification-passed false` and include the blocking findings in
-   `--verification-notes`. Do NOT proceed to Step 6 until all blocking
-   findings are resolved and a subsequent pass writes
-   `verification_passed: true`.
+   After writing, proceed to Step 6 to deliver results.
+
+2. **Cap hit — unresolved blocking findings.** When the N=3 cap is reached and
+   the verifier still returns `blocking`, write with `--verification-passed false`
+   and include the unresolved `blocking_findings` in `--verification-notes`:
+   ```
+   python3 plugins/tabp/helpers/tabp_helper.py decision-write \
+     --project-dir <project-folder> \
+     --run-id <run_id> \
+     --verification-passed false \
+     --verification-notes "<list the unresolved blocking findings here>"
+   ```
+   Do NOT proceed to Step 6. Notify the recruiter that the run produced
+   unresolved verification issues (summarise the blocking findings) and advise
+   them not to proceed to scorecard use without manual review.
 
 3. **Degradation path.** If Bash is unavailable, write `decision.json`
    directly into `.tabp/runs/<run_id>/` using the file-write capability,

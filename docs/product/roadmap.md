@@ -186,6 +186,24 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
   All design skills also gain a shared **design-time consistency step** — detect
   doc gaps/staleness across the graph and recommend adjustments in-session, no
   separate tooling ([ADR 0012](../adr/0012-design-time-doc-consistency.md)).
+- **Epic: principles & standards doc layer + brownfield standardization** — acs
+  maintains two more living doc sets for consumers: **principles/** (engineering
+  principles, e.g. `/acs:create-principles`) and **standards/** (coding
+  standards/conventions, e.g. `/acs:create-standards`), each a product-level
+  producer with templates and a planner/executor/verifier triad, following ADR
+  0011's one-skill-per-set pattern. The sets extend the conformance chain to
+  **PRD → architecture → standards → design → specs → code** — design and code
+  verifiers check conformance (no silent waivers). `/acs:create-architecture`'s
+  output set gains a **project-structure target** document (intended repo layout
+  from the C4 views). A new brownfield skill **`/acs:standardize-project`**
+  (separate from greenfield-only `/acs:create-project`) audits an existing repo
+  against its standards docs, that project-structure target, and acs-readiness
+  tooling, then **additively** sets up the missing docs/config/tooling as one
+  reviewed PR — **never moving or renaming existing source**; structural gaps
+  become recommended follow-up tickets (additive-only guardrail, C-2). Maps to
+  PRD G10 and the acs Could-have features. `settings.schema.json` gains
+  `principles_path`/`standards_path`; `/acs:init` defaults them. Skill count grows
+  accordingly. Traces **G10** (+ the Tech-lead persona).
 - Semver stability promise for state-file schemas (migration notes per minor).
 
 ## tabp plugin track
@@ -195,7 +213,7 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
 Maps to PRD: [`prd.md`](prd.md#features-moscow)
 tabp Must-have screen-cvs feature and metrics T1–T5.
 
-Deliver the screen-cvs capability in Claude Cowork:
+Deliver the screen-cvs capability in Claude Cowork or Claude Code:
 
 - **JD parsing** — parse a job description into must-have vs nice-to-have requirements.
 - **Evidence-based scoring** — per requirement: Met/Partial/Missing determination with
@@ -210,7 +228,7 @@ Deliver the screen-cvs capability in Claude Cowork:
   (tool assists, does not decide); bias-relevant JD flags surfaced.
 - **Batch fan-out** — one Sonnet subagent per CV with Opus synthesis for the final
   ranked summary.
-- **Input handling** — reads CVs and JD from the Cowork project folder; falls back to
+- **Input handling** — reads CVs and JD from the project folder; falls back to
   chat attachments.
 
 **Success exit (release gate + ongoing adoption):**
@@ -236,9 +254,9 @@ tabp re-scoped Must-have capabilities and the engineering-rigor NFR (MAR-35 amen
 Deliver the fuller tabp plugin capabilities in tabp's own namespace:
 
 - **tabp settings.json** — configurable models and default CV/JD folder paths; stored
-  in the Cowork project folder.
+  in the project folder.
 - **.tabp/ workspace state** — run history and a per-screening archive (the `.xlsx`
-  scorecard and a JSON record per run); persisted in the Cowork project folder.
+  scorecard and a JSON record per run); persisted in the project folder.
 - **/tabp:usage skill** — per-run usage metrics: cost, time, and tokens.
 - **Resumable runs** — all intermediate states persisted as a human-reviewable audit
   trail; the run can be resumed from the persisted state.
@@ -253,8 +271,8 @@ source-grounded evidence (anti-hallucination), and decision recording for human 
 No `acs` naming or `acs:` prefixes in tabp's surface.
 
 **Deferral:** the MECHANISM (instruction-driven vs hook-gated) and verification of
-what the Cowork runtime actually supports (config resolution, hooks, artifacts,
-self-reported cost/tokens) are deferred to this epic's design phase.
+what both runtimes (Claude Cowork and Claude Code) actually support (config resolution,
+hooks, artifacts, self-reported cost/tokens) are deferred to this epic's design phase.
 
 **Implementation note:** the tabp-upgrade design and build are a separate future epic —
 this milestone defines what to deliver; the design and implementation tickets carry
