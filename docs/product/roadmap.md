@@ -204,6 +204,15 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
   PRD G10 and the acs Could-have features. `settings.schema.json` gains
   `principles_path`/`standards_path`; `/acs:init` defaults them. Skill count grows
   accordingly. Traces **G10** (+ the Tech-lead persona).
+- **Epic: configurable doc-set storage location** — each acs doc set
+  (`prd`, `architecture`, `requirements`, `adr`, and future `standards`/`principles`/
+  `quality`/`operations`) is independently relocatable to an external/absolute
+  filesystem path outside the consumer repo via configuration; one doc-set
+  storage-location config surface generalizes the existing `*_path` keys; producer
+  skills resolve the configured location and preserve a reviewable diff there. Same
+  family as the `principles_path`/`standards_path`/`quality_path`/`operations_path`
+  path-config work above. Maps to PRD extended G6 and the acs Could-have
+  configurable-doc-set-storage-location feature.
 - Semver stability promise for state-file schemas (migration notes per minor).
 
 ## tabp plugin track
@@ -277,6 +286,33 @@ hooks, artifacts, self-reported cost/tokens) are deferred to this epic's design 
 **Implementation note:** the tabp-upgrade design and build are a separate future epic —
 this milestone defines what to deliver; the design and implementation tickets carry
 the build work.
+
+### acs M-future — Notion/remote-docs backend *(future — pending Notion/remote-docs epic)*
+
+Maps to PRD extended G6 and the acs Could-have pluggable-remote-docs-backend feature.
+
+Deliver a pluggable docs backend for acs, mirroring the `tracker.provider` precedent:
+
+- **`local` backend (filesystem, default)** — current behavior, unchanged; supports
+  external/absolute paths (delivered in M3 above).
+- **`notion` backend (first remote provider)** — Notion as the system of record or
+  sync target; two configurable modes per backend:
+  - **Publish/mirror** — repo stays source of truth, the docs-only PR is preserved,
+    content synced to Notion for reading.
+  - **Authoritative-remote** — Notion is the system of record, no repo copy,
+    review/audit happens in Notion.
+- Auth via external CLI/integration; **no secrets in settings** (consistent with the
+  `tracker.provider` precedent and the Safety NFR).
+
+**Deferral:** the MECHANISM — Notion API/auth, markdown→Notion-blocks mapping, PR-less
+vs sync delivery, per-mode review/audit implementation — is deferred to this epic's
+dedicated design phase. This epic requires its own `/acs:create-design` run before
+implementation begins. Non-Notion remote providers (Confluence, Google Docs, SharePoint)
+are Won't-have now; they may be considered as future extensions after this epic ships.
+
+**Implementation note:** this is a future epic pending design — this milestone entry
+defines what to deliver and its scope boundary; the design and implementation tickets
+carry the build work.
 
 ## Later / icebox
 
