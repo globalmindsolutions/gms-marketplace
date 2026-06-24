@@ -56,11 +56,42 @@ All `$id` URIs use tabp-namespaced GitHub paths; no acs identifiers.
 
 ### tabp settings.json
 
-_Forward reference — owned by MAR-3._ `tabp_helper.py settings-read` reads
-a `tabp settings.json` file from the Cowork project folder at skill start and
-applies defaults for missing keys. Schema: `plugins/tabp/schemas/settings.schema.json`
-(MAR-3). Key fields: `screening_model`, `synthesis_model`, `cv_folder`,
-`jd_folder`, `state_write_mode` (`"helper"` or `"instructed"`).
+**File path:** `<project>/tabp settings.json` — literal filename with a space,
+at the Cowork project folder root (NOT inside `.tabp/`). Read by
+`tabp_helper.py settings-read --project-dir <path>` at skill start. Validated
+by `tabp_helper.py settings-validate --project-dir <path>` before reading.
+
+**Schema:** `plugins/tabp/schemas/settings.schema.json` (JSON Schema
+Draft-2020-12; all fields optional; `additionalProperties: false`;
+`state_write_mode` enum `["helper", "instructed"]`; no `workspace_path`, no
+secrets).
+
+**Shape table:**
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `screening_model` | string | coordinator default Sonnet | Model for per-CV screening subagents. |
+| `synthesis_model` | string | coordinator default Opus | Model for synthesis subagent. |
+| `cv_folder` | string | `./cvs` | Relative to project folder. |
+| `jd_folder` | string | `./jds` | Relative to project folder. |
+| `state_write_mode` | `"helper"` or `"instructed"` | `"helper"` | `"instructed"` when Cowork denies shell (degraded mode). |
+
+**Observable fallback envelope** — `settings-read` stdout:
+
+```json
+{
+  "settings": { ...resolved fields... },
+  "settings_source": "file" | "absent" | "corrupt",
+  "from_file": [...keys present in file...],
+  "from_default": [...remaining keys that fell back to defaults...]
+}
+```
+
+When the file is absent: `settings_source = "absent"`, `from_file = []`, all
+five keys in `from_default`. When the file is corrupt: `settings_source =
+"corrupt"`, same. The coordinator reads resolved values from
+`result["settings"]` and can surface which settings came from the file vs.
+which are defaults.
 
 **MAR-38 — `model_pricing` (runtime-read-only, no schema file):** an optional
 `model_pricing` block may appear in `settings.json` to override the built-in

@@ -1727,17 +1727,22 @@ class TestLockOwnershipCrossProcess(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Class TestSettingsRead — settings-read subcommand
+# Class TestSettingsRead — settings-read subcommand (MAR-3 rewrite)
 # ---------------------------------------------------------------------------
 
 class TestSettingsRead(unittest.TestCase):
-    """settings-read resolves <project>/.tabp/settings.json over documented defaults."""
+    """TC-SR-01..07: settings-read resolves <project>/tabp settings.json at project root.
+
+    MAR-3 corrects the reader path from <project>/.tabp/settings.json to the
+    project-root literal filename "tabp settings.json". The output is now an
+    observable envelope with settings_source/from_file/from_default fields.
+    """
 
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
         self._project_dir = self._tmpdir
-        self._tabp_dir = os.path.join(self._project_dir, ".tabp")
-        os.makedirs(self._tabp_dir, exist_ok=True)
+        # No .tabp/ needed — file lives at project root as "tabp settings.json"
+        self._settings_path = os.path.join(self._project_dir, "tabp settings.json")
         self._orig_argv = sys.argv[:]
         self._orig_stdout = sys.stdout
         self._orig_stderr = sys.stderr
@@ -1749,7 +1754,8 @@ class TestSettingsRead(unittest.TestCase):
         sys.stderr = self._orig_stderr
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
-    def _read_settings(self):
+    def _read_envelope(self):
+        """Call _cmd_settings_read and return the full JSON envelope dict."""
         import io
         out = io.StringIO()
         sys.stdout = out
@@ -1759,33 +1765,105 @@ class TestSettingsRead(unittest.TestCase):
             sys.stdout = self._orig_stdout
         return json.loads(out.getvalue())
 
-    def test_defaults_when_no_file(self):
-        """No settings.json -> documented defaults."""
-        self.assertEqual(self._read_settings(), tabp_helper._SETTINGS_DEFAULTS)
+    def _read_settings(self):
+        """Return result["settings"] from the envelope — convenience for simple assertions."""
+        return self._read_envelope()["settings"]
 
-    def test_file_overrides_known_keys_only(self):
-        """A settings.json overrides known keys; unknown keys are not surfaced."""
-        tabp_helper._write_json(
-            os.path.join(self._tabp_dir, "settings.json"),
-            {"screening_model": "haiku", "cv_folder": "/abs/cvs", "unknown": "x"},
-        )
-        settings = self._read_settings()
-        self.assertEqual(settings["screening_model"], "haiku")
-        self.assertEqual(settings["cv_folder"], "/abs/cvs")
-        self.assertEqual(settings["synthesis_model"],
-                         tabp_helper._SETTINGS_DEFAULTS["synthesis_model"])
-        self.assertNotIn("unknown", settings)
+    # --- TC-SR-01: file present at project root, all five fields overridden ---
 
-    def test_corrupt_file_falls_back_to_defaults(self):
-        """A corrupt settings.json falls back to defaults (never raises)."""
+    def test_tc_sr_01_file_at_project_root_overrides_all_fields(self):
+        """TC-SR-01 (AC-1): tabp settings.json at project root; all five values read."""
+        payload = {
+            "screening_model": "haiku",
+            "synthesis_model": "haiku-mini",
+            "cv_folder": "/abs/cvs",
+            "jd_folder": "/abs/jds",
+            "state_write_mode": "instructed",
+        }
+        tabp_helper._write_json(self._settings_path, payload)
+        envelope = self._read_envelope()
+        self.assertEqual(envelope["settings"]["screening_model"], "haiku")
+        self.assertEqual(envelope["settings"]["synthesis_model"], "haiku-mini")
+        self.assertEqual(envelope["settings"]["cv_folder"], "/abs/cvs")
+        self.assertEqual(envelope["settings"]["jd_folder"], "/abs/jds")
+        self.assertEqual(envelope["settings"]["state_write_mode"], "instructed")
+        self.assertEqual(envelope["settings_source"], "file")
+        self.assertCountEqual(envelope["from_file"], list(tabp_helper._SETTINGS_DEFAULTS.keys()))
+
+    # --- TC-SR-02: file absent -> "absent", full defaults ---
+
+    def test_tc_sr_02_absent_file_returns_defaults_and_absent_source(self):
+        """TC-SR-02 (AC-3): No tabp settings.json -> defaults + settings_source=absent."""
+        envelope = self._read_envelope()
+        self.assertEqual(envelope["settings"], tabp_helper._SETTINGS_DEFAULTS)
+        self.assertEqual(envelope["settings_source"], "absent")
+        self.assertEqual(envelope["from_file"], [])
+        self.assertCountEqual(envelope["from_default"], list(tabp_helper._SETTINGS_DEFAULTS.keys()))
+
+    # --- TC-SR-03: corrupt file -> "corrupt", full defaults ---
+
+    def test_tc_sr_03_corrupt_file_returns_defaults_and_corrupt_source(self):
+        """TC-SR-03 (AC-3): Corrupt file -> defaults + settings_source=corrupt."""
         import io
-        with open(os.path.join(self._tabp_dir, "settings.json"), "w") as fh:
+        with open(self._settings_path, "w") as fh:
             fh.write("{not json")
         sys.stderr = io.StringIO()  # swallow the _read_json corruption warning
-        self.assertEqual(self._read_settings(), tabp_helper._SETTINGS_DEFAULTS)
+        envelope = self._read_envelope()
+        self.assertEqual(envelope["settings"], tabp_helper._SETTINGS_DEFAULTS)
+        self.assertEqual(envelope["settings_source"], "corrupt")
+        self.assertEqual(envelope["from_file"], [])
+        self.assertCountEqual(envelope["from_default"], list(tabp_helper._SETTINGS_DEFAULTS.keys()))
 
-    def test_main_dispatch_settings_read(self):
-        """main() dispatches settings-read and prints a settings object."""
+    # --- TC-SR-04: partial file -> partial from_file, partial from_default ---
+
+    def test_tc_sr_04_partial_file_merges_and_tracks_origins(self):
+        """TC-SR-04 (AC-2, AC-3): Partial file -> correct merge and from_file/from_default."""
+        tabp_helper._write_json(self._settings_path, {"screening_model": "haiku"})
+        envelope = self._read_envelope()
+        self.assertEqual(envelope["settings"]["screening_model"], "haiku")
+        self.assertEqual(envelope["settings"]["synthesis_model"],
+                         tabp_helper._SETTINGS_DEFAULTS["synthesis_model"])
+        self.assertEqual(envelope["from_file"], ["screening_model"])
+        self.assertCountEqual(
+            envelope["from_default"],
+            ["synthesis_model", "cv_folder", "jd_folder", "state_write_mode"]
+        )
+        self.assertEqual(envelope["settings_source"], "file")
+
+    # --- TC-SR-05: all five fields in file -> from_default is empty ---
+
+    def test_tc_sr_05_all_five_fields_from_file(self):
+        """TC-SR-05 (AC-2): Five-field file -> all in from_file, from_default empty."""
+        payload = {
+            "screening_model": "s1",
+            "synthesis_model": "o1",
+            "cv_folder": "./c",
+            "jd_folder": "./j",
+            "state_write_mode": "helper",
+        }
+        tabp_helper._write_json(self._settings_path, payload)
+        envelope = self._read_envelope()
+        for k, v in payload.items():
+            self.assertEqual(envelope["settings"][k], v)
+        self.assertCountEqual(envelope["from_file"], list(tabp_helper._SETTINGS_DEFAULTS.keys()))
+        self.assertEqual(envelope["from_default"], [])
+
+    # --- TC-SR-06: file with unknown key -> unknown key absent from settings ---
+
+    def test_tc_sr_06_unknown_key_in_file_is_ignored(self):
+        """TC-SR-06 (AC-2): Unknown key in file not surfaced; known keys resolved."""
+        tabp_helper._write_json(self._settings_path, {
+            "screening_model": "haiku",
+            "unknown_key": "bad",
+        })
+        envelope = self._read_envelope()
+        self.assertNotIn("unknown_key", envelope["settings"])
+        self.assertEqual(envelope["settings"]["screening_model"], "haiku")
+
+    # --- TC-SR-07: main() dispatches settings-read, envelope has "settings" key ---
+
+    def test_tc_sr_07_main_dispatch_settings_read_returns_envelope(self):
+        """TC-SR-07 (AC-1): main() dispatches settings-read; envelope contains settings key."""
         import io
         sys.argv = ["tabp_helper.py", "settings-read",
                     "--project-dir", self._project_dir]
@@ -1795,7 +1873,261 @@ class TestSettingsRead(unittest.TestCase):
             tabp_helper.main()
         finally:
             sys.stdout = self._orig_stdout
-        self.assertIn("screening_model", json.loads(out.getvalue()))
+        parsed = json.loads(out.getvalue())
+        self.assertIn("settings", parsed)
+        self.assertIn("settings_source", parsed)
+        self.assertIn("from_file", parsed)
+        self.assertIn("from_default", parsed)
+        self.assertIn("screening_model", parsed["settings"])
+
+
+# ---------------------------------------------------------------------------
+# Class TestSettingsValidate — _validate_settings and _cmd_settings_validate
+# ---------------------------------------------------------------------------
+
+class TestSettingsValidate(unittest.TestCase):
+    """TC-SV-01..15: _validate_settings and _cmd_settings_validate (MAR-3)."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._orig_stdout = sys.stdout
+        self._orig_stderr = sys.stderr
+        self._orig_argv = sys.argv[:]
+
+    def tearDown(self):
+        import shutil
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+        sys.argv = self._orig_argv
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _call_validate(self, args):
+        """Call _cmd_settings_validate and return (stdout_str, exit_code)."""
+        import io
+        out = io.StringIO()
+        sys.stdout = out
+        try:
+            tabp_helper._cmd_settings_validate(args)
+            code = 0
+        except SystemExit as exc:
+            code = exc.code
+        finally:
+            sys.stdout = self._orig_stdout
+        return out.getvalue(), code
+
+    # --- TC-SV-01: empty dict is valid ---
+
+    def test_tc_sv_01_empty_dict_is_valid(self):
+        """TC-SV-01 (AC-2): _validate_settings({}) — all optional, no exception."""
+        tabp_helper._validate_settings({})  # must not raise
+
+    # --- TC-SV-02: all five valid fields ---
+
+    def test_tc_sv_02_all_five_valid_fields(self):
+        """TC-SV-02 (AC-2): All five valid fields — no exception."""
+        tabp_helper._validate_settings({
+            "screening_model": "sonnet",
+            "synthesis_model": "opus",
+            "cv_folder": "./cvs",
+            "jd_folder": "./jds",
+            "state_write_mode": "helper",
+        })
+
+    # --- TC-SV-02b: model_pricing accepted (MAR-3 ↔ MAR-38 integration) ---
+
+    def test_tc_sv_02b_model_pricing_dict_accepted(self):
+        """model_pricing (runtime-read-only, MAR-38) must validate as a known key so
+        settings-validate and settings-read agree. See docs/requirements/tabp.md:216-237."""
+        # A valid model_pricing block must not raise.
+        tabp_helper._validate_settings({
+            "screening_model": "sonnet",
+            "model_pricing": {
+                "claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0},
+            },
+        })
+
+    def test_tc_sv_02c_model_pricing_non_dict_rejected(self):
+        """model_pricing must be an object; a non-dict value is a validation error."""
+        with self.assertRaises(tabp_helper.TabpValidationError) as ctx:
+            tabp_helper._validate_settings({"model_pricing": "not-a-dict"})
+        self.assertIn("model_pricing", str(ctx.exception))
+
+    # --- TC-SV-03: screening_model wrong type ---
+
+    def test_tc_sv_03_screening_model_wrong_type(self):
+        """TC-SV-03 (AC-2): screening_model is int, not str — TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError) as ctx:
+            tabp_helper._validate_settings({"screening_model": 42})
+        self.assertIn("screening_model", str(ctx.exception))
+
+    # --- TC-SV-04: synthesis_model is None ---
+
+    def test_tc_sv_04_synthesis_model_none(self):
+        """TC-SV-04 (AC-2): synthesis_model is None — TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_settings({"synthesis_model": None})
+
+    # --- TC-SV-05: cv_folder is int ---
+
+    def test_tc_sv_05_cv_folder_int(self):
+        """TC-SV-05 (AC-2): cv_folder is 123 — TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_settings({"cv_folder": 123})
+
+    # --- TC-SV-06: jd_folder is list ---
+
+    def test_tc_sv_06_jd_folder_list(self):
+        """TC-SV-06 (AC-2): jd_folder is ["list"] — TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_settings({"jd_folder": ["list"]})
+
+    # --- TC-SV-07: state_write_mode invalid enum ---
+
+    def test_tc_sv_07_state_write_mode_invalid_enum(self):
+        """TC-SV-07 (AC-2): state_write_mode="direct" not in enum — TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError) as ctx:
+            tabp_helper._validate_settings({"state_write_mode": "direct"})
+        msg = str(ctx.exception)
+        self.assertIn("direct", msg)
+        # message should name the allowed set
+        self.assertTrue("helper" in msg or "instructed" in msg)
+
+    # --- TC-SV-08: unknown key rejected ---
+
+    def test_tc_sv_08_unknown_key_rejected(self):
+        """TC-SV-08 (AC-4): Unknown key "unknown_field" — TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError) as ctx:
+            tabp_helper._validate_settings({"unknown_field": "x"})
+        self.assertIn("unknown_field", str(ctx.exception))
+
+    # --- TC-SV-09: workspace_path is unknown key -> rejected ---
+
+    def test_tc_sv_09_workspace_path_rejected(self):
+        """TC-SV-09 (AC-4): workspace_path is an unknown key — TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_settings({"workspace_path": "/some/path"})
+
+    # --- TC-SV-10: .acs/ substring in value rejected ---
+
+    def test_tc_sv_10_acs_substring_in_value_rejected(self):
+        """TC-SV-10 (AC-4): cv_folder value contains ".acs/" — TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_settings({"cv_folder": "/some/.acs/cvs"})
+
+    # --- TC-SV-11: _cmd_settings_validate --project-dir with valid file ---
+
+    def test_tc_sv_11_cmd_validate_project_dir_valid(self):
+        """TC-SV-11 (AC-2): --project-dir with valid tabp settings.json -> ok=true, exit 0."""
+        path = os.path.join(self._tmpdir, "tabp settings.json")
+        tabp_helper._write_json(path, {"screening_model": "sonnet"})
+        out, code = self._call_validate(["--project-dir", self._tmpdir])
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(out)["ok"])
+
+    # --- TC-SV-12: --project-dir where tabp settings.json is absent ---
+
+    def test_tc_sv_12_cmd_validate_project_dir_absent(self):
+        """TC-SV-12 (AC-2): --project-dir with no file -> ok=false, EXIT_VALIDATION_FAILED."""
+        out, code = self._call_validate(["--project-dir", self._tmpdir])
+        self.assertEqual(code, tabp_helper.EXIT_VALIDATION_FAILED)
+        parsed = json.loads(out)
+        self.assertFalse(parsed["ok"])
+
+    # --- TC-SV-13: --file with valid settings JSON ---
+
+    def test_tc_sv_13_cmd_validate_file_valid(self):
+        """TC-SV-13 (AC-2): --file with valid settings JSON -> ok=true, exit 0."""
+        path = os.path.join(self._tmpdir, "mysettings.json")
+        tabp_helper._write_json(path, {
+            "screening_model": "claude-sonnet-4-5",
+            "state_write_mode": "helper",
+        })
+        out, code = self._call_validate(["--file", path])
+        self.assertEqual(code, 0)
+        self.assertTrue(json.loads(out)["ok"])
+
+    # --- TC-SV-14: --file with invalid state_write_mode ---
+
+    def test_tc_sv_14_cmd_validate_file_invalid(self):
+        """TC-SV-14 (AC-2): --file with invalid state_write_mode -> ok=false, EXIT_VALIDATION_FAILED."""
+        path = os.path.join(self._tmpdir, "bad_settings.json")
+        tabp_helper._write_json(path, {"state_write_mode": "direct"})
+        out, code = self._call_validate(["--file", path])
+        self.assertEqual(code, tabp_helper.EXIT_VALIDATION_FAILED)
+        parsed = json.loads(out)
+        self.assertFalse(parsed["ok"])
+
+    # --- TC-SV-15: main() dispatches settings-validate ---
+
+    def test_tc_sv_15_main_dispatches_settings_validate(self):
+        """TC-SV-15 (AC-2): main() dispatches settings-validate; valid call exits 0."""
+        import io
+        path = os.path.join(self._tmpdir, "tabp settings.json")
+        tabp_helper._write_json(path, {"screening_model": "sonnet"})
+        sys.argv = ["tabp_helper.py", "settings-validate",
+                    "--project-dir", self._tmpdir]
+        out = io.StringIO()
+        sys.stdout = out
+        try:
+            tabp_helper.main()
+        except SystemExit as exc:
+            self.assertEqual(exc.code, 0)
+        finally:
+            sys.stdout = self._orig_stdout
+        parsed = json.loads(out.getvalue())
+        self.assertTrue(parsed["ok"])
+
+    # --- TC-SV-16: _validate_settings receives non-dict (line 562) ---
+
+    def test_tc_sv_16_validate_settings_non_dict_raises(self):
+        """TC-SV-16: _validate_settings receives a non-dict -> TabpValidationError."""
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_settings("not a dict")
+        with self.assertRaises(tabp_helper.TabpValidationError):
+            tabp_helper._validate_settings(42)
+
+    # --- TC-SV-17: _cmd_settings_validate bad args (lines 1073-1077) ---
+
+    def test_tc_sv_17_cmd_settings_validate_bad_args_no_args(self):
+        """TC-SV-17: _cmd_settings_validate with no args -> EXIT_ERROR."""
+        import io
+        sys.stderr = io.StringIO()
+        try:
+            tabp_helper._cmd_settings_validate([])
+        except SystemExit as exc:
+            self.assertEqual(exc.code, tabp_helper.EXIT_ERROR)
+        finally:
+            sys.stderr = self._orig_stderr
+
+    def test_tc_sv_18_cmd_settings_validate_bad_args_both_args(self):
+        """TC-SV-18: _cmd_settings_validate with both --project-dir and --file -> EXIT_ERROR."""
+        import io
+        sys.stderr = io.StringIO()
+        path = os.path.join(self._tmpdir, "f.json")
+        tabp_helper._write_json(path, {})
+        try:
+            tabp_helper._cmd_settings_validate([
+                "--project-dir", self._tmpdir,
+                "--file", path,
+            ])
+        except SystemExit as exc:
+            self.assertEqual(exc.code, tabp_helper.EXIT_ERROR)
+        finally:
+            sys.stderr = self._orig_stderr
+
+    # --- TC-SV-19: _cmd_settings_validate --project-dir with corrupt file ---
+
+    def test_tc_sv_19_cmd_settings_validate_corrupt_file(self):
+        """TC-SV-19: _cmd_settings_validate with corrupt file -> ok=false."""
+        import io
+        path = os.path.join(self._tmpdir, "tabp settings.json")
+        with open(path, "w") as fh:
+            fh.write("{not json")
+        sys.stderr = io.StringIO()  # swallow _read_json warning
+        out, code = self._call_validate(["--project-dir", self._tmpdir])
+        self.assertEqual(code, tabp_helper.EXIT_VALIDATION_FAILED)
+        parsed = json.loads(out)
+        self.assertFalse(parsed["ok"])
 
 
 # ---------------------------------------------------------------------------
@@ -2825,8 +3157,10 @@ class TestUsageReadAggregation(unittest.TestCase):
 
     # (j) settings-read surfaces model_pricing when present
     def test_settings_read_surfaces_model_pricing(self):
-        """settings-read output includes model_pricing when set in settings.json."""
-        settings_path = os.path.join(self._tabp_dir, "settings.json")
+        """settings-read envelope surfaces model_pricing when set in "tabp settings.json"."""
+        # MAR-3 corrected path: <project>/"tabp settings.json" (project root, literal
+        # filename with a space), and the output is the envelope {settings, ...}.
+        settings_path = os.path.join(self._project_dir, "tabp settings.json")
         tabp_helper._write_json(settings_path, {
             "model_pricing": {
                 "claude-opus-4-8": {"input_per_mtok": 15.0, "output_per_mtok": 75.0}
@@ -2838,13 +3172,14 @@ class TestUsageReadAggregation(unittest.TestCase):
         finally:
             self._restore_streams()
         result = json.loads(out.getvalue())
-        self.assertIn("model_pricing", result)
-        self.assertIn("claude-opus-4-8", result["model_pricing"])
+        self.assertIn("model_pricing", result["settings"])
+        self.assertIn("claude-opus-4-8", result["settings"]["model_pricing"])
+        self.assertIn("model_pricing", result["from_file"])
 
-    # (k) settings-read absent model_pricing -> key absent from output
+    # (k) settings-read absent model_pricing -> key absent from settings envelope
     def test_settings_read_absent_model_pricing_not_in_output(self):
-        """settings-read without model_pricing in settings.json: key absent from output."""
-        settings_path = os.path.join(self._tabp_dir, "settings.json")
+        """settings-read without model_pricing: key absent from the settings envelope."""
+        settings_path = os.path.join(self._project_dir, "tabp settings.json")
         tabp_helper._write_json(settings_path, {
             "screening_model": "sonnet",
         })
@@ -2854,4 +3189,348 @@ class TestUsageReadAggregation(unittest.TestCase):
         finally:
             self._restore_streams()
         result = json.loads(out.getvalue())
-        self.assertNotIn("model_pricing", result)
+        self.assertNotIn("model_pricing", result["settings"])
+        self.assertNotIn("model_pricing", result["from_file"])
+
+
+# ---------------------------------------------------------------------------
+# Class TestRuntimeFlag — spec 01 (MAR-40): --runtime flag + runtime resolution
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeFlag(unittest.TestCase):
+    """Spec 01 (MAR-40, AC-2 primary / AC-1 / AC-9) — the --runtime flag,
+    _resolve_runtime, and the usage-read transcript-source override.
+
+    All fixture .tabp/ dirs use tempfile.mkdtemp(). Transcript roots are
+    injected via parameter or the TABP_TRANSCRIPT_ROOT env var — the real
+    ~/.claude path is NEVER read (test harness constraint).
+
+    Tests (each mapped to the spec 01 Test plan item / AC):
+    1. Explicit --runtime claude-code honored over auto-detect          (AC-2)
+    2. Explicit --runtime cowork honored over auto-detect               (AC-2)
+    3. Auto-detect: transcript dir present -> "claude-code"             (AC-2)
+    4. Auto-detect: transcript dir absent  -> "cowork"                  (AC-2)
+    5. Invalid --runtime bogus exits non-zero (argparse choices)        (AC-2)
+    6. No-git .tabp/ resolution under a plain mkdtemp() dir             (AC-1)
+    7. usage-read override: --runtime cowork suppresses transcript read (AC-2)
+    8. Absent-flag back-compat: usage-read + run-finalize unchanged     (AC-2)
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._project_dir = self._tmpdir
+        self._tabp_dir = os.path.join(self._project_dir, ".tabp")
+        os.makedirs(self._tabp_dir, exist_ok=True)
+        self._orig_stdout = sys.stdout
+        self._orig_stderr = sys.stderr
+        self._orig_env = os.environ.copy()
+
+    def tearDown(self):
+        import shutil
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+        for k in list(os.environ.keys()):
+            if k not in self._orig_env:
+                del os.environ[k]
+        for k, v in self._orig_env.items():
+            os.environ[k] = v
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _capture(self):
+        import io
+        out = io.StringIO()
+        err = io.StringIO()
+        sys.stdout = out
+        sys.stderr = err
+        return out, err
+
+    def _restore_streams(self):
+        sys.stdout = self._orig_stdout
+        sys.stderr = self._orig_stderr
+
+    def _make_transcript_dir(self, cwd_slug, lines):
+        """Create a temp transcript dir with a session.jsonl; return its root."""
+        root = os.path.join(self._tmpdir, "transcripts")
+        slug_dir = os.path.join(root, cwd_slug)
+        os.makedirs(slug_dir, exist_ok=True)
+        with open(os.path.join(slug_dir, "session.jsonl"), "w", encoding="utf-8") as fh:
+            for line in lines:
+                fh.write(json.dumps(line) + "\n")
+        return root
+
+    def _write_history(self, runs):
+        history_path = os.path.join(self._tabp_dir, "history.json")
+        tabp_helper._write_json(history_path, {"runs": runs})
+
+    def _write_run_json(self, run_id, run_data):
+        run_dir = os.path.join(self._tabp_dir, "runs", run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        tabp_helper._write_json(os.path.join(run_dir, "run.json"), run_data)
+
+    def _make_run_record(self, run_id, status="completed", usage_source="unavailable",
+                         tokens_in=None, tokens_out=None, cost_basis=None):
+        record = {
+            "run_id": run_id,
+            "skill": "screen-cvs",
+            "started_at": "2026-06-20T09:00:00Z",
+            "ended_at": "2026-06-20T09:30:00Z",
+            "status": status,
+            "stop_reason": None,
+            "state_write_mode": "helper",
+            "usage": {
+                "usage_source": usage_source,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost_usd": None,
+                "duration_seconds": 1800,
+            },
+            "candidates_screened": 1,
+            "jd_slug": "test-role",
+        }
+        if cost_basis is not None:
+            record["usage"]["cost_basis"] = cost_basis
+        return record
+
+    def _make_history_entry(self, run_id, status="completed", usage_source="unavailable"):
+        return {
+            "run_id": run_id,
+            "skill": "screen-cvs",
+            "started_at": "2026-06-20T09:00:00Z",
+            "ended_at": "2026-06-20T09:30:00Z",
+            "status": status,
+            "candidates_screened": 1,
+            "duration_seconds": 1800,
+            "usage_source": usage_source,
+        }
+
+    def _call_usage_read(self, extra_args=None):
+        args = ["--project-dir", self._project_dir]
+        if extra_args:
+            args.extend(extra_args)
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_usage_read(args)
+        finally:
+            self._restore_streams()
+        return json.loads(out.getvalue())
+
+    # --- 1. Explicit --runtime claude-code wins over auto-detect (AC-2) -----
+    def test_explicit_claude_code_wins_when_transcript_absent(self):
+        """_resolve_runtime('claude-code', dir, root) -> 'claude-code' even
+        when no transcript dir exists for the slug (explicit flag wins)."""
+        empty_root = os.path.join(self._tmpdir, "no-transcripts")
+        os.makedirs(empty_root, exist_ok=True)
+        result = tabp_helper._resolve_runtime(
+            "claude-code", self._project_dir, transcript_root=empty_root
+        )
+        self.assertEqual(result, "claude-code")
+
+    # --- 2. Explicit --runtime cowork wins over auto-detect (AC-2) ----------
+    def test_explicit_cowork_wins_when_transcript_present(self):
+        """_resolve_runtime('cowork', dir, root) -> 'cowork' even when a
+        transcript dir for the slug IS present (explicit flag wins)."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 10, "output_tokens": 5},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        result = tabp_helper._resolve_runtime(
+            "cowork", self._project_dir, transcript_root=root
+        )
+        self.assertEqual(result, "cowork")
+
+    # --- 3. Auto-detect: transcript dir present -> claude-code (AC-2) -------
+    def test_autodetect_present_returns_claude_code(self):
+        """Flag absent (None) and <root>/<slug>/ exists -> 'claude-code'."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 1, "output_tokens": 1},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        result = tabp_helper._resolve_runtime(
+            None, self._project_dir, transcript_root=root
+        )
+        self.assertEqual(result, "claude-code")
+
+    # --- 4. Auto-detect: transcript dir absent -> cowork (AC-2) -------------
+    def test_autodetect_absent_returns_cowork(self):
+        """Flag absent (None) and no transcript dir for the slug -> 'cowork'."""
+        empty_root = os.path.join(self._tmpdir, "empty-root")
+        os.makedirs(empty_root, exist_ok=True)
+        result = tabp_helper._resolve_runtime(
+            None, self._project_dir, transcript_root=empty_root
+        )
+        self.assertEqual(result, "cowork")
+
+    # --- 5. Invalid --runtime value rejected by argparse (AC-2) -------------
+    def test_invalid_runtime_value_rejected(self):
+        """usage-read --runtime bogus exits non-zero (argparse choices)."""
+        out, err = self._capture()
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                tabp_helper._cmd_usage_read([
+                    "--project-dir", self._project_dir,
+                    "--runtime", "bogus",
+                ])
+        finally:
+            self._restore_streams()
+        self.assertNotEqual(ctx.exception.code, 0)
+
+    # --- 6. No-git .tabp/ resolution under a plain mkdtemp() dir (AC-1) -----
+    def test_no_git_tabp_resolution_run_start(self):
+        """run-start under a plain (non-git) tempfile.mkdtemp() dir writes the
+        .tabp/ run tree with no git call and no error (AC-1, D4 no-git)."""
+        plain_dir = tempfile.mkdtemp()
+        try:
+            out, err = self._capture()
+            try:
+                tabp_helper._cmd_run_start([
+                    "--project-dir", plain_dir,
+                    "--skill", "screen-cvs",
+                    "--jd-slug", "test-role",
+                ])
+            finally:
+                self._restore_streams()
+            run_id = out.getvalue().strip()
+            self.assertTrue(run_id.startswith("run-"))
+            tabp_dir = os.path.join(plain_dir, ".tabp")
+            self.assertTrue(os.path.isdir(tabp_dir), ".tabp/ must exist")
+            self.assertTrue(
+                os.path.isfile(os.path.join(tabp_dir, "runs", run_id, "run.json")),
+                "run.json must be written under .tabp/runs/<run_id>/"
+            )
+            # No git repo was created or required.
+            self.assertFalse(os.path.isdir(os.path.join(plain_dir, ".git")))
+            # _tabp_dir_from_project performs no git call — pure path join.
+            self.assertEqual(
+                tabp_helper._tabp_dir_from_project(plain_dir),
+                os.path.join(plain_dir, ".tabp")
+            )
+        finally:
+            import shutil
+            shutil.rmtree(plain_dir, ignore_errors=True)
+
+    # --- 7. usage-read override: --runtime cowork suppresses transcript -----
+    def test_usage_read_cowork_override_suppresses_transcript(self):
+        """A run stored as usage_source='claude-code' with a populated
+        transcript dir: --runtime cowork falls back to run.json tokens, while
+        --runtime claude-code reads transcript actuals; the two differ."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 99999, "output_tokens": 88888},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        os.environ["TABP_TRANSCRIPT_ROOT"] = root
+
+        run_id = "run-override"
+        self._write_run_json(run_id, self._make_run_record(
+            run_id, usage_source="claude-code",
+            tokens_in=111, tokens_out=222, cost_basis="estimate"
+        ))
+        self._write_history([self._make_history_entry(run_id, usage_source="claude-code")])
+
+        cc_result = self._call_usage_read(["--runtime", "claude-code"])
+        cc_row = cc_result["runs"][0]
+        # claude-code: transcript actuals win
+        self.assertEqual(cc_row["tokens_in"], 99999)
+        self.assertEqual(cc_row["tokens_out"], 88888)
+
+        cowork_result = self._call_usage_read(["--runtime", "cowork"])
+        cw_row = cowork_result["runs"][0]
+        # cowork override: transcript read suppressed, run.json tokens used
+        self.assertEqual(cw_row["tokens_in"], 111)
+        self.assertEqual(cw_row["tokens_out"], 222)
+        # cost_basis stays 'estimate' (still derived; no relabel to actual)
+        self.assertEqual(cw_row["cost_basis"], "estimate")
+
+        self.assertNotEqual(
+            (cc_row["tokens_in"], cc_row["tokens_out"]),
+            (cw_row["tokens_in"], cw_row["tokens_out"]),
+            "transcript-read vs override must produce different token counts"
+        )
+
+    # --- 8. Absent-flag back-compat: byte-for-byte unchanged (AC-2) ---------
+    def test_absent_flag_usage_read_backcompat(self):
+        """usage-read with NO --runtime auto-detects today's behavior:
+        transcript dir present -> reads actuals (== explicit claude-code)."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 4321, "output_tokens": 1234},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        os.environ["TABP_TRANSCRIPT_ROOT"] = root
+
+        run_id = "run-backcompat"
+        self._write_run_json(run_id, self._make_run_record(
+            run_id, usage_source="claude-code",
+            tokens_in=5, tokens_out=6, cost_basis="estimate"
+        ))
+        self._write_history([self._make_history_entry(run_id, usage_source="claude-code")])
+
+        absent = self._call_usage_read()  # no --runtime
+        explicit = self._call_usage_read(["--runtime", "claude-code"])
+        self.assertEqual(absent["runs"], explicit["runs"],
+                         "absent flag must reproduce auto-detect == claude-code path")
+        # transcript actuals are read (today's behavior)
+        self.assertEqual(absent["runs"][0]["tokens_in"], 4321)
+        self.assertEqual(absent["runs"][0]["tokens_out"], 1234)
+
+    def test_absent_flag_run_finalize_backcompat(self):
+        """run-finalize with NO --runtime behaves exactly as before:
+        writes status/usage_source/tokens to run.json unchanged."""
+        run_id = "run-finalize-bc"
+        self._write_run_json(run_id, self._make_run_record(
+            run_id, status="in_progress", usage_source="unavailable"
+        ))
+        self._write_history([self._make_history_entry(
+            run_id, status="in_progress", usage_source="unavailable")])
+
+        out, err = self._capture()
+        try:
+            tabp_helper._cmd_run_finalize([
+                "--project-dir", self._project_dir,
+                "--run-id", run_id,
+                "--status", "completed",
+                "--usage-source", "estimate",
+                "--tokens-in", "700",
+                "--tokens-out", "300",
+                "--cost-basis", "estimate",
+            ])
+        finally:
+            self._restore_streams()
+
+        run_path = os.path.join(self._tabp_dir, "runs", run_id, "run.json")
+        record = tabp_helper._read_json(run_path)
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["usage"]["usage_source"], "estimate")
+        self.assertEqual(record["usage"]["tokens_in"], 700)
+        self.assertEqual(record["usage"]["tokens_out"], 300)
+        # No new runtime field persisted (accept-and-ignore for state subcommands).
+        self.assertNotIn("runtime", record["usage"])
+        self.assertNotIn("runtime", record)
+
+
+    # --- 9. transcript_root=None default uses TABP_TRANSCRIPT_ROOT env -------
+    def test_resolve_runtime_default_root_from_env(self):
+        """_resolve_runtime(None, dir) with transcript_root omitted resolves the
+        root from TABP_TRANSCRIPT_ROOT (never the real ~/.claude path)."""
+        cwd_slug = tabp_helper._cwd_slug(self._project_dir)
+        root = self._make_transcript_dir(cwd_slug, [
+            {"message": {"usage": {"input_tokens": 1, "output_tokens": 1},
+                         "model": "claude-sonnet-4-6"}}
+        ])
+        os.environ["TABP_TRANSCRIPT_ROOT"] = root
+        # transcript_root omitted -> default-resolution branch is exercised.
+        self.assertEqual(
+            tabp_helper._resolve_runtime(None, self._project_dir),
+            "claude-code"
+        )
+        # Same project under an env root with no slug dir -> cowork.
+        empty_root = os.path.join(self._tmpdir, "env-empty")
+        os.makedirs(empty_root, exist_ok=True)
+        os.environ["TABP_TRANSCRIPT_ROOT"] = empty_root
+        self.assertEqual(
+            tabp_helper._resolve_runtime(None, self._project_dir),
+            "cowork"
+        )

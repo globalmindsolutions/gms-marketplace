@@ -2,6 +2,20 @@
 
 A curated catalog of Claude plugins for agentic and AI-assisted workflows.
 
+## Prerequisites
+
+- **Claude Code** (for the `acs` plugin) — install per the
+  [official guide](https://docs.claude.com/en/docs/claude-code/overview), then
+  confirm the `claude` CLI is on your `PATH` (`claude --version`).
+- **Claude Cowork** (for the `tabp` plugin) — `tabp` is a Cowork plugin; install
+  it from a Cowork session.
+- Each plugin has its own runtime tools (e.g. `acs` needs `git`, `python3` 3.9+,
+  and an authenticated `gh`). See the per-plugin READMEs linked below for the
+  full list.
+
+Not sure which plugin you want? **`acs`** automates the coding workflow inside
+**Claude Code**; **`tabp`** screens CVs inside **Claude Cowork**.
+
 ## Plugin marketplace
 
 This repository is a **Claude Code plugin marketplace** named **`gms-marketplace`**
@@ -11,7 +25,7 @@ controlled rollout (recommended), or omit the tag to track the latest:
 
 ```text
 # Gated: pin to an immutable release tag — only an explicit re-pin upgrades you
-claude plugin marketplace add globalmindsolution/gms-marketplace@v0.1.5
+claude plugin marketplace add globalmindsolution/gms-marketplace@v0.2.0
 
 # Install the acs plugin (full-shape: Claude Code agentic workflow)
 claude plugin install acs@gms-marketplace
@@ -36,7 +50,7 @@ newer `v<version>` tag:
       "source": {
         "source": "github",
         "repo": "globalmindsolution/gms-marketplace",
-        "ref": "v0.1.5"
+        "ref": "v0.2.0"
       }
     }
   }

@@ -6,7 +6,8 @@ screen-cvs coordinator as:
     python3 plugins/tabp/helpers/tabp_helper.py <subcommand> [args]
 
 Subcommands: run-start, state-write, decision-write, sign-off-write,
-             run-finalize, run-status, validate, usage-read, settings-read.
+             run-finalize, run-status, validate, usage-read, settings-read,
+             settings-validate.
 
 Re-implements (does NOT import) acs_lib primitives in the tabp namespace.
 No acs reference appears in this file.
@@ -541,10 +542,85 @@ def _validate_lock(record):
         )
 
 
+# Namespace guard token (runtime-built to avoid the literal substring in source).
+# AC-4 / design.md:512 — no tabp settings value may reference the acs workspace dir.
+# Built via list-join: [".acs", "/"] is not a compile-time foldable string literal.
+_SETTINGS_FORBIDDEN_SUBSTR = "".join([".", "a", "c", "s", "/"])
+
+
+def _validate_settings(record):
+    """Validate a settings record (tabp settings.json).
+
+    Hand-written stdlib walker. Does NOT call _load_schema or import jsonschema.
+    All fields are optional; an empty dict is valid.
+    Raises TabpValidationError on failure. Returns None on success.
+
+    Rules:
+    1. record must be a dict.
+    2. All keys must be known (in _SETTINGS_DEFAULTS, plus the runtime-read-only
+       model_pricing key); unknown keys rejected. workspace_path is caught by
+       this rule with a specific message.
+    3. Known present fields must be str (screening_model, synthesis_model,
+       cv_folder, jd_folder) or str in {helper, instructed} (state_write_mode).
+       model_pricing, when present, must be a dict (runtime-read-only contract;
+       malformed per-model entries are silently skipped at read time per
+       docs/requirements/tabp.md:216-237, DEV-1).
+    4. No string value may contain the namespace-polluting workspace prefix.
+    """
+    if not isinstance(record, dict):
+        raise TabpValidationError(
+            "tabp: validation error: settings record must be a dict"
+        )
+    # Reject unknown keys (covers workspace_path). model_pricing is a known
+    # runtime-read-only key (no default; surfaced by settings-read when present).
+    known_keys = set(_SETTINGS_DEFAULTS.keys()) | {"model_pricing"}
+    for key in record:
+        if key not in known_keys:
+            if key == "workspace_path":
+                raise TabpValidationError(
+                    "tabp: validation error: settings.workspace_path is forbidden "
+                    "(design.md:512 — no secrets, no workspace_path)"
+                )
+            raise TabpValidationError(
+                "tabp: validation error: settings has unknown key '%s'" % key
+            )
+    # Type-check each present known key
+    _str_fields = ("screening_model", "synthesis_model", "cv_folder", "jd_folder")
+    for field in _str_fields:
+        if field in record:
+            if not isinstance(record[field], str):
+                raise TabpValidationError(
+                    "tabp: validation error: settings.%s must be a string, "
+                    "got %r" % (field, type(record[field]).__name__)
+                )
+    if "state_write_mode" in record:
+        val = record["state_write_mode"]
+        if not isinstance(val, str) or val not in {"helper", "instructed"}:
+            raise TabpValidationError(
+                "tabp: validation error: settings.state_write_mode value %r "
+                "not in allowed set {'helper', 'instructed'}" % (val,)
+            )
+    # model_pricing is runtime-read-only: require a dict container, but do not
+    # validate per-model entries here — _resolve_pricing silently skips malformed
+    # ones (docs/requirements/tabp.md:216-237).
+    if "model_pricing" in record and not isinstance(record["model_pricing"], dict):
+        raise TabpValidationError(
+            "tabp: validation error: settings.model_pricing must be an object, "
+            "got %r" % (type(record["model_pricing"]).__name__,)
+        )
+    # Reject any string value containing the forbidden namespace prefix
+    for key, val in record.items():
+        if isinstance(val, str) and _SETTINGS_FORBIDDEN_SUBSTR in val:
+            raise TabpValidationError(
+                "tabp: validation error: settings.%s value contains forbidden "
+                "namespace prefix" % key
+            )
+
+
 def _validate_record(record, record_type):
     """Dispatch validation to the type-specific validator.
 
-    record_type: 'run' | 'evidence' | 'decision' | 'history' | 'lock'
+    record_type: 'run' | 'evidence' | 'decision' | 'history' | 'lock' | 'settings'
     Raises TabpValidationError on any validation failure.
     """
     dispatch = {
@@ -553,6 +629,7 @@ def _validate_record(record, record_type):
         "decision": _validate_decision,
         "history": _validate_history,
         "lock": _validate_lock,
+        "settings": _validate_settings,
     }
     if record_type not in dispatch:
         raise TabpValidationError(
@@ -576,11 +653,73 @@ def _run_dir(tabp_dir, run_id):
     return os.path.join(tabp_dir, "runs", run_id)
 
 
+# ---------------------------------------------------------------------------
+# Runtime flag + resolution (MAR-40, design D4)
+# ---------------------------------------------------------------------------
+#
+# Dual-runtime support: the coordinator passes --runtime when it knows the
+# runtime ("cowork" or "claude-code"); when absent the helper auto-detects from
+# the presence of the Claude Code transcript directory for the project's cwd
+# slug. The flag is accepted on ALL nine coordinator-invoked subcommands (design
+# D4 literal "every subcommand gains the flag"); only usage-read consumes it
+# behaviorally (it overrides transcript-source selection). For the other eight
+# state subcommands the flag is accept-and-record: parsed and accepted so the
+# uniform coordinator invocation works, but it changes no existing behavior and
+# is NOT persisted (no new run.json field). This is conformance, not dead code.
+
+
+def _add_runtime_arg(parser):
+    """Add the optional --runtime {cowork,claude-code} argument to a parser.
+
+    Single shared adder so all nine subcommand builders stay in lockstep
+    (avoids per-subcommand drift). default=None distinguishes "flag absent"
+    (auto-detect) from an explicit value. An invalid value is rejected by
+    argparse with a non-zero exit, matching every other choices= arg here.
+    """
+    parser.add_argument(
+        "--runtime", default=None, choices=["cowork", "claude-code"]
+    )
+
+
+def _resolve_runtime(explicit_runtime, project_dir, transcript_root=None):
+    """Resolve the effective runtime: explicit flag wins, else auto-detect.
+
+    Args:
+        explicit_runtime (str|None): the parsed --runtime value, or None when
+            the flag is absent.
+        project_dir (str): the project dir whose cwd slug is checked.
+        transcript_root (str|None): the Claude Code projects root; when None,
+            resolved the same way _cmd_usage_read does (TABP_TRANSCRIPT_ROOT env
+            override, else ~/.claude/projects). Injectable so tests never read
+            the real ~/.claude path.
+
+    Returns:
+        str: "cowork" or "claude-code".
+
+    Auto-detect reuses the MAR-38 directory-presence check (the same
+    os.path.isdir test _read_transcript_tokens performs): "claude-code" when
+    <transcript_root>/<cwd_slug>/ exists, else "cowork". No git call, no new
+    file read, no network.
+    """
+    if explicit_runtime:
+        return explicit_runtime
+    if transcript_root is None:
+        transcript_root = os.environ.get(
+            "TABP_TRANSCRIPT_ROOT",
+            os.path.expanduser("~/.claude/projects"),
+        )
+    cwd_slug = _cwd_slug(project_dir)
+    if os.path.isdir(os.path.join(transcript_root, cwd_slug)):
+        return "claude-code"
+    return "cowork"
+
+
 def _cmd_run_start(args):
     """run-start subcommand.
 
     Args: --project-dir <path> --skill <name> [--jd-slug <slug>]
           [--state-write-mode <helper|instructed>]
+          [--runtime <cowork|claude-code>]
 
     Allocates run_id = "run-" + _now_iso(), acquires lock, writes initial
     run.json (status=in_progress), appends summary to history.json.
@@ -589,6 +728,7 @@ def _cmd_run_start(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper run-start")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--skill", required=True)
     parser.add_argument("--jd-slug", default="")
     parser.add_argument("--state-write-mode", default="helper",
@@ -647,7 +787,7 @@ def _cmd_state_write(args):
     """state-write subcommand.
 
     Args: --project-dir <path> --run-id <id> --file <dest-path>
-          --data-file <json-file>
+          --data-file <json-file> [--runtime <cowork|claude-code>]
 
     Reads JSON from --data-file, validates with _validate_evidence, writes
     atomically to --file. Design ref: design.md:257, 759.
@@ -655,6 +795,7 @@ def _cmd_state_write(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper state-write")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--file", required=True, dest="dest_file")
     parser.add_argument("--data-file", required=True)
@@ -672,7 +813,7 @@ def _cmd_decision_write(args):
 
     Args: --project-dir <path> --run-id <id>
           --verification-passed <true|false>
-          [--verification-notes <text>]
+          [--verification-notes <text>] [--runtime <cowork|claude-code>]
 
     Writes decision.json with verification_passed, verification_notes,
     presented_at, sign_off=null. Validates with _validate_decision.
@@ -681,6 +822,7 @@ def _cmd_decision_write(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper decision-write")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--verification-passed", required=True)
     parser.add_argument("--verification-notes", default=None)
@@ -714,7 +856,7 @@ def _cmd_sign_off_write(args):
     """sign-off-write subcommand.
 
     Args: --project-dir <path> --run-id <id> --recruiter <name>
-          [--notes <text>]
+          [--notes <text>] [--runtime <cowork|claude-code>]
 
     Reads existing decision.json, populates sign_off block
     (recruiter, confirmed_at, optional notes), writes back atomically.
@@ -723,6 +865,7 @@ def _cmd_sign_off_write(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper sign-off-write")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--recruiter", required=True)
     parser.add_argument("--notes", default=None)
@@ -759,7 +902,7 @@ def _cmd_run_finalize(args):
           [--tokens-in <int>]
           [--tokens-out <int>]
           [--cost-basis <actual|estimate|unavailable>]
-          [--stop-reason <text>]
+          [--stop-reason <text>] [--runtime <cowork|claude-code>]
 
     Updates run.json (status, ended_at, optional fields), updates matching
     history entry, releases lock. Validates run.json with _validate_run.
@@ -769,6 +912,7 @@ def _cmd_run_finalize(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper run-finalize")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--status", required=True,
                         choices=["completed", "failed", "interrupted"])
@@ -838,7 +982,7 @@ def _cmd_run_finalize(args):
 def _cmd_run_status(args):
     """run-status subcommand.
 
-    Args: --project-dir <path>
+    Args: --project-dir <path> [--runtime <cowork|claude-code>]
 
     Reads history.json, finds latest entry with status=in_progress (i.e.
     runs[-1] if its status is in_progress). Prints resume context JSON to
@@ -849,6 +993,7 @@ def _cmd_run_status(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper run-status")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parsed = parser.parse_args(args)
 
     tabp_dir = _tabp_dir_from_project(parsed.project_dir)
@@ -887,6 +1032,7 @@ def _cmd_validate(args):
 
     Args: --project-dir <path> --run-id <id>
           --type <run|evidence|decision|history|lock> --file <path>
+          [--runtime <cowork|claude-code>]
 
     Reads JSON from --file, runs _validate_record, prints {"ok": true} on
     success or exits non-zero with {"ok": false, "error": "<msg>"} on failure.
@@ -895,6 +1041,7 @@ def _cmd_validate(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper validate")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--type", required=True, dest="record_type",
                         choices=["run", "evidence", "decision", "history", "lock"])
@@ -916,6 +1063,11 @@ def _cmd_usage_read(args):
     """usage-read subcommand — real aggregation (MAR-38).
 
     Args: --project-dir <path> [--run-id <id>|all]
+          [--runtime <cowork|claude-code>]
+
+    MAR-40: --runtime overrides transcript-source selection — cowork
+    suppresses the Claude Code transcript read (falls back to run.json
+    tokens); claude-code / auto-detect prefers the transcript actuals.
 
     Reads history.json and per-run run.json records; aggregates token counts,
     cost, and candidate totals. Emits the documented output shape to stdout.
@@ -931,6 +1083,7 @@ def _cmd_usage_read(args):
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper usage-read")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parser.add_argument("--run-id", default=None, dest="run_id")
     parsed = parser.parse_args(args)
 
@@ -967,6 +1120,16 @@ def _cmd_usage_read(args):
         os.path.expanduser("~/.claude/projects")
     )
     cwd_slug = _cwd_slug(project_dir)
+
+    # Step 4b: Resolve effective runtime (MAR-40 D4). Explicit --runtime
+    # wins; else auto-detect from transcript-dir presence. This OVERRIDES
+    # the per-run usage_source dispatch for claude-code-sourced runs only:
+    # --runtime cowork suppresses the transcript read (fall back to
+    # run.json-stored tokens), --runtime claude-code / auto-detect prefers
+    # the transcript path. cost_basis labeling is unchanged.
+    effective_runtime = _resolve_runtime(
+        parsed.runtime, project_dir, transcript_root
+    )
 
     # Step 5: Process each run
     runs_output = []
@@ -1006,15 +1169,24 @@ def _cmd_usage_read(args):
         run_note = ""
 
         if usage_source == "claude-code":
-            # Read actuals from Claude Code transcript (injectable root, privacy-safe)
-            t_in, t_out, model = _read_transcript_tokens(
-                transcript_root, cwd_slug, started_at, ended_at
-            )
+            # MAR-40 override: when the effective runtime is cowork, do NOT
+            # attempt the transcript read even for a claude-code-sourced run
+            # — treat it as if the transcript is unavailable and fall back to
+            # the run.json-stored tokens (same path as an absent transcript
+            # dir). claude-code / auto-detect prefers the transcript actuals.
+            if effective_runtime == "cowork":
+                t_in, t_out, model = 0, 0, None
+            else:
+                # Read actuals from Claude Code transcript (injectable root, privacy-safe)
+                t_in, t_out, model = _read_transcript_tokens(
+                    transcript_root, cwd_slug, started_at, ended_at
+                )
             if t_in > 0 or t_out > 0:
                 tokens_in = t_in
                 tokens_out = t_out
             else:
-                # Transcript dir absent or empty — fall back to run.json tokens
+                # Transcript dir absent or empty (or cowork override) — fall
+                # back to run.json tokens
                 tokens_in = usage.get("tokens_in")
                 tokens_out = usage.get("tokens_out")
                 model = None
@@ -1269,36 +1441,115 @@ def _derive_cost(tokens_in, tokens_out, model, pricing):
 
 
 def _cmd_settings_read(args):
-    """settings-read subcommand.
+    """settings-read subcommand (MAR-3 corrected path + observable envelope).
 
-    Args: --project-dir <path>
+    Args: --project-dir <path> [--runtime <cowork|claude-code>]
 
-    Resolves tabp settings from <project>/.tabp/settings.json layered over the
-    documented defaults (_SETTINGS_DEFAULTS), and prints the resolved settings
-    as JSON to stdout. A missing or corrupt settings file falls back to the
-    defaults (never raises), so the screen-cvs coordinator always gets a usable
-    settings object. Only known keys are honoured. This is the foundation
-    reader; the writable settings surface is owned by the tabp upgrade epic.
+    Resolves tabp settings from <project>/"tabp settings.json" (project root,
+    literal filename with space) layered over _SETTINGS_DEFAULTS. Emits a
+    single JSON envelope to stdout:
+
+        {
+          "settings": { ...resolved fields... },
+          "settings_source": "file" | "absent" | "corrupt",
+          "from_file": [...keys present in file...],
+          "from_default": [...remaining keys...]
+        }
+
+    Never raises. Design ref: design.md:490-491, spec 01:66-109.
     """
     import argparse
     parser = argparse.ArgumentParser(prog="tabp_helper settings-read")
     parser.add_argument("--project-dir", required=True)
+    _add_runtime_arg(parser)
     parsed = parser.parse_args(args)
 
-    tabp_dir = _tabp_dir_from_project(parsed.project_dir)
-    settings_path = os.path.join(tabp_dir, "settings.json")
+    settings_path = os.path.join(parsed.project_dir, "tabp settings.json")
 
     resolved = dict(_SETTINGS_DEFAULTS)
     file_settings = _read_json(settings_path)
+
     if isinstance(file_settings, dict):
+        settings_source = "file"
+        from_file = []
         for key in _SETTINGS_DEFAULTS:
             if key in file_settings:
                 resolved[key] = file_settings[key]
+                from_file.append(key)
         # MAR-38: pass through model_pricing if present (runtime-read-only; no schema file, DEV-1)
         if "model_pricing" in file_settings:
             resolved["model_pricing"] = file_settings["model_pricing"]
+            from_file.append("model_pricing")
+        from_default = [k for k in _SETTINGS_DEFAULTS if k not in from_file]
+    else:
+        # Distinguish absent (path does not exist) vs corrupt (exists but unreadable)
+        if not os.path.exists(settings_path):
+            settings_source = "absent"
+        else:
+            settings_source = "corrupt"
+        from_file = []
+        from_default = list(_SETTINGS_DEFAULTS.keys())
 
-    sys.stdout.write(json.dumps(resolved, indent=2, ensure_ascii=False) + "\n")
+    envelope = {
+        "settings": resolved,
+        "settings_source": settings_source,
+        "from_file": from_file,
+        "from_default": from_default,
+    }
+    sys.stdout.write(json.dumps(envelope, indent=2, ensure_ascii=False) + "\n")
+
+
+def _cmd_settings_validate(args):
+    """settings-validate subcommand (MAR-3).
+
+    Args: --project-dir <path>  (resolves to <project>/"tabp settings.json")
+       OR --file <path>          (validates an arbitrary file path)
+    Exactly one of the two must be provided.
+
+    Exit codes: EXIT_OK (0) on success; EXIT_VALIDATION_FAILED (3) on
+    validation failure or unreadable file; EXIT_ERROR (1) on bad args.
+
+    stdout on success: {"ok": true}
+    stdout on failure: {"ok": false, "error": "<message>"}
+
+    Mirrors _cmd_validate in CLI shape. Design ref: spec 01:171-195.
+    """
+    import argparse
+    parser = argparse.ArgumentParser(prog="tabp_helper settings-validate",
+                                     add_help=False)
+    parser.add_argument("--project-dir", default=None)
+    parser.add_argument("--file", default=None)
+    parsed, _unknown = parser.parse_known_args(args)
+
+    if (parsed.project_dir is None) == (parsed.file is None):
+        # Both given or neither given
+        sys.stderr.write(
+            "tabp_helper settings-validate: usage: "
+            "settings-validate --project-dir <path> | --file <path>\n"
+        )
+        sys.exit(EXIT_ERROR)
+
+    if parsed.project_dir is not None:
+        file_path = os.path.join(parsed.project_dir, "tabp settings.json")
+    else:
+        file_path = parsed.file
+
+    record = _read_json(file_path)
+    if record is None:
+        sys.stdout.write(
+            json.dumps({
+                "ok": False,
+                "error": "settings file absent or unreadable at %s" % file_path,
+            }) + "\n"
+        )
+        sys.exit(EXIT_VALIDATION_FAILED)
+
+    try:
+        _validate_settings(record)
+        sys.stdout.write(json.dumps({"ok": True}) + "\n")
+    except TabpValidationError as exc:
+        sys.stdout.write(json.dumps({"ok": False, "error": str(exc)}) + "\n")
+        sys.exit(EXIT_VALIDATION_FAILED)
 
 
 # ---------------------------------------------------------------------------
@@ -1312,7 +1563,8 @@ def main():
         sys.stderr.write(
             "tabp_helper: usage: tabp_helper.py <subcommand> [args]\n"
             "Subcommands: run-start, state-write, decision-write, sign-off-write, "
-            "run-finalize, run-status, validate, usage-read, settings-read\n"
+            "run-finalize, run-status, validate, usage-read, settings-read, "
+            "settings-validate\n"
         )
         sys.exit(EXIT_ERROR)
 
@@ -1338,6 +1590,8 @@ def main():
             _cmd_usage_read(rest)
         elif subcommand == "settings-read":
             _cmd_settings_read(rest)
+        elif subcommand == "settings-validate":
+            _cmd_settings_validate(rest)
         else:
             sys.stderr.write(
                 "tabp_helper: unknown subcommand '%s'\n" % subcommand

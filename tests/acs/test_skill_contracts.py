@@ -89,8 +89,9 @@ class TestSkillContracts(unittest.TestCase):
         self.assertIsNone(re.search(r"spawn a fresh subagent", body, re.IGNORECASE))
 
     def test_user_action_only_skills(self):
-        # merge-pr (human merge gate), update + install-hooks (change the environment)
-        user_action = ("merge-pr", "update", "install-hooks")
+        # update + install-hooks change the environment; merge-pr is now
+        # agent/model-invocable (MAR-42), so it is NOT in this set.
+        user_action = ("update", "install-hooks")
         for name in user_action:
             fm, _ = frontmatter(read(self.skill_path(name)), name)
             self.assertRegex(fm, r"(?m)^disable-model-invocation: true$", name)
@@ -99,6 +100,23 @@ class TestSkillContracts(unittest.TestCase):
                 continue
             fm, _ = frontmatter(read(self.skill_path(name)), name)
             self.assertNotIn("disable-model-invocation: true", fm, name)
+
+    def test_merge_pr_is_agent_invocable(self):
+        # MAR-42: /acs:merge-pr is agent/model-invocable; the readiness gate +
+        # branch protection are the merge brakes, and merges require an APPROVED
+        # review (m6). The old user-action-only invariant must be gone.
+        text = read(self.skill_path("merge-pr"))
+        fm, body = frontmatter(text, "merge-pr")
+        self.assertNotIn("disable-model-invocation", fm,
+                         "merge-pr must not set disable-model-invocation (MAR-42)")
+        self.assertNotIn("User action only", body,
+                         "merge-pr must drop the 'User action only' section (MAR-42)")
+        self.assertNotIn("user-invoked only", body,
+                         "merge-pr must drop the 'user-invoked only' framing (MAR-42)")
+        self.assertIn("Invocation and safety model", body,
+                      "merge-pr must carry the new invocation/safety section (MAR-42)")
+        self.assertRegex(body, r"(?i)reviewDecision`? is `?APPROVED",
+                         "merge-pr approvals dimension must require APPROVED (m6)")
 
     def test_no_forked_context_in_frontmatter(self):
         # context: fork would break clarifying questions (AUTHORING.md)

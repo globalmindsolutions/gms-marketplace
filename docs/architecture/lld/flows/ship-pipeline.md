@@ -29,7 +29,7 @@ sequenceDiagram
         note over SH: context may be cleared/compacted here — the ledger holds the pipeline
     end
     SH-->>Dev: pipeline report + "Review the PR, then /acs:merge-pr SHOP-123"
-    note over Dev: merging stays a user action — /ship never invokes /acs:merge-pr
+    note over Dev: /ship never invokes /acs:merge-pr — the PR is landed separately after review
 ```
 
 Properties: every hook gate still fires on the coordinator's direct Skill call

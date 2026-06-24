@@ -18,16 +18,62 @@ Use when the user wants to: screen a CV against a JD, match a resume to a role, 
 Before gathering inputs, initialise a tabp run record so all state is tracked
 from the start.
 
-1. **Read settings (with fallback).** Attempt to read `tabp settings.json`
-   from the Cowork project folder via:
+1. **Validate and read settings.** Before reading settings, run the validator
+   to confirm the file is structurally correct:
+   ```
+   python3 plugins/tabp/helpers/tabp_helper.py settings-validate \
+     --project-dir <project-folder>
+   ```
+   Exit code 3 (`EXIT_VALIDATION_FAILED`) means the file exists but is
+   invalid — warn the user and proceed with all defaults or abort, as
+   appropriate. Exit 0 means the file is absent or valid.
+
+   Then read the resolved settings (always succeeds, never raises):
    ```
    python3 plugins/tabp/helpers/tabp_helper.py settings-read \
      --project-dir <project-folder>
    ```
-   If the file is absent or the command is unavailable, apply documented
-   fallback values: screening model = coordinator default Sonnet, synthesis
-   model = coordinator default Opus, cv_folder = `./cvs`, jd_folder = `./jds`,
-   state_write_mode = `helper`.
+   The file is read from the **project folder root** as `tabp settings.json`
+   (a literal filename with a space; NOT from inside `.tabp/`).
+
+   The command prints a single JSON envelope to stdout:
+   ```json
+   {
+     "settings": {
+       "screening_model": "sonnet",
+       "synthesis_model": "opus",
+       "cv_folder": "./cvs",
+       "jd_folder": "./jds",
+       "state_write_mode": "helper"
+     },
+     "settings_source": "file",
+     "from_file": ["screening_model"],
+     "from_default": ["synthesis_model", "cv_folder", "jd_folder", "state_write_mode"]
+   }
+   ```
+   Read resolved values from `result["settings"]`. The `settings_source` field
+   is `"file"` (file read), `"absent"` (file not present), or `"corrupt"` (file
+   present but unreadable). The `from_file` array names the keys that came from
+   the file; `from_default` names the keys that fell back to their defaults.
+   When the file is absent or corrupt, all five keys are in `from_default` and
+   the coordinator should note this, e.g.: "Using all default settings — no
+   settings file found at `<project>/tabp settings.json`."
+
+   Documented fallback defaults (from `_SETTINGS_DEFAULTS`):
+   - screening model = coordinator default Sonnet (`"sonnet"`)
+   - synthesis model = coordinator default Opus (`"opus"`)
+   - cv_folder = `./cvs`
+   - jd_folder = `./jds`
+   - state_write_mode = `helper`
+
+   **Runtime note.** tabp runs under both Claude Cowork and Claude Code. The
+   `--project-dir` argument is the project folder in either runtime. In Claude
+   Code the coordinator passes the session's current working directory as
+   `--project-dir <session-cwd>` and adds `--runtime claude-code`; in Cowork it
+   passes the Cowork session's project folder (and may pass `--runtime cowork`, or omit
+   the flag to let the helper auto-detect). The project folder **need not be a
+   git repo** — the helper derives `<project-dir>/.tabp/` directly from
+   `--project-dir` with no git assumption.
 
 2. **Start the run record.** Invoke:
    ```
@@ -40,9 +86,9 @@ from the start.
    This acquires the `.tabp/` lock and writes an `in_progress` run record to
    `.tabp/runs/<run-id>/run.json`.
 
-3. **Degradation path.** If Cowork denies Bash access (the helper invocation
-   fails or is unavailable), proceed without the helper. Write an initial
-   `run.json` directly into the project folder's `.tabp/runs/<run-id>/`
+3. **Degradation path.** If the runtime denies Bash access (the helper
+   invocation fails or is unavailable), proceed without the helper. Write an
+   initial `run.json` directly into the project folder's `.tabp/runs/<run-id>/`
    directory using the file-write capability, setting
    `"state_write_mode": "instructed"`. Record the run identifier and continue
    through the remaining steps using direct file writes wherever a helper
@@ -207,10 +253,11 @@ verdict is `pass`. If the N=3 cap is hit with unresolved blocking findings, do
 NOT proceed to Step 6 result delivery — go to Step 5b to record the failure and
 notify the recruiter.
 
-**Degradation path.** When Cowork denies Bash access, all `state-write` calls
-become coordinator direct file writes as documented in the Step 0 degradation
-path. The verifier still runs — it is a subagent, not a helper call — and the
-`state_write_mode="instructed"` flag is already set. This is unchanged.
+**Degradation path.** When the runtime denies Bash access, all `state-write`
+calls become coordinator direct file writes as documented in the Step 0
+degradation path. The verifier still runs — it is a subagent, not a helper call
+— and the `state_write_mode="instructed"` flag is already set. This is
+unchanged.
 
 ## Step 5b — Record the decision
 

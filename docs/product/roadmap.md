@@ -83,6 +83,35 @@ dogfooding is rolling.
 - Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
   Projects.
 
+#### Epic E6 — Tracker-first delivery (PRD-optional mode) *(Must-have — urgent; builds on E2)*
+
+Traces **G11** (+ the Team-with-a-tracker-only-PO persona) and the acs Must-have
+**Tracker-first delivery (PRD-optional mode)** feature
+([`prd.md`](prd.md#features-moscow)). Builds on E2's import/sync depth: a team with
+**no PRD/roadmap/architecture** delivers a remote-tracker-defined ticket through the
+**same gated pipeline**.
+
+- **E6.1 — Configurable governance mode.** A setting that turns on tracker-first /
+  PRD-optional delivery; when upstream docs are absent the imported tracker issue
+  (description + acceptance criteria) is the requirement source of truth. *(Config key
+  name + explicit-opt-in vs auto-detect resolved in this epic's design phase.)*
+- **E6.2 — Graceful conformance-chain degradation.** A missing upstream artifact
+  (PRD/architecture) makes only its own trace step N/A — never a hard block — while
+  gates (TDD, coverage, review, audit, merge readiness) stay unchanged.
+- **E6.3 — Divergence behavior (C-3).** No PRD ⇒ tracing N/A, tracker governs,
+  nothing flagged; PRD present ⇒ keep today's behavior (trace, flag divergence, user
+  decides).
+- **E6.4 — Validation.** Prove a PRD-less repo delivers a tracker-defined ticket
+  end-to-end with 0 gate escapes and 0 missing-upstream hard-blocks (G11 metric).
+
+Opt-in reverse-bootstrap (seeding a baseline `prd.md`/architecture from imported
+tickets + codebase) is a Could-have growth path; it is not part of this milestone and
+has no separate milestone — tracker-first delivery works without it.
+
+**Deferral:** the MECHANISM (config key, opt-in vs auto-detect, design-step
+optionality) is determined in this epic's design phase; this milestone states what
+to deliver. E6 builds on E2.
+
 #### Epic E5 — Convention enforcement & onboarding/repo hardening *(shipped in v0.2.0)*
 
 Traces G9 (+ the Tech-lead persona). The v0.2.0 release that this roadmap entry
@@ -204,6 +233,29 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
   PRD G10 and the acs Could-have features. `settings.schema.json` gains
   `principles_path`/`standards_path`; `/acs:init` defaults them. Skill count grows
   accordingly. Traces **G10** (+ the Tech-lead persona).
+- **Epic: configurable doc-set storage location** — each acs doc set
+  (`prd`, `architecture`, `requirements`, `adr`, and future `standards`/`principles`/
+  `quality`/`operations`) is independently relocatable to an external/absolute
+  filesystem path outside the consumer repo via configuration; one doc-set
+  storage-location config surface generalizes the existing `*_path` keys; producer
+  skills resolve the configured location and preserve a reviewable diff there. Same
+  family as the `principles_path`/`standards_path`/`quality_path`/`operations_path`
+  path-config work above. Maps to PRD extended G6 and the acs Could-have
+  configurable-doc-set-storage-location feature.
+- **Epic: org-level enforcement policy (org & department layers)** — acs gains an ordered
+  **policy-source chain** above today's user + team(project) layers. An organization (and
+  optionally a department/sub-group) defines **shared defaults** (overridable convenience
+  config, resolved most-specific-wins by extending the existing cascade) and **enforcement
+  mandates** (non-overridable floors — required convention/security/standards checks; repo
+  may tighten not loosen; no repo self-exemption; org-granted, audited exemptions; rule
+  provenance). The enforceable part comes from an org-controlled source the repo cannot
+  edit (e.g. GitHub org rulesets / org-required workflows / a versioned policy pack) and/or
+  inverted floor precedence — never a developer-home file. Additive and non-breaking
+  (no org source ⇒ today's behavior). Connects to the standards layer (org policy can
+  mandate G10 conformance as a floor once it ships). Maps to PRD **G12** and the new acs
+  Could-have feature. The MECHANISM is settled in this epic's **design phase / an ADR**,
+  consistent with how the tabp-upgrade and standards epics defer mechanism. Traces **G12**
+  (+ the Org/Platform-admin persona).
 - Semver stability promise for state-file schemas (migration notes per minor).
 
 ## tabp plugin track
@@ -277,6 +329,33 @@ hooks, artifacts, self-reported cost/tokens) are deferred to this epic's design 
 **Implementation note:** the tabp-upgrade design and build are a separate future epic —
 this milestone defines what to deliver; the design and implementation tickets carry
 the build work.
+
+### acs M-future — Notion/remote-docs backend *(future — pending Notion/remote-docs epic)*
+
+Maps to PRD extended G6 and the acs Could-have pluggable-remote-docs-backend feature.
+
+Deliver a pluggable docs backend for acs, mirroring the `tracker.provider` precedent:
+
+- **`local` backend (filesystem, default)** — current behavior, unchanged; supports
+  external/absolute paths (delivered in M3 above).
+- **`notion` backend (first remote provider)** — Notion as the system of record or
+  sync target; two configurable modes per backend:
+  - **Publish/mirror** — repo stays source of truth, the docs-only PR is preserved,
+    content synced to Notion for reading.
+  - **Authoritative-remote** — Notion is the system of record, no repo copy,
+    review/audit happens in Notion.
+- Auth via external CLI/integration; **no secrets in settings** (consistent with the
+  `tracker.provider` precedent and the Safety NFR).
+
+**Deferral:** the MECHANISM — Notion API/auth, markdown→Notion-blocks mapping, PR-less
+vs sync delivery, per-mode review/audit implementation — is deferred to this epic's
+dedicated design phase. This epic requires its own `/acs:create-design` run before
+implementation begins. Non-Notion remote providers (Confluence, Google Docs, SharePoint)
+are Won't-have now; they may be considered as future extensions after this epic ships.
+
+**Implementation note:** this is a future epic pending design — this milestone entry
+defines what to deliver and its scope boundary; the design and implementation tickets
+carry the build work.
 
 ## Later / icebox
 

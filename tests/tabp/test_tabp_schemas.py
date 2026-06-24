@@ -15,7 +15,15 @@ Run: python3 -m unittest tests.tabp.test_tabp_schemas -v
 
 import json
 import os
+import sys
 import unittest
+
+# Import tabp_helper for round-trip validation tests
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_HELPERS_DIR = os.path.join(_REPO_ROOT, "plugins", "tabp", "helpers")
+if _HELPERS_DIR not in sys.path:
+    sys.path.insert(0, _HELPERS_DIR)
+import tabp_helper  # noqa: E402
 
 # Three dirname calls: __file__ is tests/tabp/test_tabp_schemas.py
 # dirname x1 -> tests/tabp
@@ -32,6 +40,7 @@ SCHEMA_FILES = [
     "decision.schema.json",
     "history.schema.json",
     "lock.schema.json",
+    "settings.schema.json",
 ]
 
 SAMPLE_FILES = [
@@ -40,6 +49,7 @@ SAMPLE_FILES = [
     "decision.sample.json",
     "history.sample.json",
     "lock.sample.json",
+    "settings.sample.json",
 ]
 
 
@@ -436,6 +446,68 @@ class TestTabpSamples(unittest.TestCase):
             "lock.sample.json created_at must be non-empty",
         )
 
+
+
+
+# ---------------------------------------------------------------------------
+# Class TestSettingsSchema — TC-SS-01..04
+# ---------------------------------------------------------------------------
+
+class TestSettingsSchema(unittest.TestCase):
+    """TC-SS-01..04 (MAR-3): settings.schema.json and settings.sample.json contracts."""
+
+    # TC-SS-01 is covered by adding "settings.schema.json" to SCHEMA_FILES above,
+    # which makes test_tc01_schema_files_exist_and_parse loop exercise the new schema.
+
+    def test_tc_ss_02_settings_schema_structure(self):
+        """TC-SS-02 (AC-2): settings.schema.json has additionalProperties:false,
+        no required array, the five core property names, and state_write_mode enum.
+        (model_pricing is an additional allowed runtime-read-only key — MAR-38/DEV-1.)
+        """
+        path = os.path.join(SCHEMAS_DIR, "settings.schema.json")
+        doc, _ = _load_json(path)
+
+        # additionalProperties must be false
+        self.assertFalse(
+            doc.get("additionalProperties", True),
+            "settings.schema.json must have additionalProperties: false"
+        )
+        # no required array, or required is empty
+        required = doc.get("required", [])
+        self.assertEqual(
+            required, [],
+            "settings.schema.json must have no required fields (all optional)"
+        )
+        # five expected property names
+        properties = doc.get("properties", {})
+        for field in ("screening_model", "synthesis_model", "cv_folder",
+                      "jd_folder", "state_write_mode"):
+            self.assertIn(field, properties,
+                          "settings.schema.json missing property: %s" % field)
+        # state_write_mode has enum ["helper", "instructed"]
+        swm = properties["state_write_mode"]
+        self.assertIn("enum", swm,
+                      "state_write_mode property must have an enum key")
+        self.assertCountEqual(swm["enum"], ["helper", "instructed"],
+                              "state_write_mode enum must be [helper, instructed]")
+
+    def test_tc_ss_03_settings_sample_passes_validate_settings(self):
+        """TC-SS-03 (AC-2): settings.sample.json exists, parses, and passes _validate_settings."""
+        path = os.path.join(SAMPLES_DIR, "settings.sample.json")
+        self.assertTrue(os.path.isfile(path),
+                        "settings.sample.json not found: %s" % path)
+        sample, _ = _load_json(path)
+        # round-trip: must not raise
+        tabp_helper._validate_settings(sample)
+
+    def test_tc_ss_04_settings_sample_no_acs_tokens(self):
+        """TC-SS-04 (AC-4): settings.sample.json contains no acs: or .acs/ tokens."""
+        path = os.path.join(SAMPLES_DIR, "settings.sample.json")
+        _, content = _load_json(path)
+        self.assertNotIn("acs:", content,
+                         "settings.sample.json contains 'acs:'")
+        self.assertNotIn(".acs/", content,
+                         "settings.sample.json contains '.acs/'")
 
 class TestTabpNamespaceGuard(unittest.TestCase):
     """TC-12: No acs: or .acs/ substring anywhere in schema or sample files. (AC-6)"""
