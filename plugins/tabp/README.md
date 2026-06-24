@@ -119,6 +119,56 @@ Ask something like:
 no network calls. Cost figures labeled `cost_basis="estimate"` are derived from
 token counts and a pricing snapshot; they are not actual billed amounts.
 
+## Settings
+
+tabp reads an optional configuration file — `tabp settings.json` — from the
+root of the Cowork project folder at skill start. All fields are optional; the
+file may be absent, in which case documented defaults apply.
+
+### File location
+
+`<project>/tabp settings.json` — a literal filename with a space, at the
+project folder root (NOT inside `.tabp/`). The file is optional and not
+committed to this repo; it belongs to the recruiter's project folder.
+
+### Configurable fields
+
+| Field | Default | Description |
+|---|---|---|
+| `screening_model` | coordinator default Sonnet | Model used for per-CV screening subagents. |
+| `synthesis_model` | coordinator default Opus | Model used for the synthesis subagent. |
+| `cv_folder` | `./cvs` | Relative path to the CV folder from the project folder. |
+| `jd_folder` | `./jds` | Relative path to the JD folder from the project folder. |
+| `state_write_mode` | `helper` | How state is written: `helper` (via `tabp_helper.py`) or `instructed` (coordinator writes directly, degraded mode). |
+
+### Observable fallback
+
+When the file is absent or a field is omitted, tabp falls back to the defaults
+above. The `settings-read` command reports which keys came from the file
+(`from_file`) and which are defaults (`from_default`) so the coordinator can
+inform the recruiter. The `settings_source` field in the output envelope is
+`"file"` (read), `"absent"` (not found), or `"corrupt"` (found but unreadable).
+
+### Validation
+
+Run this before starting a screening run to confirm the file is structurally
+valid:
+
+```
+python3 plugins/tabp/helpers/tabp_helper.py settings-validate \
+  --project-dir <project-folder>
+```
+
+Exit 0: file is absent (no action needed) or valid. Exit 3
+(`EXIT_VALIDATION_FAILED`): file exists but is invalid; the error is printed to
+stdout as `{"ok": false, "error": "..."}`. The schema contract is in
+`plugins/tabp/schemas/settings.schema.json`.
+
+### No secrets
+
+`tabp settings.json` must not contain secrets, passwords, API keys, or a
+`workspace_path` key. The validator rejects any such key.
+
 ## Inputs & privacy
 
 - **Inputs:** files only (PDF, Word, or pasted text). No external system or ATS connection required.

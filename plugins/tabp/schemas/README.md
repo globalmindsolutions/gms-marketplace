@@ -18,6 +18,7 @@ README (HARD namespace constraint, design.md:120-127, AC-6).
 | Decision record | `<project>/.tabp/runs/<run-id>/decision.json` | `decision.schema.json` | Human review sign-off record |
 | Run history | `<project>/.tabp/history.json` | `history.schema.json` | Append-only array of run summaries |
 | Lock | `<project>/.tabp/.lock` | `lock.schema.json` | Project-folder lock held during an active run |
+| Settings | `<project>/tabp settings.json` | `settings.schema.json` | Optional recruiter configuration: model selection, CV/JD folder paths, state write mode. All fields optional with documented defaults. |
 
 Validating samples for each entity live under `samples/`.
 
@@ -82,3 +83,21 @@ Runtime validation of state files is performed by `tabp_helper.py validate`
 are the contract source; the helper loads them and runs the stdlib-based validator against
 live state records. Samples in `samples/` are designed to pass the spec-02 validator when
 it is applied.
+
+### Settings validation
+
+`settings.schema.json` covers `<project>/tabp settings.json` — the
+recruiter-facing configuration file. This is distinct from the five `.tabp/`
+state entity schemas above.
+
+Validation is performed by a separate subcommand:
+```
+python3 plugins/tabp/helpers/tabp_helper.py settings-validate --project-dir <path>
+```
+This is NOT the same as `tabp_helper.py validate` (which covers the five
+`.tabp/` state entities: run, evidence, decision, history, lock).
+
+All five fields in `settings.schema.json` are optional; an absent
+`tabp settings.json` file is valid and the helper falls back to documented
+defaults. The schema enforces `additionalProperties: false` to block
+unrecognised keys (including forbidden keys such as `workspace_path`).

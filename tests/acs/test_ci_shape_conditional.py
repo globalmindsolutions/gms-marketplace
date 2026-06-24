@@ -247,7 +247,7 @@ class _CIShapeBase(unittest.TestCase):
             cls.lines, "Validate JSON Schema documents (structural)"
         )
         cls.settings_body = _extract_heredoc_body(
-            cls.lines, "Validate committed .acs/settings.json against the schema"
+            cls.lines, "Validate committed per-plugin settings.json against the schema"
         )
         cls.fm_body = _extract_heredoc_body(
             cls.lines, "Check skill/agent frontmatter"
@@ -545,6 +545,83 @@ class TestSettingsStep(_CIShapeBase):
                          f"Expected rc==0 for skills-only (settings skip). "
                          f"stderr={result.stderr!r} stdout={result.stdout!r}")
 
+
+
+    def test_settings_each_plugin_validates_its_own_target(self):
+        """T-SETTINGS-per-plugin: A second plugin with settings.schema.json
+        (additionalProperties:false) and no .<name>/settings.json must NOT cause
+        the step to validate .acs/settings.json against that plugin's schema.
+        The step must derive the target from the plugin name: .<plugin_name>/settings.json,
+        and skip it when absent. Overall rc must be 0.
+
+        Scenario: two plugins —
+          - "acs" has settings.schema.json (open schema) AND .acs/settings.json
+          - "tabp" has settings.schema.json (additionalProperties:false) but NO
+            .tabp/settings.json
+
+        The step must validate .acs/settings.json against acs's schema (pass),
+        skip tabp's target (absent), and exit 0. It must NOT apply tabp's
+        additionalProperties:false schema to .acs/settings.json.
+        """
+        import json as _json
+        tmp = self._tmp_fixture()
+
+        # Plugin "acs": open settings schema + .acs/settings.json with extra props
+        acs_dir = os.path.join(tmp, "plugins", "acs")
+        _write_file(
+            os.path.join(acs_dir, ".claude-plugin", "plugin.json"),
+            _json.dumps({"name": "acs", "version": "0.1.0"}),
+        )
+        # Open schema (no additionalProperties:false) so .acs/settings.json passes
+        _write_file(
+            os.path.join(acs_dir, "schemas", "settings.schema.json"),
+            _json.dumps({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+            }),
+        )
+        # .acs/settings.json with extra properties that would fail additionalProperties:false
+        _write_file(
+            os.path.join(tmp, ".acs", "settings.json"),
+            _json.dumps({
+                "workspace_path": "/some/path",
+                "ticket_prefix": "MAR",
+                "extra_field": "extra_value",
+            }),
+        )
+
+        # Plugin "tabp": strict schema (additionalProperties:false) but NO .tabp/settings.json
+        tabp_dir = os.path.join(tmp, "plugins", "tabp")
+        _write_file(
+            os.path.join(tabp_dir, ".claude-plugin", "plugin.json"),
+            _json.dumps({"name": "tabp", "version": "0.1.0"}),
+        )
+        _write_file(
+            os.path.join(tabp_dir, "schemas", "settings.schema.json"),
+            _json.dumps({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "screening_model": {"type": "string"},
+                },
+                "additionalProperties": False,
+            }),
+        )
+        # NO .tabp/settings.json created -> step must skip it
+
+        _write_marketplace(tmp, [
+            {"name": "acs", "source": "plugins/acs"},
+            {"name": "tabp", "source": "plugins/tabp"},
+        ])
+
+        result = self._run_py(self.settings_py, tmp)
+        self.assertEqual(
+            result.returncode, 0,
+            f"T-SETTINGS-per-plugin: Expected rc==0 when each plugin validates only "
+            f"its own .<name>/settings.json target. "
+            f"If rc!=0, the step is applying a non-owning plugin schema to the wrong target. "
+            f"stderr={result.stderr!r} stdout={result.stdout!r}"
+        )
 
 # ---------------------------------------------------------------------------
 # XSD step tests (shell run block)
