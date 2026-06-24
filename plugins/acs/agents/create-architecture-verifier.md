@@ -38,7 +38,11 @@ coordinator: read every input yourself.
 4. **mermaid-diagrams** — every diagram is a fenced ```mermaid block with a valid first
    keyword (`C4Context`, `C4Container`, `C4Component`, `erDiagram`, `sequenceDiagram`,
    `flowchart`, `stateDiagram`); fences balanced; no images or ASCII diagrams. If `mmdc`
-   (mermaid-cli) is on PATH, render-check each block; otherwise do the structural check.
+   (mermaid-cli) is on PATH, render-check each block; otherwise do the structural check
+   AND grep for the common syntax errors the structural check alone misses (each is a
+   finding): a `;` in any `sequenceDiagram` message or note line (it is a statement
+   separator and breaks the parse); space-separated `erDiagram` key constraints (`PK FK`
+   instead of `PK,FK`); unquoted `()`/`[]`/`,` inside a flowchart node label.
 5. **internal-consistency** — the docs agree with each other: container names and
    technology labels match `hld/tech-stack.md`; `hld/data-model.md` entities match the
    components that own them; deployment nodes host containers that exist.

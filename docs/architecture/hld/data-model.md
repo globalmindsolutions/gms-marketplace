@@ -139,7 +139,7 @@ erDiagram
         array bias_flags
     }
     DECISION_RECORD {
-        string run_id FK PK
+        string run_id PK,FK
         bool verification_passed
         string verification_notes
         datetime presented_at

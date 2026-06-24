@@ -22,6 +22,18 @@ repos:
       - id: check-json
       - id: mixed-line-ending
 
+  # Mermaid diagram lint — deterministic ($0, no Node) check that fenced
+  # ```mermaid blocks won't render as a GitHub error box. Catches the known
+  # breakers: semicolons in sequenceDiagram, space-separated erDiagram keys,
+  # unknown diagram types. Also enforced in CI via the unittest suite.
+  - repo: local
+    hooks:
+      - id: mermaid-lint
+        name: mermaid diagram lint
+        entry: python3 tests/acs/mermaid_lint.py
+        language: system
+        files: \.md$
+
   # acs behavioral evals — FREE tier only (deterministic, $0, no `claude`).
   # Runs the gate + SessionEnd smoke against the source being committed when the
   # plugin or the harness changes. The paid tier (real `claude -p` sessions) is

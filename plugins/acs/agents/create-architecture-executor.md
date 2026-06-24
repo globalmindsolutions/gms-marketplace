@@ -37,7 +37,15 @@ coordinator: read the plan and every input file yourself before writing anything
    - `lld/flows/<flow>.md` — one Mermaid `sequenceDiagram` per planned flow.
    - `lld/contracts.md` — interface/API contracts between components.
 3. Every diagram is a fenced ```mermaid block — diffable, GitHub-rendered. No images,
-   no ASCII art, no other diagram syntax.
+   no ASCII art, no other diagram syntax. The GitHub renderer is strict — a block
+   with a syntax error renders as an error box, so follow these rules:
+   - **No `;` in `sequenceDiagram` message or note text** — `;` is a statement
+     separator and breaks the parse. Use a comma or "—" instead.
+   - **`erDiagram` attributes with multiple key constraints are comma-separated**,
+     never space-separated: `string run_id PK,FK` (not `string run_id PK FK`).
+   - **Quote flowchart node labels containing `()`, `[]`, `:`, `,`, or `<br/>`**:
+     `N["build (CI)"]`, not `N[build (CI)]`.
+   - One statement per line; never put two statements on the same line.
 4. **HLD↔LLD consistency is your responsibility at write time**: every `participant`/
    `actor` in every sequence diagram must be a container or component named identically
    in `hld/c4-container.md` or `hld/c4-component.md`; every interface in
