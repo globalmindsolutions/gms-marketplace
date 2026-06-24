@@ -233,6 +233,11 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
   PRD G10 and the acs Could-have features. `settings.schema.json` gains
   `principles_path`/`standards_path`; `/acs:init` defaults them. Skill count grows
   accordingly. Traces **G10** (+ the Tech-lead persona).
+- **Epic: enforceable e2e integrity (opt-in merge gate + brownfield e2e scaffolding)** — extends the already-shipped opt-in e2e layer (M1) with enforcement and brownfield onboarding. Three deliverables:
+  - **E2E-1 — Optional required e2e merge gate.** `/acs:init` scaffolds a repo-side e2e CI workflow + runner from `settings.e2e` and, opt-in, wires it as a REQUIRED status check on the protected default branch — a red e2e becomes a fail-closed merge brake (symmetric to E5's convention gate and the coverage hard-fail), making `/acs:merge-pr`'s report-only CI read enforceable via branch protection. Maps to PRD acs Should-have (e2e bullet). Traces **G13**, **G9**.
+  - **E2E-2 — Brownfield e2e scaffolding via `/acs:standardize-project`.** The greenfield-only `/acs:create-project` e2e scaffolding gains a brownfield counterpart: `/acs:standardize-project` additively scaffolds the e2e CI workflow + runner for an EXISTING repo that lacks one, as part of its one reviewed PR — never moving or renaming source (C-2). Maps to PRD acs Could-have (`/acs:standardize-project`). Traces **G13**, **G10**.
+  - **E2E-3 — Measured e2e integrity (G13).** Validate the metric on the dogfood repo: 0 PRs merged with a red e2e suite (gate enabled) and 100% of user-facing-surface specs declare e2e impact, per release. Maps to PRD **G13**.
+  The opt-in invariant holds throughout: `settings.e2e` unset = no e2e suite, no gate.
 - **Epic: configurable doc-set storage location** — each acs doc set
   (`prd`, `architecture`, `requirements`, `adr`, and future `standards`/`principles`/
   `quality`/`operations`) is independently relocatable to an external/absolute
