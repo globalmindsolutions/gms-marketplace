@@ -23,7 +23,12 @@ user *or* an authorized agent/model, and a merge happens only when the readiness
 (CI, approvals, conflicts, protections) **and** the repo's branch protection pass, by
 whoever invokes — failures are report-only and every attempt is audited;
 agent-invoked merges additionally require an **approved** review. `/acs:ship` still
-deliberately stops at create-pr so a reviewer sees the PR before merge.
+deliberately stops at create-pr so a reviewer sees the PR before merge. acs **meets
+teams where they are**: when a team has no PRD/roadmap/architecture and its PO works
+only in a remote tracker, the pipeline runs **tracker-first** — the tracker issue
+(description + acceptance criteria) governs as the requirement source of truth and the
+**same gates** (TDD, coverage, review, audit, merge readiness) still apply; no PRD is
+required to deliver, and none is ever auto-authored without opt-in.
 
 ## Problem
 
@@ -36,7 +41,12 @@ bar, or discoverability.
 forgets, mixes planning with implementation in one context, and leaves no
 audit trail of what was decided, built, verified, and why. Teams cannot trust
 a pipeline whose ordering depends on model goodwill, and cannot resume or
-parallelize work that lives in a conversation window.
+parallelize work that lives in a conversation window. Many teams, moreover,
+never produce a PRD/roadmap/architecture at all — their PO authors requirements
+only in a remote tracker (e.g. Jira) and may not know how to create the upstream
+docs. A pipeline that **requires** a PRD to start locks those teams out; they
+need to deliver tracker-defined work through the same gates without first
+authoring product docs they do not have.
 
 **tabp feature problem:** Manual CV-vs-JD screening is slow, inconsistent, and hard to audit for
 fairness — hiring managers cannot reproduce scoring decisions or demonstrate
@@ -49,6 +59,7 @@ that protected characteristics played no role.
 | **Solo developer** | Ship features end-to-end with one command (`/acs:ship`), trust the gates instead of self-discipline, resume after any interruption. |
 | **Tech lead** | Enforce a delivery process (design gates, TDD, review dimensions, PR size) uniformly across repos and teammates; inspect any ticket's full audit trail. |
 | **Team on a shared repo** | Parallel tickets in worktrees without state collisions; team-shared settings; tracker sync to Jira / GitHub Projects. |
+| **Team with a tracker-only PO** | Deliver requirements that live only in a remote tracker (Jira), with no PRD/roadmap/architecture and no need to author one — the tracker issue governs, and the full gated pipeline (TDD, coverage, review, audit) still applies. |
 | **TABP recruiter / hiring team** | Screen one CV or a batch against a job description in Claude Cowork or Claude Code, receive evidence-based and reproducible Recommend/Hold/Reject recommendations with a downloadable scorecard, and demonstrate fairness to auditors. |
 
 ## Goals & success metrics
@@ -67,6 +78,7 @@ that protected characteristics played no role.
 | G8 — Skill quality coverage | Structure, gating, and routing covered for 100% of skills (free, every PR); every critical-path skill has behavioral (artifact-level) eval coverage; no new skill ships without ≥ a trigger eval (CI guardrail). |
 | G9 — Enforceable conventions | The configured branch/PR/commit formats are enforceable as a required merge gate on the consumer repo, blocking non-exempt violating PRs even when they bypassed `/acs:create-pr` (escape hatch: the `acs-exempt` label / release-branch allowlist). MAR-9 (PR #50, pending merge) completes the consumer side of that escape hatch: a legitimate non-ticket exempt PR lands via the sanctioned `/acs:merge-pr --pr` path (same readiness + branch/worktree cleanup as the ticket path, no ticket/partition/tracker/archive; it refuses and redirects ticket-backed PRs), and `/acs:init` Step 7e writes an idempotent `CLAUDE.md` acs-managed block that makes the pipeline the *default* for in-repo agent sessions (steering changes through `/acs:ship` rather than ad-hoc PRs). The gate itself is existence-proven by the live required-check ruleset on this repo's own `main` (ruleset 17602044, `active`; "Branch / PR / commit conventions" is a required status-check context). |
 | G10 — Standards conformance & repo standardization | New design/code conforms to the principles + standards doc sets, verifier-checked: **100% of `/code` runs whose changeset touches a standards-governed area produce zero unwaived standards-conformance findings** (a violation is a blocking finding, never a silent pass), measured per release on the dogfood repo. Brownfield onboarding is additive and reviewable: **`/acs:standardize-project` lands its setup as exactly one reviewed PR that adds only docs/config/tooling and moves or renames zero existing source files** (0 source relocations; verified by the PR diff), with every target-layout structural gap emitted as a recommended follow-up ticket rather than an in-place move. |
+| G11 — Tracker-first delivery / graceful degradation | A repo with **no PRD/architecture** delivers a remote-tracker-defined ticket end-to-end through the **same gates** (TDD, coverage hard-fail, 11-dimension review, audit, merge readiness) with **zero gate escapes** and **zero "missing PRD" hard-blocks** — the absent upstream artifact makes only its own trace step N/A, never blocking the run. Target: **100% of tracker-first runs (PRD absent) complete without a missing-upstream hard-block AND with 0 gate escapes**, validated on **≥ 1 real PRD-less repo within 1 release of the capability shipping**; tracker-issue acceptance criteria are carried into the spec for **100%** of such runs. |
 
 ### tabp feature — success metrics
 
@@ -99,6 +111,23 @@ feature sections here.
 - `acs:metrics` dashboard skill — reads workspace artifacts (`metrics.json`, `tickets-index.json`, per-ticket `pipeline-state.json`, `code-state.json`, `create-pr-state.json`) and renders an interactive HTML dashboard inline in the Claude Code session (`show_widget`) covering: ticket throughput by status/type, pipeline funnel, cost and time per ticket broken down by pipeline step, test coverage achieved vs target, review iterations before verifier passed, and token burn by role (planner/executor/verifier). Read-only; no new file writes; no new config; single-repo scope. Traces G5, G7. *(Must have for M2 exit)*
 - Convention enforcement as a required merge gate — `/acs:init` Step 7c scaffolds a repo-side CI check (`.github/workflows/acs-conventions.yml`) backed by a stdlib-only `.acs/ci/check-conventions.py` (fail-closed; modes `pr` / `pre-push` / `commit-msg`) compiled from the configured `formats.*`, plus an `enforcement` settings block (`checks.{branch_name,pr_title,pr_description,acs_label,commit_message}`, `require_label`, `exempt_label` default `acs-exempt`, `exempt_branches`, `pr_description_sections`). Wired as a required status check on the consumer repo, it blocks non-exempt branch/title/description/label/commit-message violations even on PRs that bypassed `/acs:create-pr`; the `acs-exempt` label and a release-branch allowlist are the escape hatch. Observed live on this repo (ruleset 17602044, `active` on `main`; "Branch / PR / commit conventions" is a required context). Traces G9 (+ the Tech-lead persona). **MAR-9 (PR #50, pending merge)** extends this: the exempt PRs the gate lets through then land via a sanctioned merge path — `/acs:merge-pr --pr <n>` (also `#n` / a PR URL) runs the same four readiness dimensions and branch/worktree cleanup as the ticket path but resolves no ticket, writes no partition/state, and skips tracker sync and archiving (bumping only the repo `pr_merged` metric), refusing and redirecting when the PR is actually ticket-backed; and `/acs:init` Step 7e (opt-in, default-on) writes an idempotent, marker-delimited `CLAUDE.md` acs-managed block (rendered from `templates/CLAUDE.acs.md`) that steers in-repo Claude sessions to ship via `/acs:ship` instead of a raw `gh pr create`, making the pipeline the default rather than only the gate.
 - `/acs:install-hooks` skill — the `pre-commit install` equivalent for acs (per-clone, user-invoked): installs the config-driven local git hooks (`commit-msg` + `pre-push`) that run the same `check-conventions.py` before a commit or push leaves the machine. A committed `.acs/ci/install-hooks.sh` lets teammates run it without the plugin. Traces G9 (+ the Tech-lead persona).
+- **Tracker-first delivery (PRD-optional mode)** — a **configurable governance mode**
+  so a team with no PRD/roadmap/architecture can deliver requirements that live only
+  in a remote tracker (GitHub Projects / Jira) through the **same gated pipeline**.
+  When upstream product docs are **absent**, the imported tracker issue (description +
+  acceptance criteria) is the **requirement source of truth**; the conformance chain
+  **degrades gracefully** — a missing upstream artifact makes only its own trace step
+  **N/A**, never a hard block — while TDD, coverage hard-fail, the 11-dimension review,
+  audit trail, and merge readiness are **unchanged**. Builds on the existing
+  `/acs:create-ticket <remote-key>` import + two-way tracker sync (Should-have, above;
+  `gh`/`acli`). **Divergence (C-3):** with **no PRD present**, tracing is N/A and the
+  tracker ticket governs (nothing to flag); with a **PRD present**, today's behavior
+  is kept — trace, flag divergence, user decides. This is **graceful degradation of
+  the existing pipeline, not a parallel workflow**, and acs **never auto-authors a PRD
+  without opt-in** (see Constraints). Traces **G11** (+ the Team-with-a-tracker-only-PO
+  persona). *(Must have — urgent; see roadmap E6.)* The mechanism (config key name,
+  explicit opt-in vs auto-detect, design-step optionality) is **deferred to the
+  tracker-first epic's design phase** — this PRD states the requirement (what).
 
 **Should have** *(shipped in v0.1, maturing)*
 - Two-way tracker sync (GitHub Projects / Jira via `gh` / `acli`), remote import.
@@ -113,6 +142,12 @@ feature sections here.
 - **acs maintains the `principles/` and `standards/` doc sets for consumers** — engineering principles (e.g. `/acs:create-principles` → `principles/`) and coding standards/conventions (e.g. `/acs:create-standards` → `standards/`), each a product-level producer skill with its own planner/executor/verifier triad and acs-shipped templates, following the one-skill-per-set pattern of `/acs:create-architecture` and the proposed `/acs:create-quality` / `/acs:create-operations` (see [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md)). These sets sit between architecture and design in the conformance chain: **PRD → architecture → standards → design → specs → code**, each level verified against the one above it. Design and code MUST conform to the standards docs; the `/code` `code-verifier`'s technical-standards dimension and the design verifiers check conformance and block violations (no silent waivers). Traces G10 (+ the Tech-lead persona). *(Proposed — extends the chain at workflow.md and docs/README; see Constraints.)*
 - **Architecture doc set gains an explicit project-structure target** — the `/acs:create-architecture` output set adds a project-structure document (the intended repo layout, derived from the C4 container/component views) as the canonical target a repo is expected to match. It is the layout `/acs:standardize-project` audits an existing repo against. Traces G10.
 - **`/acs:standardize-project` — brownfield standardization (separate from `/acs:create-project`, which stays greenfield-only)** — audits an EXISTING repo against its principles + standards doc sets, the architecture project-structure target, and acs-readiness tooling (coverage/CI/pre-commit/e2e harness, the same set `/acs:create-project` scaffolds greenfield), then **additively** sets up the missing docs/config/tooling as **one reviewed PR**. It NEVER moves or renames existing source; structural gaps versus the target layout become **recommended follow-up tickets**, not in-place moves. Traces G10 (+ the Tech-lead persona). *(Proposed; additive-only — see the C-2 guardrail in Constraints & assumptions.)*
+- **Opt-in reverse-bootstrap from tracker + codebase** — an **opt-in** growth path
+  that seeds a baseline `prd.md`/architecture by reverse-engineering from imported
+  tracker issues plus the existing codebase, giving a tracker-only team a starting
+  product-doc set **only when they ask for it**. Never automatic; tracker-first
+  delivery works **without** it. Traces **G11**. *(Proposed; opt-in only — see the
+  C-5 guardrail in Constraints & assumptions.)*
 
 **Won't have (now)** *(acs feature scope)*
 - Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes for the acs pipeline.
@@ -189,6 +224,12 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
 - **Auditability**: every state file human-readable (pretty JSON), append-only run history, archived not deleted.
 - **Safety**: no secrets in settings (CLIs own auth); locks prevent cross-session corruption; stale locks reported, never stolen.
 - **Cost transparency**: tokens/cost/time per run, rolled up per ticket and repo.
+- **Graceful degradation of the conformance chain**: the chain is **PRD (when present)
+  → architecture (when present) → standards → design → specs → code**; each present
+  level is verified against the present level above it, and a **missing upstream
+  artifact makes only its own trace step N/A — never a hard block**. The pipeline's
+  gates (ordering, TDD, coverage, review, audit, merge readiness) **fail closed
+  regardless** of how many upstream docs exist.
 
 ## Constraints & assumptions
 
@@ -202,6 +243,16 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
   uses one Sonnet subagent per CV with Opus synthesis; outputs include a two-sheet Excel
   scorecard and a per-run `.tabp/` archive. tabp is not skills-only — the fuller feature
   shape is defined in the tabp feature section above.
+- **acs feature — tracker-first is graceful degradation, not a parallel pipeline (C-5).**
+  Tracker-first / PRD-optional mode reuses the **one existing gated pipeline** (same
+  gates, TDD, coverage, review, audit, merge readiness); it is **not** a second
+  workflow. acs **never auto-authors a PRD/roadmap/architecture** — reverse-bootstrap
+  is **opt-in** (Could-have) and off by default. The conformance chain degrades
+  gracefully: **PRD (when present) → architecture (when present) → standards → design
+  → specs → code**; a missing upstream artifact makes its trace step N/A, never a hard
+  block. This guardrail is deliberate — a parallel "tracker pipeline" or
+  auto-PRD-generation would repeat the abandoned MAR-16..24 over-engineering (see Out
+  of scope).
 
 ## Out of scope
 
@@ -222,6 +273,13 @@ existing codebase to match the architecture project-structure target is a
 human-decided follow-up, surfaced as recommended tickets — not something acs
 performs automatically. This guardrail exists to avoid repeating the abandoned
 MAR-16..24 over-engineering reset.
+
+**Auto-authoring product docs from a tracker is out of scope.** Tracker-first mode
+never generates a `prd.md`/roadmap/architecture automatically; reverse-bootstrap
+(seeding those from imported tickets + codebase) is an **opt-in Could-have** the user
+must invoke. Tracker-first applies to the supported trackers only (GitHub Projects /
+Jira via `gh` / `acli`); **non-GitHub/Jira forges remain out of scope** (GitLab /
+Bitbucket, per the acs Won't-have).
 
 **Reversal note (MAR-35):** this amendment reverses the prior "tabp is skills-only"
 product decision that was previously stated in this PRD and in MAR-26 design C-arch-5

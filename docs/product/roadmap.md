@@ -83,6 +83,35 @@ dogfooding is rolling.
 - Conflict-resolution UX, bulk import, epic-link fidelity on Jira / GitHub
   Projects.
 
+#### Epic E6 — Tracker-first delivery (PRD-optional mode) *(Must-have — urgent; builds on E2)*
+
+Traces **G11** (+ the Team-with-a-tracker-only-PO persona) and the acs Must-have
+**Tracker-first delivery (PRD-optional mode)** feature
+([`prd.md`](prd.md#features-moscow)). Builds on E2's import/sync depth: a team with
+**no PRD/roadmap/architecture** delivers a remote-tracker-defined ticket through the
+**same gated pipeline**.
+
+- **E6.1 — Configurable governance mode.** A setting that turns on tracker-first /
+  PRD-optional delivery; when upstream docs are absent the imported tracker issue
+  (description + acceptance criteria) is the requirement source of truth. *(Config key
+  name + explicit-opt-in vs auto-detect resolved in this epic's design phase.)*
+- **E6.2 — Graceful conformance-chain degradation.** A missing upstream artifact
+  (PRD/architecture) makes only its own trace step N/A — never a hard block — while
+  gates (TDD, coverage, review, audit, merge readiness) stay unchanged.
+- **E6.3 — Divergence behavior (C-3).** No PRD ⇒ tracing N/A, tracker governs,
+  nothing flagged; PRD present ⇒ keep today's behavior (trace, flag divergence, user
+  decides).
+- **E6.4 — Validation.** Prove a PRD-less repo delivers a tracker-defined ticket
+  end-to-end with 0 gate escapes and 0 missing-upstream hard-blocks (G11 metric).
+
+Opt-in reverse-bootstrap (seeding a baseline `prd.md`/architecture from imported
+tickets + codebase) is a Could-have growth path; it is not part of this milestone and
+has no separate milestone — tracker-first delivery works without it.
+
+**Deferral:** the MECHANISM (config key, opt-in vs auto-detect, design-step
+optionality) is determined in this epic's design phase; this milestone states what
+to deliver. E6 builds on E2.
+
 #### Epic E5 — Convention enforcement & onboarding/repo hardening *(shipped in v0.2.0)*
 
 Traces G9 (+ the Tech-lead persona). The v0.2.0 release that this roadmap entry
