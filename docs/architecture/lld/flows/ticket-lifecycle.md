@@ -44,27 +44,27 @@ sequenceDiagram
         loop up to 2 total update attempts
             CO->>GH: gh pr update-branch NUMBER (merge-update)
             alt update-branch conflict
-                CO-->>Dev: report-only — "conflict updating branch; resolve and re-invoke /acs:merge-pr"
+                CO-->>Dev: report-only — "conflict updating branch — resolve and re-invoke /acs:merge-pr"
             else update succeeded
                 loop poll every 15s, max 5 min
                     CO->>GH: gh pr checks NUMBER --required
                     alt all required checks pass
-                        CO->>GH: merge (configured strategy, default squash); delete branch
-                        CO->>CO: clean worktree if one was used; tracker sync to Done
-                        CO->>POST: result document (protections="pass (was BEHIND; auto-updated via gh pr update-branch)")
-                        POST->>WS: ticket done; epic auto-done when last child;<br/>clear pointers; metrics (pr merged)
+                        CO->>GH: merge (configured strategy, default squash), then delete branch
+                        CO->>CO: clean worktree if one was used, then tracker sync to Done
+                        CO->>POST: result document (protections="pass, was BEHIND — auto-updated via gh pr update-branch")
+                        POST->>WS: ticket done, epic auto-done when last child,<br/>clear pointers, metrics (pr merged)
                         POST->>WS: move partition -> archive/SHOP-123/
                         CO-->>Dev: completion report (cleanup performed, archive path)
                     else BEHIND again (base advanced mid-poll)
                         note over CO: re-enter update loop if attempts < 2
                     else poll timeout (5 min elapsed)
-                        CO-->>Dev: report-only — "branch updated; re-invoke /acs:merge-pr once CI passes"
+                        CO-->>Dev: report-only — "branch updated — re-invoke /acs:merge-pr once CI passes"
                     end
                 end
             end
         end
         alt 2 update attempts exhausted, still BEHIND
-            CO-->>Dev: report-only — "base advanced again; re-invoke /acs:merge-pr"
+            CO-->>Dev: report-only — "base advanced again — re-invoke /acs:merge-pr"
         end
     end
 ```
