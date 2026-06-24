@@ -48,6 +48,16 @@ docs. A pipeline that **requires** a PRD to start locks those teams out; they
 need to deliver tracker-defined work through the same gates without first
 authoring product docs they do not have.
 
+Today the pipeline runs the full plan-execute-verify ladder (create-ticket →
+[create-design] → create-spec → code → create-pr → merge-pr) on **every** ticket
+regardless of size. An over-engineering audit found that a trivial one-line ticket
+pays ~5 coordinators + ~15 subagent spawns (~20 fresh model contexts), so simple,
+supervised changes cost disproportionate wall-clock time and token/cost. The rigor
+that is the product is right for unattended and complex work, but is double-paid on
+interactive simple work where a human is already the reviewer. Rigor is scaled today
+by design-significance (the `needs_design` flag) but never by implementation size or
+supervision level.
+
 **tabp feature problem:** Manual CV-vs-JD screening is slow, inconsistent, and hard to audit for
 fairness — hiring managers cannot reproduce scoring decisions or demonstrate
 that protected characteristics played no role.
@@ -82,6 +92,9 @@ that protected characteristics played no role.
 | G11 — Tracker-first delivery / graceful degradation | A repo with **no PRD/architecture** delivers a remote-tracker-defined ticket end-to-end through the **same gates** (TDD, coverage hard-fail, 11-dimension review, audit, merge readiness) with **zero gate escapes** and **zero "missing PRD" hard-blocks** — the absent upstream artifact makes only its own trace step N/A, never blocking the run. Target: **100% of tracker-first runs (PRD absent) complete without a missing-upstream hard-block AND with 0 gate escapes**, validated on **≥ 1 real PRD-less repo within 1 release of the capability shipping**; tracker-issue acceptance criteria are carried into the spec for **100%** of such runs. |
 | G12 — Org-level enforceable policy | An organization can define enforcement policy (required convention checks, security gates, standards/conventions floors) once and have it apply as a **non-overridable floor** across all its repos, with repos able to tighten but not loosen it, exemptions granted only at the org layer, and every effective rule traceable to the layer it came from. **Measurable success metric:** on a pilot org of **≥ 3 repos**, **100% of those repos enforce the org-mandated convention/security checks as required status checks with 0 repo-level self-exemptions of a mandated rule**, and a deliberately non-conforming PR in any pilot repo is **blocked from merge** — first validated within **1 release** of the org-policy capability shipping (mirrors how G1/G9 are validated by an observed live gate, e.g. ruleset 17602044, prd.md). |
 | G13 — Enforceable e2e integrity | When the optional e2e merge gate is enabled on a consumer repo, **0 PRs merge with a red e2e suite** (the required e2e status check is a fail-closed merge brake, symmetric to the G9 convention gate and the G3 coverage hard-fail), AND **100% of specs whose changeset touches a user-facing / cross-component surface declare e2e impact** (the spec's Test plan states e2e impact or an explicit "no e2e impact" reason — the code-verifier blocks any declared-impact spec lacking matching e2e test diffs; no zero-findings verdict without a green e2e run). The opt-in invariant holds: a repo with `settings.e2e` unset has no e2e suite and no e2e gate. Measured per release on the dogfood repo (gate-enabled repos). Traces the Tech-lead persona. |
+| G14 — Complexity-adaptive delivery efficiency | A trivial, human-supervised ticket is delivered for substantially less wall-clock time and token/cost than the full pipeline. **Metric:** median wall-clock time AND median token/cost for a trivial-tier ticket are each reduced **≥ 60%** vs the same ticket run through the full plan-execute-verify ladder, measured on the dogfood repo within **1 release** of the capability shipping. |
+| G15 — Fast-lane adoption | A meaningful share of tickets flow through the trivial/standard fast lanes rather than the full ladder. **Metric:** **≥ 50%** of delivered tickets use the trivial- or standard-tier fast lane (vs the full complex/unattended ladder), measured per release on the dogfood repo once the tiers ship. |
+| G16 — Rigor preserved where it matters (no regression) | Reducing process on simple/supervised work must not lower defect-catch on the work that keeps the verifier. **Metric:** **0 regression** in the code verifier's defect-catch rate — the TDD/coverage gate's hard-fail behavior and the 11-dimension review on standard/complex tiers stay 100% in force; measured by the existing eval harness (E1) showing no drop in verifier-caught findings per release vs the pre-feature baseline. |
 
 ### tabp feature — success metrics
 
@@ -131,6 +144,32 @@ feature sections here.
   persona). *(Must have — urgent; see roadmap E6.)* The mechanism (config key name,
   explicit opt-in vs auto-detect, design-step optionality) is **deferred to the
   tracker-first epic's design phase** — this PRD states the requirement (what).
+- **Complexity-adaptive delivery** — acs scales the amount of process/structure it
+  applies to a ticket based on the ticket's **complexity** AND the level of **human
+  supervision**, instead of running the full plan-execute-verify ladder on every
+  ticket. **Framing principle:** adopt the host tool (Claude Code)'s own adaptivity
+  rather than re-implement a heavier always-on version — Claude Code uses Plan mode
+  for complex tasks (skipped for simple) with human approval as the verification gate,
+  plus on-demand verification (`/verify`, `/code-review`, tests in-loop), never a
+  mandatory independent verifier on every task; acs's automated verifier is a
+  **stand-in for the absent human reviewer in unattended runs**, so applying it to
+  every interactive simple ticket double-pays. Three delivery tiers:
+  1. **TRIVIAL** (small change, human supervising interactively) — single agent loop
+     draft → edit → human approves; no standalone create-spec, no separate planner
+     subagent, no automated verifier subagent.
+  2. **STANDARD** (normal story) — create-spec fused into code (collapse the
+     create-spec/code-planner double-planning); exactly **ONE** independent verify
+     pass retained on code (the load-bearing TDD/coverage gate); apply-tier skills
+     (create-pr, merge-pr, create-ticket) run inline (coordinator + single executor),
+     not a full triad.
+  3. **COMPLEX / UNATTENDED** (epic, design-significant, or `/acs:ship` autonomous
+     run) — the full ladder exactly as today; the independent verifier legitimately
+     substitutes for the absent human and the persisted artifacts are the audit trail;
+     preserves the rigor that is the product.
+
+  The tier is set once, user-confirmed, at create-ticket, alongside the existing
+  `needs_design` flag and following that precedent; default is full/standard rigor;
+  lighter tiers are opt-in. Traces **G14, G15, G16**.
 
 **Should have** *(shipped in v0.1, maturing)*
 - Two-way tracker sync (GitHub Projects / Jira via `gh` / `acli`), remote import.
@@ -176,6 +215,7 @@ feature sections here.
 **Won't have (now)** *(acs feature scope)*
 - Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes for the acs pipeline.
 - Non-Notion remote docs providers (Confluence, Google Docs, SharePoint) — Notion is the only named remote provider; general CMS / doc-graph re-architecture is out of scope; bidirectional Notion→repo editing is out of scope now (authoritative-remote means Notion is the system of record with no repo copy, not a two-way file sync).
+- Automatic downgrade of a ticket's complexity/supervision tier without explicit user confirmation — tiers are always user-confirmed; the system never silently reduces rigor.
 
 ### Feature: tabp (recruiting/talent toolkit for the TABP team)
 
@@ -255,6 +295,22 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
   artifact makes only its own trace step N/A — never a hard block**. The pipeline's
   gates (ordering, TDD, coverage, review, audit, merge readiness) **fail closed
   regardless** of how many upstream docs exist.
+- **Conditional verification (stakes + supervision, not universal)**: the code
+  TDD/coverage gate **always** stays regardless of tier; what becomes conditional is
+  the **separate independent verifier subagent role** on deterministic / low-stakes /
+  supervised work. Gates fail closed — the gate is never the thing dropped; the
+  redundant independent reviewer on supervised work is. (Composes with "Graceful
+  degradation of the conformance chain" above: conditional verification scales
+  *process volume*, the chain's gates still fail closed.)
+- **Deterministic apply-tier executors**: apply-tier skills (create-ticket, create-pr,
+  merge-pr) have deterministic executors with judgment front-loaded into
+  clarification/gates; they do **not** need an iterating plan-execute-verify reflection
+  loop. create-ticket's structural checks (schema-completeness, link bidirectionality)
+  are a **script check, not an LLM verifier**.
+- **Message-validation / per-send performance**: in-process / batched XML message
+  validation instead of a `validate_xml.py` subprocess on every send AND receive (a
+  simple ticket currently fires ~24–30 subprocess spawns); batch `clarify.py`
+  record-before-act calls.
 
 ## Constraints & assumptions
 
@@ -280,6 +336,7 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
   auto-PRD-generation would repeat the abandoned MAR-16..24 over-engineering (see Out
   of scope).
 - **acs feature — org enforcement uses an org-controlled, non-overridable source; layers are additive (C-6).** Org-level *defaults* extend today's most-specific-wins cascade (a new org source resolved below user, fully overridable). Org-level *mandates* are the opposite: because a CI gate sees only the checked-out repo (the convention checker reads the committed project `.acs/settings.json`, not a developer home dir) and the cascade is most-specific-wins (a repo layer would silently override an org layer), an enforceable org mandate MUST come from an org-controlled source the repo cannot edit and/or use inverted **floor** precedence (repo may tighten, never loosen), with exemptions granted only at the org layer (a repo cannot self-exempt from a mandate) and every effective rule carrying provenance (which layer it came from). Introducing org/department layers is **additive and non-breaking**: with no org source configured, resolution is identical to today's user + team(project) behavior. The MECHANISM (cascade extension vs GitHub org rulesets / org-required workflows vs a versioned policy pack) is deferred to a future design epic / ADR (this PRD states the WHAT).
+- **acs feature — complexity tier is a confirmed flag set once at create-ticket; default is full rigor; lighter tiers are opt-in (C-7).** The complexity/supervision tier is set **once, user-confirmed, at create-ticket**, alongside the existing `needs_design` flag and following that exact precedent (a confirmed flag gating downstream skills). The **default stays full/standard rigor**; trivial/standard fast lanes are **opt-in**, so rigor is **never silently dropped**. The code TDD/coverage gate is non-negotiable in every tier; only the redundant independent-verifier role on supervised/low-stakes work is conditional. (Mirrors how `needs_design` is a confirmed flag gating the design step.) Cross-reference: the Out of scope section records that automatic downgrade of a ticket's complexity/supervision tier without explicit user confirmation is out of scope. *(Assumption: this constraint follows the `needs_design` confirmed-flag precedent — verified in `ticket.json` (`"needs_design": false` field present), confirming the precedent exists and no new pattern is invented.)*
 
 ## Out of scope
 
@@ -346,3 +403,6 @@ retrofitting of existing repos to an org policy is out of scope — applying org
 repo is an opt-in/rollout action surfaced per repo, never an automatic mass rewrite (same
 additive, no-wholesale-restructure discipline as C-2 above and the MAR-16..24 reset note
 above). A general non-GitHub policy distribution system is out of scope.
+
+Automatic downgrade of a ticket's complexity/supervision tier without explicit user
+confirmation — tiers are always user-confirmed; the system never silently reduces rigor.
