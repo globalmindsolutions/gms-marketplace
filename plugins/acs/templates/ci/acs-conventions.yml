@@ -19,10 +19,14 @@ permissions:
   contents: read
   pull-requests: read
 
-# A newer commit/edit supersedes an in-flight run for the same PR.
+# Do NOT cancel in-progress runs. A cancelled run leaves a non-SUCCESS conclusion on the
+# required "Branch / PR / commit conventions" check for the head SHA. Branch protection
+# treats any non-SUCCESS required context as unmet and BLOCKS the PR — observed when
+# `opened` and `labeled` both fire on `gh pr create --label ACS`. All runs complete
+# independently; GitHub records the latest run's conclusion.
 concurrency:
   group: acs-conventions-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   conventions:

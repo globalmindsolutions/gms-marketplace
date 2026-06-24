@@ -8,7 +8,7 @@ instructions in `plugins/tabp/skills/screen-cvs/SKILL.md`.
 Cross-references to SKILL.md steps:
 - **Step 0** — Initialise the tabp run (`settings-read`, `run-start`, degradation path).
 - **Step 3a** — Fan out Sonnet subagents, persist evidence, invoke Opus synthesis.
-- **Step 5a** — Self-verification pass (AC-3 gate: present only after pass).
+- **Step 5a** — Independent verification (verifier subagent, always-on, N=3 cap, present only after pass).
 
 ## Sequence diagram
 
@@ -20,6 +20,7 @@ sequenceDiagram
     participant TH as tabp_helper.py
     participant SON as Sonnet subagent (per CV)
     participant OPU as Opus synthesis subagent
+    participant VER as Verifier subagent (screen-verifier-subagent.md)
     participant FS as .tabp/ filesystem
 
     REC->>CW: /screen-cvs (or natural language trigger)
@@ -38,12 +39,18 @@ sequenceDiagram
     end
     CO->>OPU: synthesize batch results (XML task with all evidence records)
     OPU-->>CO: synthesis (ranked list + per-candidate summaries)
-    CO->>CO: self-verification pass (re-check all judgments cite CV evidence, fairness guardrails, must-have gates, rubric consistency)
-    alt verification finds blocking issues
-        CO->>CO: remediate (re-evaluate flagged candidates)
-        CO->>CO: re-run self-verification pass
+    CO->>VER: verify artifacts (XML task: run_id + jd_requirements + evidence_records + synthesis_result + scoring_rubric + fairness_guidelines — no coordinator reasoning)
+    VER-->>CO: pass | blocking-findings (no state writes)
+    loop remediate-and-re-verify (max N=3 total verifier invocations)
+        alt blocking findings exist AND iteration < N=3
+            CO->>CO: remediate flagged candidates (re-spawn screen-cv-subagent for evidence/fairness findings, or re-run synthesis for rubric/consistency findings)
+            CO->>TH: state-write (persist updated evidence records)
+            TH->>FS: .tabp/runs/<run-id>/evidence-<id>.json (atomic write)
+            CO->>VER: re-verify updated artifacts (XML task: updated artifacts — no coordinator reasoning)
+            VER-->>CO: pass | blocking-findings (no state writes)
+        end
     end
-    CO->>TH: decision-write (write decision.json with verification_passed=true)
+    CO->>TH: decision-write (write decision.json with verification_passed=true or false)
     TH->>FS: .tabp/runs/<run-id>/decision.json (atomic write)
     CO->>REC: present rich artifact (scorecard + inline summary) — present ONLY after verification passed
     REC-->>CO: explicit sign-off confirmation in-chat
@@ -81,17 +88,38 @@ the scoring rubric and returns a ranked batch result.
 
 This corresponds to **Step 3a** in `plugins/tabp/skills/screen-cvs/SKILL.md`.
 
-### Step 5a — Self-verification pass (AC-3 gate)
+### Step 5a — Independent verification (AC-3 gate)
 
-Before presenting any results, the coordinator runs a single self-verification
-pass over all evidence records. The pass re-checks:
+Before presenting any results, the coordinator spawns an independent verifier
+subagent (charter: `plugins/tabp/agents/screen-verifier-subagent.md`). The
+verifier is passed exactly six inline artifacts — `run_id`, `jd_requirements`,
+`evidence_records`, `synthesis_result`, `scoring_rubric`, and
+`fairness_guidelines` — and no coordinator reasoning or framing. The verifier
+operates in isolation from the coordinator's perspective.
+
+The verifier re-checks five dimensions:
+
 - Evidence citations are non-empty and specific.
 - Fairness guardrails were applied uniformly.
 - Must-have gates are consistent with recommendation values.
 - The scoring rubric was applied with identical thresholds for all candidates.
+- Cross-candidate consistency holds.
 
-If blocking findings exist, the coordinator remediates and re-runs the pass.
-Results are presented **only** after the pass finds no blocking findings.
+The verifier returns a `pass` or `blocking` verdict with per-finding detail.
+
+**Remediate-and-re-verify loop (capped at N=3 total verifier invocations):**
+If the verdict is `blocking`, the coordinator remediates the flagged issues
+(re-spawning affected `screen-cv-subagent` instances for evidence/fairness
+findings, or re-running the synthesis subagent for rubric/consistency findings),
+persists any updated records via `state-write`, and re-spawns the verifier. The
+loop is capped at N=3 total verifier invocations. If the third invocation still
+returns `blocking`, the loop exits and the coordinator writes
+`verification_passed=false` with the unresolved blocking findings in
+`verification_notes`, then notifies the recruiter without delivering Step 6
+results.
+
+Results are presented **only** after the verifier returns a clean `pass`. The
+verifier runs on every `screen-cvs` run with no skip path (always-on).
 
 This corresponds to **Step 5a** in `plugins/tabp/skills/screen-cvs/SKILL.md`.
 
@@ -100,7 +128,7 @@ This corresponds to **Step 5a** in `plugins/tabp/skills/screen-cvs/SKILL.md`.
 **When Cowork denies Bash access (C-5):** all `CO->>TH` steps become `CO->>FS`
 direct coordinator writes (Option A behavior). The coordinator writes
 `state_write_mode: "instructed"` into `run.json` at Step 0 to record the
-degraded mode. The subagent fan-out (Step 3a) and self-verification pass
+degraded mode. The subagent fan-out (Step 3a) and independent verification
 (Step 5a) are unaffected — only the persistence mechanism changes. Atomic
 write and spin-lock guarantees are lost in degraded mode; this is acknowledged
 in `run.json`.

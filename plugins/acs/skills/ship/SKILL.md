@@ -23,7 +23,8 @@ Ground rules, non-negotiable:
   `pipeline-state.json`, `ticket.json`, and the compact `<handoff>` XML each
   step returns (~1 KB). Between steps your context is safe to compact — the
   ledger holds everything you need to continue.
-- **Never run /acs:merge-pr.** Merging is a user action, always.
+- **Never run /acs:merge-pr.** /acs:ship deliberately stops at create-pr so the
+  PR is reviewed before it lands; landing is a separate step, not part of ship.
 
 ## Start
 
@@ -81,7 +82,7 @@ never silently fall back.
 | 3 | create-spec | always |
 | 4 | code | always |
 | 5 | create-pr | always |
-| — | merge-pr | **NEVER by you** — user action after their own review |
+| — | merge-pr | **NEVER by you** — ship stops at create-pr; the PR is landed separately after review |
 
 Design step rules (read `needs_design` and `parent` from
 `<partition>/ticket.json`):
@@ -260,7 +261,7 @@ everything. End every run — success or failure — with a compact report:
 When the pipeline completed through create-pr, the LAST line is always:
 
 > The PR is ready. Review it yourself, then run `/acs:merge-pr <ticket-id>`
-> to land it — merging stays a user action.
+> to land it — a separate, reviewed step.
 
 ## Completion report (normative)
 

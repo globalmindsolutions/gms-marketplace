@@ -1,8 +1,7 @@
 ---
 name: merge-pr
-description: Review a ticket PR's readiness (CI, approvals, conflicts, branch protections) via gh and, when ready, merge it with the configured strategy, then clean up branches, worktree, and tracker status. Use only when the user explicitly asks to merge, after they have reviewed the PR themselves.
+description: Review a ticket PR's readiness (CI, approvals, conflicts, branch protections) via gh and, when ready, merge it with the configured strategy, then clean up branches, worktree, and tracker status. Use to land a ticket's PR once it is ready and has an approving review.
 argument-hint: "[ticket-id] | --pr PRNUMBER"
-disable-model-invocation: true
 disallowed-tools: Edit, NotebookEdit
 ---
 
@@ -13,18 +12,21 @@ status). You orchestrate planner/executor/verifier subagents, persist every
 phase artifact to the ticket partition, and finish by writing the result
 document and running the post-hook — always, even on failure.
 
-## User action only
+## Invocation and safety model
 
-/acs:merge-pr runs ONLY on explicit user invocation, after the user has
-reviewed the PR themselves. The pipeline never triggers it: /acs:ship stops
-after /acs:create-pr by design, and this skill's frontmatter sets
-`disable-model-invocation: true` so the model cannot auto-invoke it. If you
-ever find yourself spawned as a step (a `<task phase="coordinate">` brief from
-/acs:ship instead of a direct user invocation): do NOT merge anything — write
-the result document with status `"failed"` and `stop_reason` "merge-pr is
-user-invoked only", run the Finish steps, and return a
-`<handoff skill="merge-pr" ticket-id="<id>" status="failed">` saying the user
-must run /acs:merge-pr themselves.
+/acs:merge-pr is invocable by the user OR an authorized agent/model — there is
+no longer a human-only gate on invocation (MAR-42; see
+`docs/adr/0027-merge-pr-agent-invocable.md`). The safety guarantee is NOT "a
+human must press merge" but "a merge happens only when the readiness gate
+(CI, approvals, conflicts, protections) AND the repo's branch protection pass,
+by whoever invokes; failures are report-only; every attempt is audited." The
+readiness review below is the load-bearing brake — agent invocation does NOT
+bypass it. The **approvals** dimension requires an **approved** review:
+because the coordinator cannot reliably distinguish an agent invocation from a
+direct human one, an approving review is required for every invocation (the
+conservative fallback of mitigation m6; ADR-0027). /acs:ship still deliberately
+stops at /acs:create-pr so a reviewer sees the PR before merge — it never
+invokes /acs:merge-pr itself.
 
 A failed readiness check is REPORT-ONLY: record what blocks, tell the user,
 stop. NEVER route fixes back to /acs:code automatically, never push commits to
@@ -38,9 +40,9 @@ through the pipeline — without inventing a ticket for it. It is the sanctioned
 counterpart to the convention-enforcement gate's `exempt_label` /
 `exempt_branches` escape hatch: instead of a raw `gh pr merge` (which the gate
 fights), the user labels the PR with the exempt label and merges it here. Like
-the ticket path it is **user-invoked only** — it inherits the "User action
-only" invariant above; if you are ever spawned as a `/acs:ship` step, refuse
-exactly as the ticket path does.
+the ticket path, it runs the same readiness brakes (including the
+approved-review requirement) and branch-protection checks before merging;
+/acs:ship never invokes it.
 
 The Start step below already passes `--args "$ARGUMENTS"`; for the exempt form
 the same command resolves the mode. Run it and read the printed context JSON:
@@ -207,8 +209,12 @@ and judge the four readiness dimensions, each reported as `"pass"` or
 - **ci** — all REQUIRED checks pass (`gh pr checks --required` exits 0 and
   `statusCheckRollup` shows no required check failing or still pending).
   Failing non-required checks are recorded as `info` findings, not blockers.
-- **approvals** — `reviewDecision` is `APPROVED`, or empty (repo requires no
-  review). `REVIEW_REQUIRED` or `CHANGES_REQUESTED` is a fail.
+- **approvals** — `reviewDecision` is `APPROVED`. An approving review is
+  required for every merge: empty (repo requires no review), `REVIEW_REQUIRED`,
+  and `CHANGES_REQUESTED` all fail. Rationale: agent-invoked merges must carry
+  an approving review (mitigation m6); because the coordinator cannot reliably
+  distinguish an agent invocation from a direct human one, the requirement
+  applies to all invocations (the require-APPROVED-for-all fallback, ADR-0027).
 - **conflicts** — `mergeable` is `MERGEABLE`. `CONFLICTING` (or
   `mergeStateStatus` `DIRTY`) is a fail.
 - **protections** — `mergeStateStatus` is not `BLOCKED` (unmet branch
@@ -326,8 +332,10 @@ Use AskUserQuestion or plain questions; record the answers in the phase
 artifacts. Never guess on anything that destroys state (force-removing a
 dirty worktree, deleting an unmerged branch).
 
-If you somehow cannot reach the user (spawned context): do not merge — see
-"User action only" above; fail with the handoff, never guess.
+If you cannot reach the user (a non-interactive agent run): proceed only when
+the readiness review fully passes (including the required approving review); on
+any failing dimension this is the same REPORT-ONLY stop — do not merge, record
+what blocks.
 
 ## Context pressure
 

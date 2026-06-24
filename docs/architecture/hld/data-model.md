@@ -116,10 +116,11 @@ erDiagram
         enum status "in_progress|completed|failed|interrupted"
         string stop_reason
         enum state_write_mode "helper|instructed"
-        string usage_source "cowork|unavailable"
+        string usage_source "cowork|claude-code|estimate|unavailable"
         number tokens_in "null if unavailable"
         number tokens_out "null if unavailable"
         number cost_usd "null if unavailable"
+        string cost_basis "actual|estimate|unavailable (optional; absent = unavailable)"
         number duration_seconds
         number candidates_screened
         string jd_slug
