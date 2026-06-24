@@ -266,5 +266,102 @@ class TestExemptPrDocs(unittest.TestCase):
         self.assertIn("--pr", body)
 
 
+class TestMergePrBehindAutoUpdate(unittest.TestCase):
+    """MAR-47 (spec 03): pin the BEHIND→update-branch prose contract across all
+    three behavior surfaces (SKILL.md, planner, executor) and the exempt --pr
+    path. Additive existence/co-occurrence assertions only — they enforce AC-6
+    (and AC-1, AC-2, AC-4 across surfaces) so a future edit that drops or
+    reverts the carve-out fails CI. No existing assertion is modified."""
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def agent_path(self, skill, role):
+        return os.path.join(PLUGIN, "agents", "%s-%s.md" % (skill, role))
+
+    def test_skill_behind_routes_to_update_branch(self):
+        body = read(self.skill_path("merge-pr"))
+        # Basic existence: update-branch is present in the skill prose.
+        self.assertIn("update-branch", body,
+                      "SKILL.md must mention update-branch (MAR-47 AC-1)")
+        # Co-occurrence: BEHIND and update-branch must appear in proximity,
+        # proving the routing (not unconditionally report-only).
+        self.assertIsNotNone(
+            re.search(r"BEHIND.*update-branch|update-branch.*BEHIND", body, re.DOTALL),
+            "SKILL.md must co-locate BEHIND and update-branch (MAR-47 AC-1)")
+
+    def test_planner_behind_routes_to_update_branch(self):
+        body = read(self.agent_path("merge-pr", "planner"))
+        # Basic existence: update-branch is present in the planner prose.
+        self.assertIn("update-branch", body,
+                      "merge-pr-planner.md must mention update-branch (MAR-47 AC-2)")
+        # Co-occurrence: BEHIND and update-branch appear together.
+        self.assertIsNotNone(
+            re.search(r"BEHIND.*update-branch|update-branch.*BEHIND", body, re.DOTALL),
+            "merge-pr-planner.md must co-locate BEHIND and update-branch (MAR-47 AC-2)")
+        # C-7 verdict tokens: pin the verdict shape without requiring the exact
+        # full sentence — robust to minor rewording of surrounding context.
+        self.assertIn("was BEHIND", body,
+                      "merge-pr-planner.md must carry 'was BEHIND' verdict token (MAR-47 C-7)")
+        self.assertIn("auto-updated", body,
+                      "merge-pr-planner.md must carry 'auto-updated' verdict token (MAR-47 C-7)")
+
+    def test_executor_behind_routes_to_update_branch(self):
+        body = read(self.agent_path("merge-pr", "executor"))
+        # Basic existence: update-branch is present in the executor prose.
+        self.assertIn("update-branch", body,
+                      "merge-pr-executor.md must mention update-branch (MAR-47 AC-2)")
+        # BEHIND-only guard: the executor must scope the update-branch step
+        # strictly to when mergeStateStatus == BEHIND (AC-2 — SKIP otherwise).
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)(only when.*BEHIND|BEHIND.*only|skip.*if.*BEHIND"
+                r"|mergeStateStatus != BEHIND)",
+                body),
+            "merge-pr-executor.md must carry the BEHIND-only guard for update-branch "
+            "(MAR-47 AC-2 — 'SKIP if mergeStateStatus != BEHIND')")
+
+    def test_conflict_and_timeout_fallbacks_in_skill(self):
+        body = read(self.skill_path("merge-pr"))
+        # Verbatim load-bearing fallback tokens (design.md lines 238-239).
+        # A future edit that drops either fallback will be caught here.
+        self.assertIn("update-branch conflict", body,
+                      "SKILL.md must carry 'update-branch conflict' fallback stop_reason "
+                      "(MAR-47 AC-4)")
+        self.assertIn("branch updated but required CI still running", body,
+                      "SKILL.md must carry CI-timeout fallback stop_reason (MAR-47 AC-4)")
+
+    def test_conflict_and_timeout_fallbacks_in_executor(self):
+        body = read(self.agent_path("merge-pr", "executor"))
+        # Same two verbatim fallback tokens must appear in the executor prose
+        # independently — asserting both surfaces catches a partial edit that
+        # updates only skill or only executor.
+        self.assertIn("update-branch conflict", body,
+                      "merge-pr-executor.md must carry 'update-branch conflict' fallback "
+                      "stop_reason (MAR-47 AC-4)")
+        self.assertIn("branch updated but required CI still running", body,
+                      "merge-pr-executor.md must carry CI-timeout fallback stop_reason "
+                      "(MAR-47 AC-4)")
+
+    def test_exempt_pr_path_behind_routes_to_update_branch(self):
+        # C-10 extension: the BEHIND carve-out applies to the exempt --pr path
+        # as well as the ticket path (clarifications.json:104-113).
+        body = read(self.skill_path("merge-pr"))
+        # Exempt section heading must be present (also asserted by TestExemptPrDocs).
+        self.assertIn("Exempt non-ticket PR mode", body,
+                      "SKILL.md must carry the 'Exempt non-ticket PR mode' section")
+        # update-branch must appear within 3000 chars after the exempt heading,
+        # proving the exempt section itself was amended — not just the ticket path.
+        self.assertIsNotNone(
+            re.search(r"(?s)Exempt non-ticket PR mode.{0,3000}update-branch", body),
+            "SKILL.md exempt section must mention update-branch within 3000 chars "
+            "of its heading (MAR-47 C-10)")
+        # BEHIND must also appear within that window.
+        self.assertIsNotNone(
+            re.search(r"(?s)Exempt non-ticket PR mode.{0,3000}BEHIND", body),
+            "SKILL.md exempt section must mention BEHIND within 3000 chars "
+            "of its heading (MAR-47 C-10)")
+
+
 if __name__ == "__main__":
     unittest.main()
