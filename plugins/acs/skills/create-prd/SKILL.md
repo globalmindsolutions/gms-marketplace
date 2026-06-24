@@ -22,15 +22,28 @@ MANDATORY first action. Pick the form by inspecting `$ARGUMENTS`:
   python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/skill-start.py" --skill create-prd --ticket <ticket-id>
   ```
 
-- Otherwise (fresh PRD or amendment — every run gets a NEW delivery ticket):
+- Otherwise (fresh PRD or amendment — every run gets a NEW delivery ticket). First
+  pick the delivery-ticket **title**, so amendment PRs don't all read the same
+  `[<id>] Product definition (PRD)`:
+
+  - Resolve `prd_path` (the `prd_path` key in `<repo>/.acs/settings.json` or
+    `~/.acs/settings.json`; default `docs/product`) and check whether
+    `<prd_path>/prd.md` already exists.
+  - **Amendment** (`prd.md` exists) with a request in `$ARGUMENTS`: compose a concise
+    (≤ ~10-word), specific title prefixed `Amend PRD: ` that names what the amendment
+    changes — e.g. `Amend PRD: add org-level enforcement policy` — and pass it as
+    `--title`. The slug, branch, and PR title all derive from it.
+  - **Fresh** PRD (no `prd.md`), or an amendment invoked with no usable request: omit
+    `--title` — the built-in `Product definition (PRD)` is right for the single initial
+    PRD and is a safe fallback.
 
   ```bash
-  python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/skill-start.py" --skill create-prd --allocate
+  python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/skill-start.py" --skill create-prd --allocate [--title "Amend PRD: <what changed>"]
   ```
 
-  `--allocate` creates the delivery ticket (type `task`, built-in title
-  "Product definition (PRD)"), its workspace partition, the `.lock`, the session
-  pointer, and the `in_progress` run entry.
+  `--allocate` creates the delivery ticket (type `task`, title from `--title` or the
+  built-in `Product definition (PRD)`), its workspace partition, the `.lock`, the
+  session pointer, and the `in_progress` run entry.
 
 If skill-start exits non-zero: STOP and surface its stderr verbatim.
 
@@ -137,7 +150,9 @@ git fetch origin "$DEFAULT_BRANCH" && git checkout -b "<branch>" "origin/$DEFAUL
 
 `<branch>` renders `settings.formats.branch_name` (default
 `{type}/{ticket_id}-{slug}`) with `ticket_id` = delivery ticket id, `type` = `task`,
-`slug` = slugified ticket title — e.g. `task/SHOP-1-product-definition-prd`. On a
+`slug` = slugified ticket title — e.g. `task/SHOP-1-product-definition-prd` for the
+initial PRD, or `task/SHOP-2-amend-prd-add-org-level-enforcement-policy` for an
+amendment with a specific title. On a
 fresh repo with no remote default branch yet, `git checkout -b "<branch>"` from the
 current HEAD instead. If checkout fails (conflicting local changes), surface the git
 error and ask the user. Iterations 2-3 stay on the branch.
@@ -198,8 +213,10 @@ gh pr create --base "$DEFAULT_BRANCH" --head "<branch>" \
 gh pr view "<branch>" --json number,url
 ```
 
-- PR title renders `settings.formats.pr_title` (default `[{ticket_id}] {title}`),
-  e.g. `[SHOP-1] Product definition (PRD)`.
+- PR title renders `settings.formats.pr_title` (default `[{ticket_id}] {title}`) from
+  the delivery ticket title — `[SHOP-1] Product definition (PRD)` for the initial PRD,
+  or the specific amendment title, e.g.
+  `[SHOP-2] Amend PRD: add org-level enforcement policy`.
 - PR body: resolve `settings.formats.pr_description_template` (default
   `pr-default` -> `${CLAUDE_PLUGIN_ROOT}/templates/pr-default.md`; a custom name ->
   `<repo>/.acs/templates/<name>.md`; else an absolute path). Fill `{ticket_id}`,
