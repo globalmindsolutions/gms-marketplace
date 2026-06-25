@@ -373,6 +373,25 @@ Purpose: turn a raw user prompt into a well-formed ticket.
   tests. The flag relaxes `/code`'s tests-first and coverage hard-fail — the
   full suite still runs once and must stay green, and a diff line touching
   executable code under the flag is a blocking verifier finding.
+- MUST capture **`size`** and **`stakes`** during `/create-ticket` analysis (MAR-56):
+  - The planner surveys the codebase or diff to identify likely touched file surfaces
+    and runs path-glob matching against `high_stakes_paths` (from settings; default seed:
+    `auth/**`, `payments/**`, `migrations/**`, `public-api/**`, `security/**`) to
+    RECOMMEND a `stakes` value. Any match yields `stakes=high` (full-verify); no match
+    yields `stakes=normal`. The planner also recommends `size` based on scope analysis.
+  - The user CONFIRMS or overrides both values (same pattern as `needs_design`/`docs_only`).
+    Stakes MUST NOT be silently lowered from a user-confirmed value; de-escalation requires
+    explicit user confirmation.
+  - The executor writes the confirmed `size`, `stakes`, and the derived `lane` (computed
+    via `derive_lane(size, stakes, needs_design, type)`) into `ticket.json`. `lane` is
+    always recomputed from the axes — never accepted verbatim from user input.
+  - Defaults when axes are absent or unrecognized: `size=standard`, `stakes=normal`,
+    `lane=STANDARD` (conservative — full-verify rigor, never a fast lane on unknown inputs).
+  - The verifier re-checks that `ticket.json` carries all three fields and that
+    `lane == derive_lane(size, stakes, needs_design, type)` (cache consistency guard).
+  - Ticket schema: `size` enum `trivial|small|standard|large`; `stakes` enum
+    `low|normal|high`; `lane` enum `TRIVIAL|SMALL|STANDARD|COMPLEX`. All three are
+    optional and additive — existing tickets without them remain valid.
 - MUST size stories/tasks to **one reviewable PR** (rule of thumb ~<=400
   changed lines, one concern, grounded in a codebase survey); above the bar the
   planner recommends an epic with children cut at PR-sized, independently

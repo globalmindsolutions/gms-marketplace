@@ -44,6 +44,18 @@
       "type": "boolean",
       "default": false
     },
+    "size": {
+      "description": "Ticket size axis; authoritative input to derive_lane. Default standard when absent.",
+      "enum": ["trivial", "small", "standard", "large"]
+    },
+    "stakes": {
+      "description": "Stakes axis; authoritative input to derive_lane. Default normal when absent.",
+      "enum": ["low", "normal", "high"]
+    },
+    "lane": {
+      "description": "Derived cache: recomputable from size x stakes via derive_lane(). Authoritative axes are size + stakes. TRIVIAL/SMALL are fast lanes; STANDARD/COMPLEX run full verify.",
+      "enum": ["TRIVIAL", "SMALL", "STANDARD", "COMPLEX"]
+    },
     "due_date": {
       "description": "Optional delivery target date (ISO-8601 YYYY-MM-DD). null = no deadline set.",
       "oneOf": [

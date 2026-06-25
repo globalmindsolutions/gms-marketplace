@@ -39,6 +39,14 @@ def main():
     parser.add_argument("--story-points", dest="story_points", type=int)
     parser.add_argument("--due-date", dest="due_date",
                         help="Optional delivery target date, ISO-8601 YYYY-MM-DD.")
+    parser.add_argument("--size", dest="size",
+                        choices=["trivial", "small", "standard", "large"],
+                        default="standard",
+                        help="Ticket size axis (default: standard).")
+    parser.add_argument("--stakes", dest="stakes",
+                        choices=["low", "normal", "high"],
+                        default="normal",
+                        help="Stakes axis (default: normal).")
     args = parser.parse_args()
 
     if args.due_date is not None:
@@ -94,6 +102,8 @@ def main():
         story_points=args.story_points,
         needs_design=needs_design,
         docs_only=args.docs_only == "true",
+        size=args.size,
+        stakes=args.stakes,
         due_date=args.due_date,
     )
     lib.save_ticket(tdir, ticket)
@@ -117,7 +127,8 @@ def main():
         },
     })
     lib.update_pipeline(tdir, ticket_id, "create-ticket", "completed",
-                        summary="created" + (" as child of %s" % args.parent if args.parent else ""))
+                        summary="created" + (" as child of %s" % args.parent if args.parent else ""),
+                        lane=ticket.get("lane"))
 
     if parent_ticket is not None:
         children = parent_ticket.setdefault("children", [])

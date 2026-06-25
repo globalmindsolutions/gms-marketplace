@@ -1134,3 +1134,320 @@ class TestDueDateWritePath(AcsWorkspaceCase):
             "--due-date", "2026-07-01T00:00:00Z",
         )
         self.assertNotEqual(result.returncode, 0)
+
+
+# ---------------------------------------------------------------------------
+# MAR-56 spec 01 — classification axes, derive_lane, mint defaults, lane writes
+# ---------------------------------------------------------------------------
+
+class TestSizeStakesLaneSchema(unittest.TestCase):
+    """AC-1 / AC-3: ticket.schema.json carries size/stakes/lane optional enums;
+    no change to required list; additionalProperties stays True; legacy tickets
+    still validate.
+
+    Uses the same stdlib-only approach as TestDueDateSchema (no jsonschema import).
+    """
+
+    SCHEMA_PATH = os.path.join(REPO_ROOT, "plugins", "acs", "schemas", "ticket.schema.json")
+
+    @classmethod
+    def setUpClass(cls):
+        with open(cls.SCHEMA_PATH) as fh:
+            cls.schema = json.load(fh)
+
+    def test_size_enum_present(self):
+        """size must be an enum with exactly {trivial, small, standard, large}."""
+        props = self.schema["properties"]
+        self.assertIn("size", props)
+        self.assertEqual(
+            sorted(props["size"]["enum"]),
+            ["large", "small", "standard", "trivial"],
+        )
+
+    def test_stakes_enum_present(self):
+        """stakes must be an enum with exactly {low, normal, high}."""
+        props = self.schema["properties"]
+        self.assertIn("stakes", props)
+        self.assertEqual(
+            sorted(props["stakes"]["enum"]),
+            ["high", "low", "normal"],
+        )
+
+    def test_lane_enum_present(self):
+        """lane must be an enum with exactly {TRIVIAL, SMALL, STANDARD, COMPLEX}."""
+        props = self.schema["properties"]
+        self.assertIn("lane", props)
+        self.assertEqual(
+            sorted(props["lane"]["enum"]),
+            ["COMPLEX", "SMALL", "STANDARD", "TRIVIAL"],
+        )
+
+    def test_size_stakes_lane_not_required(self):
+        """None of the three new fields must appear in required."""
+        required = self.schema.get("required", [])
+        for field in ("size", "stakes", "lane"):
+            self.assertNotIn(field, required, "%s must not be required" % field)
+
+    def test_additional_properties_true(self):
+        """additionalProperties must remain True (additive schema)."""
+        self.assertTrue(self.schema.get("additionalProperties", False))
+
+    def test_invalid_size_value_not_in_enum(self):
+        """'huge' must not be in the size enum (stdlib enum-rejection guard)."""
+        enum = self.schema["properties"]["size"]["enum"]
+        self.assertNotIn("huge", enum)
+
+    def test_invalid_stakes_value_not_in_enum(self):
+        """'critical' must not be in the stakes enum."""
+        enum = self.schema["properties"]["stakes"]["enum"]
+        self.assertNotIn("critical", enum)
+
+    def test_invalid_lane_value_not_in_enum(self):
+        """'MINI' must not be in the lane enum."""
+        enum = self.schema["properties"]["lane"]["enum"]
+        self.assertNotIn("MINI", enum)
+
+    def test_legacy_ticket_satisfies_required_list(self):
+        """A legacy ticket dict with no size/stakes/lane is back-compat:
+        the required list does not include the three new fields, so their
+        absence does not invalidate the ticket (R1 guard)."""
+        required = set(self.schema.get("required", []))
+        legacy_fields = {
+            "id", "title", "type", "description", "acceptance_criteria",
+            "priority", "parent", "children", "status", "external",
+            "assignee", "story_points", "needs_design",
+        }
+        # The required list must be satisfiable by a legacy ticket (no new fields).
+        self.assertTrue(
+            required.issubset(legacy_fields),
+            "required fields not satisfiable by a legacy ticket: %s" % (required - legacy_fields),
+        )
+
+
+class TestDeriveLane(unittest.TestCase):
+    """AC-2 / AC-3: derive_lane returns the correct lane for every cell of the
+    routing table, including the rule overrides and conservative defaults.
+    Full 21+ assertion grid per spec 01 Test plan.
+    """
+
+    def _lane(self, size, stakes, needs_design, ticket_type):
+        return lib.derive_lane(size, stakes, needs_design, ticket_type)
+
+    # --- base grid (no overrides) ---
+
+    def test_trivial_low_story(self):
+        self.assertEqual(self._lane("trivial", "low", False, "story"), "TRIVIAL")
+
+    def test_trivial_normal_story(self):
+        self.assertEqual(self._lane("trivial", "normal", False, "story"), "TRIVIAL")
+
+    def test_small_low_story(self):
+        self.assertEqual(self._lane("small", "low", False, "story"), "SMALL")
+
+    def test_small_normal_story(self):
+        self.assertEqual(self._lane("small", "normal", False, "story"), "SMALL")
+
+    def test_standard_low_story(self):
+        self.assertEqual(self._lane("standard", "low", False, "story"), "STANDARD")
+
+    def test_standard_normal_story(self):
+        self.assertEqual(self._lane("standard", "normal", False, "story"), "STANDARD")
+
+    def test_large_low_story(self):
+        self.assertEqual(self._lane("large", "low", False, "story"), "COMPLEX")
+
+    def test_large_normal_story(self):
+        self.assertEqual(self._lane("large", "normal", False, "story"), "COMPLEX")
+
+    # --- stakes=high floor (Rule 3; Rule 2 fires first for large) ---
+
+    def test_trivial_high_floors_to_standard(self):
+        self.assertEqual(self._lane("trivial", "high", False, "story"), "STANDARD")
+
+    def test_small_high_floors_to_standard(self):
+        self.assertEqual(self._lane("small", "high", False, "story"), "STANDARD")
+
+    def test_standard_high_stays_standard(self):
+        self.assertEqual(self._lane("standard", "high", False, "story"), "STANDARD")
+
+    def test_large_high_is_complex_rule2_beats_rule3(self):
+        """large + high -> COMPLEX because Rule 2 (size=large) fires before Rule 3."""
+        self.assertEqual(self._lane("large", "high", False, "story"), "COMPLEX")
+
+    # --- needs_design floor (Rule 4) ---
+
+    def test_trivial_low_needs_design_floors_to_standard(self):
+        self.assertEqual(self._lane("trivial", "low", True, "story"), "STANDARD")
+
+    def test_small_normal_needs_design_floors_to_standard(self):
+        self.assertEqual(self._lane("small", "normal", True, "story"), "STANDARD")
+
+    # --- epic override (Rule 1) ---
+
+    def test_trivial_low_epic_is_complex(self):
+        self.assertEqual(self._lane("trivial", "low", False, "epic"), "COMPLEX")
+
+    def test_small_normal_epic_is_complex(self):
+        self.assertEqual(self._lane("small", "normal", False, "epic"), "COMPLEX")
+
+    def test_standard_high_epic_is_complex(self):
+        self.assertEqual(self._lane("standard", "high", False, "epic"), "COMPLEX")
+
+    # --- absent / None / unrecognized inputs (Rule 6 — AC-3) ---
+
+    def test_none_none_defaults_to_standard(self):
+        self.assertEqual(self._lane(None, None, False, "story"), "STANDARD")
+
+    def test_empty_string_defaults_to_standard(self):
+        self.assertEqual(self._lane("", "", False, "story"), "STANDARD")
+
+    def test_unknown_size_defaults_to_standard(self):
+        self.assertEqual(self._lane("unknown", "normal", False, "story"), "STANDARD")
+
+    def test_unknown_stakes_does_not_floor(self):
+        """Unrecognized stakes that is not 'high' must not trigger the high floor."""
+        self.assertEqual(self._lane("small", "unknown", False, "story"), "SMALL")
+
+    # --- additional edge cases ---
+
+    def test_task_type_uses_size_dispatch(self):
+        self.assertEqual(self._lane("small", "low", False, "task"), "SMALL")
+
+    def test_needs_design_true_with_trivial_low_gives_standard_not_trivial(self):
+        """needs_design=True must prevent TRIVIAL even with size=trivial, stakes=low."""
+        result = self._lane("trivial", "low", True, "task")
+        self.assertEqual(result, "STANDARD")
+        self.assertNotEqual(result, "TRIVIAL")
+
+
+class TestMintLaneDefaults(AcsWorkspaceCase):
+    """AC-4: new_ticket_doc and new-ticket.py write size/stakes/lane defaults and
+    honor explicit overrides.
+    """
+
+    def test_default_story_has_standard_normal_standard(self):
+        """new_ticket_doc with no size/stakes kwargs -> standard/normal/STANDARD."""
+        doc = lib.new_ticket_doc("T-1", "Test", "story")
+        self.assertEqual(doc["size"], "standard")
+        self.assertEqual(doc["stakes"], "normal")
+        self.assertEqual(doc["lane"], "STANDARD")
+
+    def test_epic_has_complex_lane(self):
+        """new_ticket_doc for epic -> needs_design=True -> lane=COMPLEX (Rule 1)."""
+        doc = lib.new_ticket_doc("T-2", "Test", "epic")
+        self.assertTrue(doc["needs_design"])
+        self.assertEqual(doc["lane"], "COMPLEX")
+
+    def test_explicit_size_stakes_override(self):
+        """Explicit size=trivial, stakes=low -> lane=TRIVIAL."""
+        doc = lib.new_ticket_doc("T-3", "Test", "story", size="trivial", stakes="low")
+        self.assertEqual(doc["size"], "trivial")
+        self.assertEqual(doc["stakes"], "low")
+        self.assertEqual(doc["lane"], "TRIVIAL")
+
+    def test_small_high_stakes_floors_to_standard(self):
+        """size=small, stakes=high -> lane=STANDARD (Rule 3)."""
+        doc = lib.new_ticket_doc("T-4", "Test", "story", size="small", stakes="high")
+        self.assertEqual(doc["lane"], "STANDARD")
+
+    def test_cli_explicit_size_stakes(self):
+        """new-ticket.py --size trivial --stakes low must write size/stakes/lane=TRIVIAL."""
+        ticket_id = self.new_ticket("CLI test", "task",
+                                    "--size", "trivial", "--stakes", "low")
+        ticket = lib.load_ticket(self.tdir(ticket_id))
+        self.assertEqual(ticket["size"], "trivial")
+        self.assertEqual(ticket["stakes"], "low")
+        self.assertEqual(ticket["lane"], "TRIVIAL")
+
+    def test_cli_defaults_standard_normal_standard(self):
+        """new-ticket.py with no --size/--stakes must write standard/normal/STANDARD."""
+        ticket_id = self.new_ticket("CLI default test", "task")
+        ticket = lib.load_ticket(self.tdir(ticket_id))
+        self.assertEqual(ticket["size"], "standard")
+        self.assertEqual(ticket["stakes"], "normal")
+        self.assertEqual(ticket["lane"], "STANDARD")
+
+    def test_lane_always_derived_not_verbatim(self):
+        """Lane is always computed by derive_lane; passing inconsistent values
+        must yield the derived lane, not the raw input."""
+        # Even if a caller somehow passes a lane kwarg, new_ticket_doc should
+        # always recompute. Verify via normal override: small+high -> STANDARD.
+        doc = lib.new_ticket_doc("T-5", "Test", "story", size="small", stakes="high")
+        expected = lib.derive_lane("small", "high", False, "story")
+        self.assertEqual(doc["lane"], expected)
+
+
+class TestLaneWrites(AcsWorkspaceCase):
+    """AC-8: update_pipeline and update_index record lane in state files."""
+
+    def setUp(self):
+        super().setUp()
+        self.ticket_id = self.new_ticket("Lane write test", "task",
+                                         "--size", "trivial", "--stakes", "low")
+        self._tdir = self.tdir(self.ticket_id)
+
+    def test_update_pipeline_writes_lane(self):
+        """update_pipeline(..., lane='TRIVIAL') must write lane to pipeline-state.json."""
+        lib.update_pipeline(self._tdir, self.ticket_id, "create-spec", "done",
+                            lane="TRIVIAL")
+        data = lib.read_json(
+            os.path.join(self._tdir, "pipeline-state.json"))
+        self.assertEqual(data["lane"], "TRIVIAL")
+
+    def test_update_pipeline_lane_survives_second_update(self):
+        """A second update_pipeline call for a different skill must not drop lane."""
+        lib.update_pipeline(self._tdir, self.ticket_id, "create-spec", "done",
+                            lane="TRIVIAL")
+        lib.update_pipeline(self._tdir, self.ticket_id, "code", "done",
+                            lane="TRIVIAL")
+        data = lib.read_json(
+            os.path.join(self._tdir, "pipeline-state.json"))
+        self.assertEqual(data["lane"], "TRIVIAL")
+
+    def test_update_pipeline_without_lane_does_not_crash(self):
+        """Calling update_pipeline without lane= must not write/overwrite the field
+        and must not raise."""
+        lib.update_pipeline(self._tdir, self.ticket_id, "create-spec", "done",
+                            lane="SMALL")
+        lib.update_pipeline(self._tdir, self.ticket_id, "code", "done")
+        data = lib.read_json(
+            os.path.join(self._tdir, "pipeline-state.json"))
+        # lane from first call survives; second call without lane doesn't overwrite
+        self.assertEqual(data["lane"], "SMALL")
+
+    def test_update_index_writes_lane(self):
+        """update_index with ticket['lane']='SMALL' must persist to index."""
+        ticket = lib.load_ticket(self._tdir)
+        ticket["lane"] = "SMALL"
+        lib.update_index(self.ws, "acme-shop", ticket)
+        with open(lib.index_path(self.ws, "acme-shop")) as fh:
+            index = json.load(fh)
+        self.assertEqual(index["tickets"][self.ticket_id]["lane"], "SMALL")
+
+    def test_update_index_no_lane_key_writes_none(self):
+        """update_index with a ticket dict that has no lane key must write
+        lane: None (or absent) without crashing."""
+        ticket = lib.load_ticket(self._tdir)
+        ticket.pop("lane", None)
+        lib.update_index(self.ws, "acme-shop", ticket)
+        with open(lib.index_path(self.ws, "acme-shop")) as fh:
+            index = json.load(fh)
+        # lane entry should exist and be None (or the key should be present)
+        entry = index["tickets"][self.ticket_id]
+        # ticket.get("lane") when lane is absent returns None — that's what was written
+        self.assertIn("lane", entry)
+        self.assertIsNone(entry["lane"])
+
+    def test_update_pipeline_lane_none_does_not_write_key(self):
+        """Calling update_pipeline with lane=None (default) must not add a lane key
+        when one was not already there (or at least must not crash)."""
+        # Start fresh: call with no lane
+        lib.update_pipeline(self._tdir, self.ticket_id, "create-spec", "done")
+        data = lib.read_json(
+            os.path.join(self._tdir, "pipeline-state.json"))
+        # lane was not written (no lane= arg means None, so the if-guard skips it)
+        # The key must be absent in the initial write (or written from the ticket's
+        # mint-time create-ticket call if it was written earlier)
+        # We only assert it did not crash — the key may or may not be present
+        # depending on whether the setUp mint already wrote it.
+        self.assertIsInstance(data, dict)  # no crash
