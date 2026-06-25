@@ -147,6 +147,12 @@
       },
       "additionalProperties": false
     },
+    "high_stakes_paths": {
+      "description": "Array of glob patterns identifying high-stakes code surfaces. The create-ticket planner matches changed/owned paths against these globs to RECOMMEND stakes=high. Absent key resolves to the seed default.",
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["auth/**", "payments/**", "migrations/**", "public-api/**", "security/**"]
+    },
     "enforcement": {
       "description": "Repo-side convention enforcement scaffolded by /acs:init: a GitHub Actions check (.github/workflows/acs-conventions.yml) and a checker (.acs/ci/check-conventions.py) that validate branch name, PR title, PR description, labels, and commit messages against formats.* — the same conventions the acs pipeline renders from. Becomes a true merge gate only when made a required status check on a protected default branch. These keys are read by the checker; the convention keys (ticket_prefix + formats) must be committed to <repo>/.acs/settings.json for CI to see them.",
       "type": "object",

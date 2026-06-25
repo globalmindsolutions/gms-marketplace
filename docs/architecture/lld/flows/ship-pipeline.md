@@ -35,3 +35,11 @@ sequenceDiagram
 Properties: every hook gate still fires on the coordinator's direct Skill call
 (no bypass); re-running `/ship <ticket>` resumes from the ledger; epic fan-out
 runs each child's pipeline independently (parallel worktrees supported).
+
+> **NOTE (MAR-56):** The ship coordinator reads `ticket.lane` from `ticket.json` (written
+> by `/create-ticket`) to determine which pipeline steps are active. The `lane` field is
+> always derived from the ticket's authoritative axes (`size` × `stakes`) via
+> `derive_lane(size, stakes, needs_design, type)`. This field is available in
+> `pipeline-state.json` (alongside `flow`) and in `tickets-index.json` (alongside
+> `needs_design`) for observability and metrics (G14/G15). The `[create-spec]` bracketing
+> of TRIVIAL/SMALL lanes in the Mermaid diagram above is a D6 change owned by MAR-59.

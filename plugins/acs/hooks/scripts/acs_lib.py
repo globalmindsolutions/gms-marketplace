@@ -64,9 +64,75 @@ FORMAT_PLACEHOLDERS = {
 
 BUILTIN_TEMPLATES = {"pr-default", "epic-default", "story-default", "task-default"}
 
+
+# ---------------------------------------------------------------------------
+# Classification routing
+# ---------------------------------------------------------------------------
+
+def derive_lane(size, stakes, needs_design, ticket_type):
+    """Deterministic lane routing: maps size x stakes axes + flags to a pipeline lane.
+
+    Rule evaluation order (fixed, per design.md:553-565):
+      Rule 1 (type override):     epic -> COMPLEX
+      Rule 2 (size=large):        large -> COMPLEX
+      Rule 3 (high-stakes floor): stakes=high -> STANDARD (size<=standard floor)
+      Rule 4 (needs_design):      needs_design=True -> at least STANDARD
+      Rule 5 (size dispatch):     standard->STANDARD, small->SMALL, trivial->TRIVIAL
+      Rule 6 (default):           STANDARD (conservative fallback for absent/unknown)
+
+    Returns one of: 'TRIVIAL', 'SMALL', 'STANDARD', 'COMPLEX'.
+    Pure function; no side effects; stdlib only.
+    """
+    if ticket_type == "epic":
+        return "COMPLEX"
+    if size == "large":
+        return "COMPLEX"
+    if stakes == "high":
+        return "STANDARD"
+    if needs_design:
+        return "STANDARD"
+    if size == "standard":
+        return "STANDARD"
+    if size == "small":
+        return "SMALL"
+    if size == "trivial":
+        return "TRIVIAL"
+    return "STANDARD"  # conservative fallback for absent/unknown size
+
+
+def recommend_stakes(paths, settings):
+    """Match a collection of file paths against high_stakes_paths globs from settings.
+
+    Returns 'high' if any path matches any glob; returns 'normal' otherwise.
+    Pure function — never writes stakes to ticket.json or any state file.
+
+    Arguments:
+      paths    -- iterable of file path strings (changed files, owned paths, surveyed paths).
+                  Empty collection -> 'normal'.
+      settings -- the merged settings dict; high_stakes_paths resolved from it
+                  (falls back to DEFAULT_SETTINGS seed list if absent or settings is None).
+
+    Returns 'high' or 'normal'. This is a RECOMMENDATION only; the caller (SKILL.md planner)
+    presents it to the user. The function never silently floors a previously-confirmed value.
+    """
+    globs = (settings or {}).get("high_stakes_paths", DEFAULT_SETTINGS["high_stakes_paths"])
+    for path in (paths or []):
+        for pattern in globs:
+            if fnmatch.fnmatch(path, pattern):
+                return "high"
+    return "normal"
+
+
 DEFAULT_SETTINGS = {
     "test_coverage_percent": 90,
     "merge_strategy": "squash",
+    "high_stakes_paths": [
+        "auth/**",
+        "payments/**",
+        "migrations/**",
+        "public-api/**",
+        "security/**",
+    ],
     "prd_path": "docs/product",
     "architecture_path": "docs/architecture",
     "requirements_path": "docs/requirements",
@@ -743,7 +809,7 @@ def load_pipeline(tdir, ticket_id, flow="ticket"):
     return data
 
 
-def update_pipeline(tdir, ticket_id, skill, status, summary=None, flow=None):
+def update_pipeline(tdir, ticket_id, skill, status, summary=None, flow=None, lane=None):
     data = load_pipeline(tdir, ticket_id, flow or ("product" if skill in PRODUCT_SKILLS else "ticket"))
     if flow:
         data["flow"] = flow
@@ -755,6 +821,8 @@ def update_pipeline(tdir, ticket_id, skill, status, summary=None, flow=None):
     step["status"] = status
     if summary is not None:
         step["summary"] = summary
+    if lane is not None:
+        data["lane"] = lane
     data["totals"] = compute_ticket_totals(tdir)
     write_json(os.path.join(tdir, "pipeline-state.json"), data)
     return data
@@ -809,6 +877,14 @@ def new_ticket_doc(ticket_id, title, ttype, **kw):
         "story_points": kw.get("story_points"),
         "needs_design": kw.get("needs_design", ttype == "epic"),
         "docs_only": kw.get("docs_only", False),
+        "size":   kw.get("size",   "standard"),
+        "stakes": kw.get("stakes", "normal"),
+        "lane":   derive_lane(
+                      kw.get("size",   "standard"),
+                      kw.get("stakes", "normal"),
+                      kw.get("needs_design", ttype == "epic"),
+                      ttype
+                  ),
         "due_date": kw.get("due_date"),
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -868,6 +944,7 @@ def update_index(workspace, repo_id, ticket, archived=None):
         "parent": ticket.get("parent"),
         "children": ticket.get("children", []),
         "needs_design": ticket.get("needs_design"),
+        "lane": ticket.get("lane"),
         "external": ticket.get("external"),
         "due_date": ticket.get("due_date"),
         "updated_at": now_iso(),

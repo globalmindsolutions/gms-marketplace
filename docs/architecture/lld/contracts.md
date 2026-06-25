@@ -19,7 +19,7 @@ Validation: `validate_xml.py` on every send/receive; one re-request, then fail.
 |--------|----------|
 | `skill-start.py --skill S [--ticket\|--args\|--allocate]` | stdout: context JSON (settings, partition, ticket, models, reconcile/handoff, post_hook path); registers `in_progress` run, lock, pointer |
 | `post-<skill>.py --ticket T --result-file F` (or stdin JSON) | input: the **result document** `{status, stop_reason, states, findings, errors, tokens, cost_usd[, handoff_summary]}`; finalizes run + ledger + index + metrics, releases lock |
-| `new-ticket.py --title --type [--parent --needs-design --docs-only …]` | mints id + partition + mint-time create-ticket state; epic backlinks |
+| `new-ticket.py --title --type [--parent --needs-design --docs-only --size --stakes …]` | mints id + partition + mint-time create-ticket state; epic backlinks; --size {trivial,small,standard,large} and --stakes {low,normal,high} write classification axes + derived lane |
 | `clarify.py add\|answer\|list` | the Q&A ledger (`clarifications.json`); assumptions need `--rationale` |
 | `handoff.py --summary` | finalizes `handed_off`, releases lock, prints `continue_with` |
 
@@ -29,6 +29,16 @@ Exit codes: 0 ok; 2 blocked/invalid with actionable stderr.
 
 `PreToolUse(Skill)` → `dispatch.py pre` → `pre-<skill>.py` (exit 2 blocks);
 `SessionEnd` → `dispatch.py session-end` (finalize `interrupted`, release lock).
+
+## Ticket classification fields (MAR-56)
+
+`ticket.json` carries three new optional fields (additive; legacy tickets without them remain valid):
+- `size` — authoritative axis (enum: `trivial`, `small`, `standard`, `large`; default `standard` when absent)
+- `stakes` — authoritative axis (enum: `low`, `normal`, `high`; default `normal` when absent)
+- `lane` — derived cache, recomputable via `derive_lane(size, stakes, needs_design, type)` (enum: `TRIVIAL`, `SMALL`, `STANDARD`, `COMPLEX`; default `STANDARD`)
+
+`pipeline-state.json` records `lane` alongside `flow` (written by `update_pipeline`).
+`tickets-index.json` mirrors `lane` per entry alongside `needs_design` (written by `update_index`).
 
 ## Inter-step contract (state files)
 
@@ -44,7 +54,8 @@ INTERNALS.md "Canonical states keys per skill". Schemas:
 per-key merge local → project → user; validated by every pre-hook
 (`settings.schema.json`): `workspace_path`, `ticket_prefix`,
 `test_coverage_percent`, `merge_strategy`, `prd_path`, `architecture_path`,
-`adr_path?`, `e2e?`, `models`, `tracker`, `formats`.
+`adr_path?`, `e2e?`, `models`, `tracker`, `formats`, `high_stakes_paths?`
+(array of glob strings; absent key resolves to the seed default `["auth/**","payments/**","migrations/**","public-api/**","security/**"]`).
 
 ---
 

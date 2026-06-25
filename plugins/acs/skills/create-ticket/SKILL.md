@@ -135,6 +135,7 @@ Send, for example:
     <constraint name="prd">when the PRD exists (settings.prd_path, default docs/product): trace the ticket to a PRD feature/goal; epics SHOULD derive from roadmap milestones; flag any divergence explicitly</constraint>
     <constraint name="formats">title must fit settings.formats.tickets.&lt;type&gt;.title; description must fit the type's description_template sections</constraint>
     <constraint name="needs-design">epics are always needs_design=true; for story/task recommend a value with a one-line rationale</constraint>
+    <constraint name="classification">survey the codebase or diff for likely touched file surfaces; run path-glob match against high_stakes_paths (from settings; default seed: auth/**, payments/**, migrations/**, public-api/**, security/**) to RECOMMEND stakes=high (any match) or stakes=normal (no match); recommend size (trivial/small/standard/large) based on scope analysis; derive and present the recommended lane via derive_lane(size, stakes, needs_design, type); present rationale for stakes=high when path-glob triggered it</constraint>
   </constraints>
   <context>Raw request: ... $ARGUMENTS ... (or: imported from jira PROJ-456; full imported description follows) ...</context>
 </task>
@@ -143,7 +144,7 @@ Send, for example:
 The planner returns a `<result>` carrying the full proposal as
 `<finding severity="info" dimension="proposal">` entries (one per decided field:
 type, title, description outline, acceptance criteria, priority, story points,
-needs_design + rationale, prd_trace, child breakdown) and real ambiguities as
+needs_design + rationale, prd_trace, child breakdown, size + rationale, stakes + rationale (incl. matched paths when high), derived lane) and real ambiguities as
 `<questions>`. Persist it to `iter-<n>-plan.xml`.
 
 ### Confirm with the user (between plan and execute)
@@ -160,6 +161,13 @@ Do this BEFORE finalizing anything:
    CONFIRM the final value. Same for `docs_only` whenever the planner recommends
    `true` (it relaxes /acs:code's TDD/coverage gates — never set it without
    explicit user confirmation; when `false`, don't ask).
+3a. Size and stakes (MAR-56): present the recommended `size` and `stakes` with a brief
+    one-line rationale (including the matched paths when stakes=high is recommended by the
+    path-glob match). Have the USER CONFIRM or override each. Derive `lane` from the
+    confirmed values via `derive_lane(size, stakes, needs_design, type)` and display it so
+    the user sees what pipeline lane their ticket will take. Note: `stakes` MAY be raised by
+    the user without restriction; de-escalation (lowering a stakes=high to a lower value)
+    requires explicit user confirmation — never silently floor down a user-confirmed value.
 4. Epic only: present the proposed child story/task breakdown (title, type, points,
    needs_design=false rationale per child) and get user confirmation/edits before
    any child is created.
@@ -189,11 +197,21 @@ The executor must:
    mapping, the sync result from step 5, or null), `assignee` (or null),
    `story_points` (or null), `needs_design`, `docs_only` (confirmed value,
    default false), and `due_date` (optional ISO-8601 date string or null;
-   elicited from user); refresh `updated_at` (ISO-8601 UTC).
+   elicited from user); refresh `updated_at` (ISO-8601 UTC). Also write the
+   user-confirmed classification fields: `size` (enum trivial|small|standard|large,
+   default standard), `stakes` (enum low|normal|high, default normal), and `lane`
+   computed by `derive_lane(size, stakes, needs_design, ticket_type)` — NEVER
+   copy lane verbatim from the user input or planner recommendation; always recompute
+   from the confirmed axes to ensure cache consistency (invariant D5).
 4. EPIC fan-out — for each user-confirmed child, run:
 
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/new-ticket.py" --title "Wishlist API" --type story --parent SHOP-123 --description "..." --priority medium --needs-design false --story-points 3
+
+   Do NOT pass `--size` or `--stakes` when minting child tickets in the fan-out.
+   This ensures children mint with conservative defaults (size=standard, stakes=normal,
+   lane=STANDARD) and will each be confirmed individually when their own /create-ticket
+   runs. Conservative defaults never silently assign a fast lane to unconfirmed work.
    ```
 
    This mints the child id, writes BOTH link directions (child `parent`, epic
@@ -239,6 +257,10 @@ re-checks reality — it must independently confirm:
   `schemas/ticket.schema.json`; title matches `formats.tickets.<type>.title`;
   description contains the resolved template's sections; `due_date` is present
   and is either a `YYYY-MM-DD` string or `null`.
+- Classification fields (MAR-56): `ticket.json` carries `size`, `stakes`, and `lane`
+  (all three present and non-null after a create-ticket run). Verify cache consistency:
+  `lane == derive_lane(size, stakes, needs_design, ticket_type)` — a mismatch means
+  the cached lane is stale or was mis-written and is a blocking finding.
 - Acceptance criteria: present, and each one concretely testable (an observable
   outcome a test or reviewer can check) — vague criteria are blocking findings.
 - PRD trace: when the PRD exists, the ticket maps to a named feature/goal (epics to
