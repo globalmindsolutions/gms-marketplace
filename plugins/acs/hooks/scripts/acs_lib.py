@@ -100,6 +100,46 @@ def derive_lane(size, stakes, needs_design, ticket_type):
     return "STANDARD"  # conservative fallback for absent/unknown size
 
 
+def verify_depth(lane, stakes):
+    """Return "light" or "full" verify depth for the ticket's lane and stakes.
+
+    Truth table (design.md D4 / C-9):
+      lane=TRIVIAL,  stakes=low    -> "light"
+      lane=TRIVIAL,  stakes=normal -> "light"
+      lane=SMALL,    stakes=low    -> "light"
+      lane=SMALL,    stakes=normal -> "light"
+      lane=STANDARD, stakes=*      -> "full"
+      lane=COMPLEX,  stakes=*      -> "full"
+      any lane,      stakes=high   -> "full"  (stakes floor, AC-2)
+      lane=None/unknown/absent     -> "full"  (conservative default, invariant c)
+
+    Check stakes == "high" FIRST (floor cannot be bypassed by lane value).
+    Only the exact string "high" triggers the floor; None and other strings do not.
+    Only exact uppercase lane values TRIVIAL/SMALL/STANDARD/COMPLEX are recognized;
+    any other string (including lowercase) is treated as unknown -> "full".
+
+    Pure function; no I/O, no side effects; stdlib only.
+    """
+    # Stakes floor: high stakes always yields full regardless of lane (AC-2)
+    if stakes == "high":
+        return "full"
+    # Lane dispatch: recognized fast-lane values
+    if lane in ("TRIVIAL", "SMALL"):
+        return "light"
+    # Recognized full-lane values (conservative for absent/unknown lane too)
+    return "full"
+
+
+VERIFY_ITERATION_CAP: dict = {"light": 1, "full": 3}
+"""Iteration cap keyed by verify depth (AC-3: light=1; AC-4: full=3).
+
+Used by the /acs:code coordinator to bound the reflection loop:
+  depth = verify_depth(ticket.lane, ticket.stakes)
+  ceiling = VERIFY_ITERATION_CAP[depth]
+"""
+
+
+
 def recommend_stakes(paths, settings):
     """Match a collection of file paths against high_stakes_paths globs from settings.
 

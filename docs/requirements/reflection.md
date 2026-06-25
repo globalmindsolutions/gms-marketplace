@@ -31,8 +31,28 @@ Requirements:
   output.
 - On verification failure, the cycle reflects: the coordinator feeds the
   verifier's findings back into another plan/execute iteration.
-  - The cycle runs at most **3 iterations**; on hitting the cap the skill
-    stops and records its findings and stop reason in its state file.
+  - The cycle runs at most **lane-driven iterations**:
+    - **TRIVIAL/SMALL lanes** (low/normal stakes): at most **1 iteration** (light
+      verify — single verifier pass that may iterate once on blocking findings;
+      cap = `VERIFY_ITERATION_CAP["light"]` = 1).
+    - **STANDARD/COMPLEX lanes**, or any **high-stakes** ticket: at most
+      **3 iterations** (full verify — existing plan→execute→verify loop + full
+      11-dimension review + e2e when configured, unchanged; cap =
+      `VERIFY_ITERATION_CAP["full"]` = 3).
+    - When `ticket.lane` or `ticket.stakes` are absent or unrecognized, default
+      conservatively to full (3-iteration ceiling).
+    - On hitting the lane's cap with findings remaining, the skill stops and
+      records its findings and stop reason in its state file.
+
+  **Absolute invariants — apply in every lane regardless of verify depth:**
+
+  - The **verifier subagent is the in-loop quality gate in every lane** (C-5).
+    Light verify differs from full only in iteration ceiling; the verifier always
+    runs. There is no inline human-approval gate; the human-in-the-loop
+    checkpoint is the PR review before merge.
+  - The **TDD/coverage gate runs in full in every lane and is never trimmed by
+    verify-depth selection** (invariant a, MAR-55). Depth selection is not a
+    verify dimension that light mode drops.
 - Subagent naming convention: `<skill>-planner`, `<skill>-executor`,
   `<skill>-verifier` for all six workflow skills, plus the product-level
   `/create-prd`, `/create-architecture`, and `/create-project` triples —

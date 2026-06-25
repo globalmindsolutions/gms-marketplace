@@ -99,7 +99,31 @@ pass), and continue from where it points.
 
 ## Reflection loop
 
-Run plan -> execute -> verify, at most 3 iterations. Spawn subagents with the
+### Verify-depth (lane-driven iteration ceiling)
+
+Before starting the reflection loop, determine the verify depth for this ticket:
+
+1. Read `ticket.lane` and `ticket.stakes` from `context.ticket` (fields added
+   by MAR-56; available in `context.ticket.lane` and `context.ticket.stakes`).
+2. Call `verify_depth(ticket.lane, ticket.stakes)` (defined in `acs_lib.py`)
+   to obtain `"light"` or `"full"`.
+3. Set the reflection-loop iteration ceiling from `VERIFY_ITERATION_CAP[depth]`:
+   - `"light"` (TRIVIAL/SMALL at low/normal stakes) → ceiling = **1** iteration.
+   - `"full"` (STANDARD/COMPLEX, or any high-stakes) → ceiling = **3** iterations.
+4. When `ticket.lane` or `ticket.stakes` are absent or unrecognized, default
+   conservatively to `"full"` (mirrors `verify_depth`'s own default).
+
+**Invariants (always hold regardless of lane):**
+
+- The **verifier subagent is the in-loop quality gate in EVERY lane** (C-5).
+  Light verify differs from full verify only in iteration ceiling — the verifier
+  ALWAYS runs. There is no inline human-approval gate; the human-in-the-loop
+  checkpoint is the PR review before merge.
+- The **TDD/coverage gate (see `### Coverage hard fail` below) runs in FULL in
+  every lane and is NEVER trimmed by verify-depth selection**. Invariant (a)
+  holds regardless of lane.
+
+Run plan -> execute -> verify, at most verify_depth-determined iterations (light: cap 1; full: cap 3). Spawn subagents with the
 Agent tool: `acs:code-planner`, `acs:code-executor`, `acs:code-verifier` (fall
 back to the un-namespaced name only if the runtime rejects the namespaced
 one). For each role, apply `context.models.<role>.model` / `.effort` at spawn
@@ -231,8 +255,8 @@ Dimensions, each producing blocking findings on failure:
 ALL findings block — zero findings = pass (`verifier_passed: true`). On
 findings: persist the verify output, then AUTOMATICALLY re-plan and re-execute
 (TDD still applies to fixes: failing test first when a finding is behavioral).
-After iteration 3 with findings remaining: stop with final status `"failed"`,
-findings recorded, gate closed.
+After the lane's iteration cap (light: 1 / full: 3) with findings remaining: stop
+with final status `"failed"`, findings recorded, gate closed.
 
 ### Coverage hard fail
 

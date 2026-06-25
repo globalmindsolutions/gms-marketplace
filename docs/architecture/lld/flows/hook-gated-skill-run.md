@@ -57,3 +57,22 @@ sequenceDiagram
 Failure shapes: iteration cap → `failed` with findings recorded; coverage
 hard-fail → `failed`, `/create-pr` gate stays closed; crash → `in_progress`
 left behind, SessionEnd marks `interrupted`, next run reconciles.
+
+## Verify-depth scaling (MAR-58 / D4)
+
+The iteration ceiling for the reflection loop is **lane-driven**:
+
+- **TRIVIAL/SMALL lanes** (low/normal stakes): cap = **1** iteration — light
+  verify (single verifier pass that may iterate once on blocking findings).
+- **STANDARD/COMPLEX lanes** (or any high-stakes ticket): cap = **3** iterations
+  — full verify (existing plan→execute→verify loop + full 11-dimension review
+  + e2e when configured), unchanged.
+
+The ceiling is determined by `verify_depth(ticket.lane, ticket.stakes)` in
+`acs_lib.py` (see `VERIFY_ITERATION_CAP`). High-stakes tickets ALWAYS use full
+verify regardless of size (stakes floor; AC-2).
+
+**The verifier subagent runs in every lane as the in-loop gate (C-5).** Light
+verify reduces the iteration ceiling only — the verifier always runs; there is
+no inline human-approval gate. The TDD/coverage gate (Coverage hard fail) is
+never trimmed by the verify-depth selection and applies in full in every lane.

@@ -1320,6 +1320,95 @@ class TestDeriveLane(unittest.TestCase):
         self.assertNotEqual(result, "TRIVIAL")
 
 
+
+## MAR-58 spec 01 — TestVerifyDepth
+
+
+class TestVerifyDepth(unittest.TestCase):
+    """AC-1/AC-2/AC-7: verify_depth(lane, stakes) returns 'light' or 'full' per the
+    full lane x stakes grid, including the high-stakes floor and conservative defaults.
+    VERIFY_ITERATION_CAP constants asserted (AC-3/AC-4).
+    """
+
+    def _depth(self, lane, stakes):
+        return lib.verify_depth(lane, stakes)
+
+    # --- base light cells (lane in {TRIVIAL, SMALL}, stakes in {low, normal}) ---
+
+    def test_trivial_low_is_light(self):
+        self.assertEqual(self._depth("TRIVIAL", "low"), "light")
+
+    def test_trivial_normal_is_light(self):
+        self.assertEqual(self._depth("TRIVIAL", "normal"), "light")
+
+    def test_small_low_is_light(self):
+        self.assertEqual(self._depth("SMALL", "low"), "light")
+
+    def test_small_normal_is_light(self):
+        self.assertEqual(self._depth("SMALL", "normal"), "light")
+
+    # --- base full cells (lane in {STANDARD, COMPLEX} -> full regardless of stakes) ---
+
+    def test_standard_low_is_full(self):
+        self.assertEqual(self._depth("STANDARD", "low"), "full")
+
+    def test_standard_normal_is_full(self):
+        self.assertEqual(self._depth("STANDARD", "normal"), "full")
+
+    def test_complex_low_is_full(self):
+        self.assertEqual(self._depth("COMPLEX", "low"), "full")
+
+    def test_complex_normal_is_full(self):
+        self.assertEqual(self._depth("COMPLEX", "normal"), "full")
+
+    # --- high-stakes floor (AC-2): stakes=high always yields full ---
+
+    def test_trivial_high_is_full(self):
+        self.assertEqual(self._depth("TRIVIAL", "high"), "full")
+
+    def test_small_high_is_full(self):
+        self.assertEqual(self._depth("SMALL", "high"), "full")
+
+    def test_standard_high_is_full(self):
+        self.assertEqual(self._depth("STANDARD", "high"), "full")
+
+    def test_complex_high_is_full(self):
+        self.assertEqual(self._depth("COMPLEX", "high"), "full")
+
+    def test_trivial_high_is_never_light(self):
+        """AC-2: high-stakes TRIVIAL ticket NEVER gets light verify."""
+        self.assertNotEqual(self._depth("TRIVIAL", "high"), "light")
+
+    # --- conservative default (AC-1): absent/None/empty/unknown lane -> full ---
+
+    def test_none_lane_normal_is_full(self):
+        self.assertEqual(self._depth(None, "normal"), "full")
+
+    def test_empty_string_lane_is_full(self):
+        self.assertEqual(self._depth("", "normal"), "full")
+
+    def test_unknown_lane_is_full(self):
+        self.assertEqual(self._depth("unknown", "low"), "full")
+
+    # --- unknown/None stakes (non-"high") does not floor a fast lane ---
+
+    def test_trivial_unknown_stakes_is_light(self):
+        """Only 'high' triggers the stakes floor; unrecognized stakes does not."""
+        self.assertEqual(self._depth("TRIVIAL", "unknown"), "light")
+
+    def test_trivial_none_stakes_is_light(self):
+        """None stakes is not 'high'; a TRIVIAL ticket stays light."""
+        self.assertEqual(self._depth("TRIVIAL", None), "light")
+
+    # --- iteration-cap constant values (AC-3/AC-4/AC-7) ---
+
+    def test_cap_light_is_1(self):
+        self.assertEqual(lib.VERIFY_ITERATION_CAP["light"], 1)
+
+    def test_cap_full_is_3(self):
+        self.assertEqual(lib.VERIFY_ITERATION_CAP["full"], 3)
+
+
 class TestMintLaneDefaults(AcsWorkspaceCase):
     """AC-4: new_ticket_doc and new-ticket.py write size/stakes/lane defaults and
     honor explicit overrides.
