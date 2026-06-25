@@ -509,9 +509,12 @@ Purpose: implement the specs in the consumer repo using TDD.
 - Pre-hook (`pre-code.py`) MUST verify specs exist and `/create-spec`
   completed for STANDARD, COMPLEX, absent, and unrecognized lanes; otherwise
   exit 2 to stop the skill. For TRIVIAL and SMALL lanes the gate does NOT
-  require create-spec completion or a populated `specs/` directory — spec
-  authoring is folded into `/code`'s plan phase on fast lanes (see Spec 02,
-  MAR-59).
+  require create-spec completion or a populated `specs/` directory — on those
+  lanes, when no specs are present, spec authoring (scope, approach,
+  API/data changes, and a test plan with every acceptance criterion mapped to a
+  test) is folded into `/code`'s plan phase by the code-planner. The
+  TDD/coverage hard-fail and verifier-as-gate (light cap 1, no inline human
+  gate) are preserved unchanged in every lane.
 - Subagents: `code-planner`, `code-executor`, `code-verifier`.
 - When the coverage target cannot be reached, `/code` MUST **hard fail**:
   stop, record the achieved coverage and reason in `code-state.json`, and
