@@ -66,11 +66,20 @@ configuration.
 
 Purpose: drive the whole pipeline from one command.
 
-- `/ship <prompt>` MUST run the workflow skills in order —
-  `/create-ticket` → `/create-design` (when the ticket needs design) →
-  `/create-spec` → `/code` → `/create-pr` — and stop before `/merge-pr`,
-  which a reviewer lands as a separate step
-  ([workflow.md](workflow.md#umbrella-command-ship)).
+- `/ship <prompt>` MUST run the workflow skills in lane-conditional order
+  and stop before `/merge-pr`, which a reviewer lands as a separate step
+  ([workflow.md](workflow.md#umbrella-command-ship)):
+  - **TRIVIAL or SMALL lane:** `/create-ticket` → `/create-design` (when
+    the ticket needs design) → `/code` → `/create-pr` — create-spec is
+    skipped; spec authoring is folded into `/code`'s plan phase.
+  - **STANDARD, COMPLEX, high-stakes, absent, or unrecognized lane:**
+    `/create-ticket` → `/create-design` (when the ticket needs design) →
+    `/create-spec` → `/code` → `/create-pr` — the full path, unchanged.
+  Note: `stakes == "high"` resolves to STANDARD via `derive_lane`
+  (rule 3: high-stakes floor), so high-stakes tickets never reach the
+  TRIVIAL/SMALL branch and always keep the full create-spec path. An
+  absent or unrecognized lane is treated as STANDARD (fail-closed;
+  consistent with `derive_lane`'s conservative default).
 - MUST NOT bypass any pre/post hook; it adds orchestration only.
 - SHOULD be resumable: re-running it for a ticket continues from the first
   incomplete step recorded in workspace state.
