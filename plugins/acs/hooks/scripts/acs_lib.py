@@ -1292,7 +1292,13 @@ def gate_create_spec(ctx, payload):
 
 
 def gate_code(ctx, payload):
-    ticket_id, tdir, _ticket = _resolve_ticket_for_gate(ctx, payload, "code")
+    ticket_id, tdir, ticket = _resolve_ticket_for_gate(ctx, payload, "code")
+    recognized_lanes = ("TRIVIAL", "SMALL", "STANDARD", "COMPLEX")
+    lane = ticket.get("lane")
+    if lane not in recognized_lanes:
+        lane = derive_lane(ticket.get("size"), ticket.get("stakes"), ticket.get("needs_design"), ticket.get("type"))
+    if lane in ("TRIVIAL", "SMALL"):
+        return ticket_id
     _require_completed(tdir, "create-spec", ticket_id, "run /acs:create-spec %s first" % ticket_id)
     specs = os.path.join(tdir, "specs")
     if not os.path.isdir(specs) or not [f for f in os.listdir(specs) if f.endswith(".md")]:

@@ -507,7 +507,11 @@ Purpose: implement the specs in the consumer repo using TDD.
   resume from the first unfinished spec/phase
   ([workflow.md](workflow.md#resuming-a-ticket)).
 - Pre-hook (`pre-code.py`) MUST verify specs exist and `/create-spec`
-  completed; otherwise exit 2 to stop the skill.
+  completed for STANDARD, COMPLEX, absent, and unrecognized lanes; otherwise
+  exit 2 to stop the skill. For TRIVIAL and SMALL lanes the gate does NOT
+  require create-spec completion or a populated `specs/` directory — spec
+  authoring is folded into `/code`'s plan phase on fast lanes (see Spec 02,
+  MAR-59).
 - Subagents: `code-planner`, `code-executor`, `code-verifier`.
 - When the coverage target cannot be reached, `/code` MUST **hard fail**:
   stop, record the achieved coverage and reason in `code-state.json`, and
