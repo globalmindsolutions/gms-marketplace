@@ -9,10 +9,11 @@ You are the coordinator of /acs:create-pr. Your job: ship the ticket's
 implementation as a pull request. Everything in the PR — title, body, ticket
 reference, change list, test plan — is composed from WORKSPACE STATE
 (`ticket.json`, `specs/`, `design.md`, `code-state.json` including its review
-summary), never from conversation history. You orchestrate
-planner/executor/verifier subagents, persist every phase artifact to the
-ticket partition, and finish by writing the result document and running the
-post-hook — always, even on failure.
+summary), never from conversation history. You perform the apply-work inline
+(or delegate to at most one executor subagent), persist every phase artifact to
+the ticket partition, and finish by writing the result document and running the
+post-hook — always, even on failure. You never spawn a planner or verifier
+subagent for this skill.
 
 ## Start
 
@@ -38,7 +39,8 @@ Parse the printed context JSON. Fields you will use:
   `pr_description_template` (default `pr-default`).
 - `settings.tracker` — `provider` is `local` (no sync), `github`, or `jira`.
 - `checkout_root`, `plugin_root` — for template resolution.
-- `models` — per-role `{model, effort}` for planner/executor/verifier.
+- `models` — per-role `{model, effort}` for the executor (the only subagent
+  role used by this skill; planner and verifier are not spawned).
 - `reconcile`, `handoff_summary`, `prior_run_status` — see Resume & reconcile.
 - `design` — `{required, dir, source}`; when required, `<design.dir>/design.md`
   feeds the Summary/Changes content.
@@ -79,149 +81,89 @@ If `context.handoff_summary` exists, read it plus
 reconcile (trust the summary, cheaply spot-check the PR/branch it names), and
 continue from where it points.
 
-## Reflection loop
+## Inline apply flow
 
-Run plan -> execute -> verify, at most 3 iterations. Spawn subagents with the
-Agent tool: `acs:create-pr-planner`, `acs:create-pr-executor`,
-`acs:create-pr-verifier` (fall back to the un-namespaced name only if the
-runtime rejects the namespaced one). For each role, apply
-`context.models.<role>.model` / `.effort` at spawn when not `"inherit"`; if
-the runtime rejects the model or effort, FAIL the run with that exact error —
-no silent fallback.
+No planner-executor-verifier triad. No planner or verifier subagents are
+spawned for this skill. This inline flow holds in every lane (TRIVIAL / SMALL
+/ STANDARD / COMPLEX / absent) — the lane never re-introduces a planner or
+verifier for create-pr.
 
-Messaging rules (schemas/acs-messages.xsd):
+**Verifier-gated upstream (AC-5).** Correctness was already gated by the
+upstream code-verifier (/acs:code's verifier subagent, which must pass before
+/acs:create-pr is invoked — the pre-hook enforces this via
+`code-state.json` `states.verifier_passed == true`). The human checkpoint is
+the PR review. /acs:create-pr carries no in-skill verifier; invariant (d)
+lives in the upstream code/spec lanes, not in apply-work.
 
-- Send each subagent one `<task skill="create-pr" phase="plan|execute|verify"
-  ticket-id="<id>" iteration="n">` containing `<objective>`, `<inputs>` (file
-  refs: ticket.json, code-state.json, specs/, design.md when it applies), and
-  `<constraints>`. The subagent returns a `<result>` as its final content.
-- Validate EVERY message you send and receive:
+The coordinator performs the following numbered steps directly, or delegates
+the entire numbered flow to at most one `acs:create-pr-executor` subagent when
+run complexity warrants it. When delegating, send one `<task>` message
+(validated with validate_xml.py against schemas/acs-messages.xsd); the
+executor returns one `<result>` with the phase artifact reference. The
+coordinator never delegates to a planner or verifier. If the runtime rejects a
+model or effort setting from `context.models.executor`, FAIL the run with that
+exact error — no silent fallback.
 
-  ```bash
-  echo "<xml>" | python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_xml.py" -
-  ```
-
-  On invalid: re-request once with the validation error; still invalid -> fail
-  the run and record the error in the result document's `errors`.
-- Persist every phase output to
-  `<partition>/phases/create-pr/iter-<n>-<phase>.xml` at the phase boundary,
-  BEFORE starting the next phase.
-- Decomposition is YOURS alone — subagents never spawn subagents. For this
-  skill run exactly ONE executor per iteration: there is one branch and one PR,
-  so parallel executor outputs always conflict. The verifier runs after the
-  executor finishes.
-
-### Plan (per iteration)
-
-Task the planner with `<inputs>` of the state files above. The planner is
-read-only (except its own `iter-<n>-plan.md`) and must produce:
-
-- The ticket branch resolved from `code-state.json` `states.branch`, with its
-  reality check plan (exists locally? exists on origin? local tip ==
-  remote tip?).
-- The base: the repo's DEFAULT branch, detected via
-  `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`.
-- The rendered PR title per `settings.formats.pr_title` — `{summary}` is a
-  one-line summary of the change derived from specs + code-state, `{external_key}`
-  is `ticket.external.key` or empty.
-- The resolved body template path. Resolution (INTERNALS rule): a built-in
-  name (`pr-default`) -> `${CLAUDE_PLUGIN_ROOT}/templates/pr-default.md`;
-  otherwise `<checkout_root>/.acs/templates/<name>.md`; otherwise an absolute
-  path. Unresolvable template = blocking problem, surface it.
-- The section-by-section body content plan, every claim traced to a state
-  file: Summary (from specs scope + design decision), Ticket (id, title, type,
-  external key), Changes (from `specs_implemented`, `docs_updated`, and the
-  real diff `git diff <base>...<branch> --stat`), Test plan (from
-  `tests.passed/failed/coverage_percent/coverage_target` and the specs' test
-  plans), Checklist (tick exactly what code-state evidences).
-- Existing-PR detection plan: `gh pr list --head <branch> --state open
-  --json number,url,baseRefName,isDraft` — create vs update.
-- Tracker sync plan when `settings.tracker.provider` is `github`/`jira` and
-  `ticket.external` is set.
-- On iterations 2-3: how each verifier finding from the previous iteration is
-  addressed.
-
-The planner writes `<partition>/phases/create-pr/iter-<n>-plan.md` and
-references it in its `<result>` outputs.
-
-### Execute (per iteration)
-
-Send the executor a `<task phase="execute">` carrying the plan file ref. The
-executor performs, in order:
-
-1. **Branch.** Verify the ticket branch from the plan exists
-   (`git rev-parse --verify <branch>` locally, or already on origin). Push it:
+1. **Branch.** Verify the ticket branch from `code-state.json` `states.branch`
+   exists locally (`git rev-parse --verify <branch>`) or on origin
+   (`git ls-remote origin <branch>`). Push it:
    `git push -u origin <branch>`. If the branch only exists on origin and is
-   current, skip the push. Never commit new work — if implementation changes
-   are uncommitted, that is /acs:code's job: report it as a problem instead.
-2. **Body.** Fill the resolved template into
-   `<partition>/phases/create-pr/pr-body.md`: replace every placeholder
-   (`{ticket_id}`, `{type}`, `{title}`, `{summary}`, `{external_key}`;
-   `{external_key_line}` renders as ` — tracker: <provider> <key>` when
-   `ticket.external` is set, empty otherwise), replace the template's HTML
-   comments with real content and DELETE the comments, and fill every section
-   strictly from the state files per the plan. Checklist items are `[x]` only
-   when code-state substantiates them (e.g. review loop passed when
-   `review.findings_open == 0`).
+   already current, skip the push. Never commit new work — if uncommitted
+   implementation changes exist, that is /acs:code's job: surface it as a
+   problem and stop.
+
+2. **Body.** Resolve the body template: a built-in name (`pr-default`) maps to
+   `${CLAUDE_PLUGIN_ROOT}/templates/pr-default.md`; otherwise
+   `<checkout_root>/.acs/templates/<name>.md`; otherwise an absolute path.
+   Unresolvable template = blocking problem, surface it. Fill the resolved
+   template into `<partition>/phases/create-pr/pr-body.md`: replace every
+   placeholder (`{ticket_id}`, `{type}`, `{title}`, `{summary}`,
+   `{external_key}`; `{external_key_line}` renders as
+   ` — tracker: <provider> <key>` when `ticket.external` is set, empty
+   otherwise), replace HTML comments with real content and DELETE the comments,
+   fill every section strictly from the state files (`ticket.json`,
+   `code-state.json`, `specs/*.md`, `design.md` when required). The base
+   branch is the repo's default, detected via
+   `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`.
+   Render the PR title per `settings.formats.pr_title` — `{summary}` is a
+   one-line summary derived from specs + code-state, `{external_key}` is
+   `ticket.external.key` or empty. Body: Summary (from specs scope + design
+   decision), Ticket (id, title, type, external key), Changes (from
+   `specs_implemented`, `docs_updated`, and `git diff <base>...<branch> --stat`),
+   Test plan (from `tests.passed/failed/coverage_percent/coverage_target` and
+   the specs' test plans), Checklist (tick exactly what code-state evidences —
+   e.g. `[x]` only when `review.findings_open == 0`).
+
 3. **Label.** `gh label create ACS --description "Created by the acs pipeline" 2>/dev/null || true`
-4. **Create or update.** If no open PR exists for the branch:
+
+4. **Create or update PR.** Detect existing open PR:
+   `gh pr list --head <branch> --state open --json number,url,baseRefName,isDraft`.
+   If no open PR exists for the branch:
 
    ```bash
    gh pr create --base <default-branch> --head <branch> --title "<rendered pr_title>" --body-file <partition>/phases/create-pr/pr-body.md --label ACS
    ```
 
    No `--draft` — PRs are created ready-for-review. If an open PR already
-   exists for the branch: update it instead and record it —
+   exists for the branch: update it instead —
    `gh pr edit <number> --title "<rendered pr_title>" --body-file <body> --add-label ACS`,
    plus `gh pr edit <number> --base <default-branch>` when its base is wrong
    and `gh pr ready <number>` when it is a draft.
+
 5. **Record.** `gh pr view <branch> --json number,url,baseRefName,headRefName,isDraft,labels`
-   -> capture `{number, url, branch, base}`.
-6. **Tracker sync** (only when `settings.tracker.provider` is `github` or
-   `jira` AND `ticket.external.key` is set; skip for `local`, and report an
-   info finding when the provider is configured but the ticket was never
-   synced):
+   → capture `{number, url, branch, base}` for `states.pr`.
+
+6. **Tracker sync.** When `settings.tracker.provider` is `github` or `jira`
+   AND `ticket.external.key` is set, comment on the remote issue with the PR
+   URL:
    - `github`: `gh issue comment <external.key> --body "ACS: PR #<number> opened for <ticket-id> — <url>"`
    - `jira`: `acli jira workitem comment --key <external.key> --body "ACS: PR opened for <ticket-id> — <url>"`
+   Skip for `local`; report an info finding when the provider is configured but
+   the ticket was never synced.
 
-The executor writes `<partition>/phases/create-pr/iter-<n>-execute.json`
+Write a phase artifact `<partition>/phases/create-pr/iter-1-execute.json`
 (commands run with outcomes, pushed SHA, PR number/url/base, sync result,
-problems hit) and returns a `<result>` referencing it.
-
-### Verify (per iteration)
-
-Spawn the verifier AFTER the executor finishes, with `<inputs>` of
-ticket.json, code-state.json, specs/, the rendered pr-body.md, and the PR
-reference from the execute report. The verifier judges fresh — never forward
-executor reasoning — and re-runs the actual checks:
-
-- **PR exists and is live**: `gh pr view <number> --json
-  number,url,state,baseRefName,headRefName,isDraft,labels,title,body` —
-  state OPEN, `isDraft` false, head is the ticket branch.
-- **Targets the default branch**: `baseRefName` equals
-  `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`.
-- **ACS label present** in the PR's labels.
-- **Title follows formats**: independently re-render
-  `settings.formats.pr_title` from ticket.json and compare to the live title.
-- **Body follows the template and is filled from state**: all sections of the
-  resolved template present (for `pr-default`: Summary, Ticket, Changes, Test
-  plan, Checklist); no unrendered `{placeholder}` and no leftover template
-  comments; Ticket section names `<ticket-id>` (and the external key when
-  synced); Test plan numbers match `code-state.json` `tests` exactly; Changes
-  consistent with `specs_implemented`/`docs_updated` and the real file list
-  (`gh pr diff <number> --name-only`).
-- **Branch is pushed and current**: `git rev-parse <branch>` equals the SHA in
-  `git ls-remote origin refs/heads/<branch>`.
-- **Tracker sync done** when configured and the ticket is synced: the PR URL
-  appears on the remote issue (`gh issue view <key> --comments` /
-  `acli jira workitem view <key>`).
-
-The verifier writes its full report to
-`<partition>/phases/create-pr/iter-<n>-verify.md` and returns `<finding>`
-entries that summarize it. ALL findings block — zero findings = pass. On
-findings: persist the verify output, feed every finding into the next
-iteration's plan, and loop. After iteration 3 with findings remaining: stop
-with final status `"failed"`, findings recorded in the result document.
+problems hit). Validate any `<task>`/`<result>` XML with validate_xml.py.
 
 ## User interaction
 
