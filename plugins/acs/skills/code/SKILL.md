@@ -169,7 +169,7 @@ states a higher lane or axis value.
 2. Call `escalate_lane(current_lane, eff_size, eff_stakes, needs_design,
    ticket_type)` (`acs_lib.py`) to obtain `(new_lane, new_depth, new_ceiling)`.
    Lane is never hand-set — `derive_lane` inside `escalate_lane` is the single
-   authoritative producer (ADR 0031).
+   authoritative producer (ADR 0030).
 3. If `new_lane == current_lane` (no raise needed): no-op, continue.
 4. If `new_lane` is strictly higher (per `lane_rank`):
    a. Update the in-memory ticket object's `size`, `stakes`, and `lane` fields.
