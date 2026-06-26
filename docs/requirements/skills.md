@@ -9,9 +9,15 @@ read-only PM metrics dashboard (`/metrics`), and the read-only usage dashboard
 conditional).
 Every **workflow** skill MUST:
 
-- run the Reflection cycle (plan → execute → verify) with its own
-  `<skill>-planner`, `<skill>-executor`, `<skill>-verifier` subagents
-  ([reflection.md](reflection.md));
+- Six **workflow/product skills** (create-spec, code, create-prd,
+  create-design, create-architecture, create-project) run the full Reflection
+  cycle (plan → execute → verify) with their own `<skill>-planner`,
+  `<skill>-executor`, `<skill>-verifier` subagents
+  ([reflection.md](reflection.md)). Three **apply-work skills**
+  (create-pr, merge-pr, create-ticket) run **inline** per MAR-55 invariant
+  (b): the coordinator, optionally delegating to at most one executor subagent,
+  performs the apply-work directly — no planner subagent, no verifier subagent,
+  in every lane.
 - be gated by a pre-hook and persisted by a post-hook
   ([hooks.md](hooks.md));
 - read and write **only** inside `<workspace>/<repo>/<ticket-id>/` for state
@@ -20,7 +26,8 @@ Every **workflow** skill MUST:
 - read configuration from the `.acs` `settings.json`
   ([configuration.md](configuration.md)), and spawn its
   planner/executor/verifier on the models and effort levels configured there
-  ([configuration.md](configuration.md#subagent-models));
+  ([configuration.md](configuration.md#subagent-models)) (applies to the six
+  triad-keeping skills only — apply-work skills run inline);
 - (except `/create-ticket`) resolve the target `<ticket-id>` before doing
   anything — explicit argument, else session context, else branch name
   ([workflow.md](workflow.md#ticket-context));
@@ -348,8 +355,11 @@ Purpose: turn a raw user prompt into a well-formed ticket.
     **`acli`** for Jira — which handle authentication themselves.
 - MUST persist the ticket (and its `<ticket-id>`) into the workspace; the
   `<ticket-id>` names the workspace partition for the whole pipeline.
-- Subagents: `create-ticket-planner`, `create-ticket-executor`,
-  `create-ticket-verifier`.
+- Inline shape (MAR-55 invariant (b)): the coordinator runs apply-work
+  directly, optionally delegating to at most one `create-ticket-executor`
+  subagent; no planner subagent; no verifier subagent. Correctness is gated by
+  schema validation and the user-confirmation gate (size/stakes/lane/needs_design),
+  not an in-skill verifier.
 - Ticket ids use the **per-repo prefix + sequence** (e.g. `SHOP-123`); the
   per-repo counter lives in `<workspace>/<repo>/counters.json`.
 - MAY **import an existing remote ticket**: `/create-ticket <remote-key>`
@@ -538,7 +548,10 @@ Purpose: ship the implementation as a pull request.
   specs, `code-state.json` summary incl. review findings) rather than
   conversation history.
 - MUST record the PR reference (number/URL) in the workspace state.
-- Subagents: `create-pr-planner`, `create-pr-executor`, `create-pr-verifier`.
+- Inline shape (MAR-55 invariant (b)): the coordinator runs apply-work
+  directly, optionally delegating to at most one `create-pr-executor`
+  subagent; no planner subagent; no verifier subagent. Correctness was gated
+  by the upstream code-verifier; the human checkpoint is the PR review.
 - PR title and PR description MUST follow the formats configured in
   `settings.json` ([configuration.md](configuration.md)).
 - The PR targets the repo's **default branch** and MUST carry the **`ACS`**
@@ -569,7 +582,10 @@ Purpose: land the change.
 - When the merged ticket is the last open child of an epic, the epic MUST be
   auto-marked done ([workflow.md](workflow.md#epic-fan-out)) —
   performed by the `post-merge-pr` hook.
-- Subagents: `merge-pr-planner`, `merge-pr-executor`, `merge-pr-verifier`.
+- Inline shape (MAR-55 invariant (b)): the coordinator runs apply-work
+  directly, optionally delegating to at most one `merge-pr-executor`
+  subagent; no planner subagent; no verifier subagent. Correctness was gated
+  by the upstream code-verifier.
 - Merge strategy is configurable via `merge_strategy` in `settings.json`
   (`squash` | `merge` | `rebase`), default **`squash`**.
 - Post-merge actions (all required): **delete the branch**, **clean up the
