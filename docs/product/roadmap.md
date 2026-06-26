@@ -362,6 +362,34 @@ are Won't-have now; they may be considered as future extensions after this epic 
 defines what to deliver and its scope boundary; the design and implementation tickets
 carry the build work.
 
+### acs M-future — Multi-runtime support (OpenAI Codex CLI) *(future — pending multi-runtime epic)*
+
+Maps to PRD extended G6 (runtime portability) and the acs Could-have **Multi-runtime
+support — OpenAI Codex CLI** feature ([`prd.md`](prd.md#features-moscow)). Reverses the
+prior acs "non-Claude-Code runtimes" Won't-have (Reversal note MAR-2).
+
+Make the acs gated pipeline runnable on **OpenAI Codex CLI** in addition to Claude Code:
+
+- **Runtime abstraction.** Identify which pipeline mechanisms are Claude-Code-specific
+  (PreToolUse/SessionEnd hook gating, the planner/executor/verifier reflection-subagent
+  protocol, skill/agent dispatch, per-role model/effort config, self-reported
+  cost/tokens) vs runtime-agnostic (the stdlib-only deterministic layer: gating, state,
+  ids, metrics, convention checks).
+- **Codex CLI runtime adapter.** Map each Claude-Code-specific mechanism onto Codex
+  CLI's equivalents (or a portable shim), preserving the **same gates** — 0 gate
+  escapes, full audit trail — on the second runtime.
+- **Validation (extended G6).** Publish an end-to-end run of the acs pipeline on Codex
+  CLI with 0 gate escapes and 0 lost audit-trail artifacts, within 1 release of the
+  capability shipping (the G6 runtime-portability metric).
+
+**Deferral:** the MECHANISM (the hook-gating / subagent-protocol / dispatch mapping and
+which gates are native vs shimmed on Codex CLI) is deferred to this epic's dedicated
+design phase / an ADR; this epic requires its own `/acs:create-design` run before
+implementation. Mirrors the Notion/remote-docs and tabp-upgrade deferrals.
+
+**Implementation note:** this is a future epic pending design — this entry defines what
+to deliver and its scope boundary; the design and implementation tickets carry the build.
+
 ## Later / icebox
 
 Scheduled background sync routines; cross-machine handoff via shared

@@ -74,7 +74,7 @@ that protected characteristics played no role.
 | G3 — Quality via reflection | ≥ 90% of `/code` runs reach zero verifier findings within the 3-iteration cap; coverage target met or hard-failed (never silently waived). |
 | G4 — Reviewable delivery | ≥ 80% of story/task PRs ≤ ~400 changed lines; every PR carries ticket trace, test plan, and findings. |
 | G5 — Auditability | Every decision (clarification, assumption, finding, phase output) recoverable from the ticket partition; cost/tokens/time recorded per run, ticket, and repo. First measured 2026-06-13 (acs v0.1.2, M2-0 spike, 5 runs): ~$2.43 total, ~385k in / ~72k out tokens, ~1770 working-seconds, all recoverable from the partition. |
-| G6 — Portability | Works on any git repo with `python3` + `gh`; zero pip installs; one `/acs:init` to onboard. First validated 2026-06-13 (acs v0.1.2, M2-0 spike): clean install + `/acs:init` in a throwaway repo, no Duplicate-hooks load failure. Each acs doc set (`prd`, `architecture`, `requirements`, `adr`, and future `standards`/`principles`/`quality`/`operations`) is independently relocatable to an external/absolute filesystem path via configuration; 100% of producer-skill runs preserve the per-backend reviewability + Git-audit guarantee (local/external-local = reviewable diff / repo PR; remote = backend-native review); 0 doc-set writes bypass the configured backend review path; measured per release. |
+| G6 — Portability | Works on any git repo with `python3` + `gh`; zero pip installs; one `/acs:init` to onboard. First validated 2026-06-13 (acs v0.1.2, M2-0 spike): clean install + `/acs:init` in a throwaway repo, no Duplicate-hooks load failure. Each acs doc set (`prd`, `architecture`, `requirements`, `adr`, and future `standards`/`principles`/`quality`/`operations`) is independently relocatable to an external/absolute filesystem path via configuration; 100% of producer-skill runs preserve the per-backend reviewability + Git-audit guarantee (local/external-local = reviewable diff / repo PR; remote = backend-native review); 0 doc-set writes bypass the configured backend review path; measured per release. The acs pipeline is **runtime-portable**: the same gated pipeline (gating, TDD, coverage hard-fail, 11-dimension review, audit) runs on **≥ 2 supported runtimes** (Claude Code today + OpenAI Codex CLI), with **0 gate escapes and 0 lost audit-trail artifacts** on a published end-to-end run on the second runtime, **validated within 1 release of the Codex CLI runtime capability shipping** (mirrors how G1/G2/G6 were first validated by the M2-0 spike). |
 | G7 — Observability | Dashboard renders all 6 panels (throughput, pipeline funnel, cost/time per step, coverage vs target, review iterations, token burn by role) in ≤ 5 s for ≤ 50 tickets; reads only workspace artifacts; requires no network calls and no new config beyond `.acs/settings.json`. In-session status lines, when wired, preserve 100% of Claude Code's default status-line fields and add acs state on top (zero default fields lost), render in < 100 ms per refresh, and never crash — any failure falls back to a valid line. |
 | G8 — Skill quality coverage | Structure, gating, and routing covered for 100% of skills (free, every PR); every critical-path skill has behavioral (artifact-level) eval coverage; no new skill ships without ≥ a trigger eval (CI guardrail). |
 | G9 — Enforceable conventions | The configured branch/PR/commit formats are enforceable as a required merge gate on the consumer repo, blocking non-exempt violating PRs even when they bypassed `/acs:create-pr` (escape hatch: the `acs-exempt` label / release-branch allowlist). MAR-9 (PR #50, pending merge) completes the consumer side of that escape hatch: a legitimate non-ticket exempt PR lands via the sanctioned `/acs:merge-pr --pr` path (same readiness + branch/worktree cleanup as the ticket path, no ticket/partition/tracker/archive; it refuses and redirects ticket-backed PRs), and `/acs:init` Step 7e writes an idempotent `CLAUDE.md` acs-managed block that makes the pipeline the *default* for in-repo agent sessions (steering changes through `/acs:ship` rather than ad-hoc PRs). The gate itself is existence-proven by the live required-check ruleset on this repo's own `main` (ruleset 17602044, `active`; "Branch / PR / commit conventions" is a required status-check context). |
@@ -173,8 +173,26 @@ feature sections here.
   workflows vs a versioned policy pack the repo cannot edit; the non-overridable mandate
   encoding) is deferred to a future design epic / ADR, per Constraints.)*
 
+- **Multi-runtime support — OpenAI Codex CLI as an acs pipeline runtime** — the acs
+  gated pipeline (ordering/gating, TDD, coverage hard-fail, the 11-dimension review
+  loop, resumable workspace state, audit trail, merge readiness) becomes runnable on
+  **OpenAI Codex CLI** in addition to Claude Code, so a team standardized on Codex CLI
+  can adopt acs without switching agent runtimes. acs stays authored and distributed
+  as a Claude plugin; this adds a **second execution runtime for the pipeline**, not a
+  second product. The **MECHANISM** — how the Claude-Code-specific mechanisms map onto
+  Codex CLI (the PreToolUse/SessionEnd hook gating, the planner/executor/verifier
+  reflection-subagent protocol, skill/agent dispatch, per-role model/effort config,
+  self-reported cost/tokens) and which gates are enforced natively vs via a portable
+  shim — is **deferred to a dedicated future multi-runtime epic's design phase**,
+  mirroring how this PRD defers the Notion/remote-docs and org-policy mechanisms. The
+  deterministic layer is already stdlib-only Python (Portability NFR), which is the
+  portable substrate this builds on. Traces **extended G6** (runtime portability).
+  *(Proposed — the MECHANISM is deferred to the multi-runtime epic's design phase /
+  an ADR, per Constraints. Reverses the prior acs Won't-have — see Reversal note
+  (MAR-2) in Out of scope.)*
+
 **Won't have (now)** *(acs feature scope)*
-- Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes for the acs pipeline.
+- Non-GitHub forges (GitLab/Bitbucket). *(The former "non-Claude-Code runtimes for the acs pipeline" Won't-have is **reversed by MAR-2** — OpenAI Codex CLI is now a supported pipeline runtime; see the acs Could-have **Multi-runtime support (OpenAI Codex CLI)** feature and the Reversal note (MAR-2) in Out of scope.)*
 - Non-Notion remote docs providers (Confluence, Google Docs, SharePoint) — Notion is the only named remote provider; general CMS / doc-graph re-architecture is out of scope; bidirectional Notion→repo editing is out of scope now (authoritative-remote means Notion is the system of record with no repo copy, not a two-way file sync).
 
 ### Feature: tabp (recruiting/talent toolkit for the TABP team)
@@ -245,7 +263,7 @@ These NFRs apply across all marketplace features. Each feature realizes them thr
 its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patterns).
 
 - **Determinism where possible**: ordering, gating, state writes, id allocation are scripts, never prose; gates fail closed.
-- **Portability**: hooks and helpers are stdlib-only Python ≥ 3.9; no network dependencies of their own. `/acs:init` Step 0b runs a toolchain preflight — it detects and offers to install the tools acs leans on (`git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli`) so onboarding fails up front with consent rather than mid-pipeline; the convention checker stays stdlib-only so no acs install is needed on the CI runner.
+- **Portability**: hooks and helpers are stdlib-only Python ≥ 3.9; no network dependencies of their own. `/acs:init` Step 0b runs a toolchain preflight — it detects and offers to install the tools acs leans on (`git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli`) so onboarding fails up front with consent rather than mid-pipeline; the convention checker stays stdlib-only so no acs install is needed on the CI runner. Runtime coupling is **isolated**: the deterministic layer (gating, state, id allocation, metrics, convention checks) stays runtime-agnostic stdlib-only Python so the acs pipeline can target a second agent runtime (e.g. OpenAI Codex CLI) without rewriting that core; runtime-specific glue (hook dispatch, subagent protocol) is the only part that varies per runtime (mechanism deferred to the multi-runtime epic).
 - **Auditability**: every state file human-readable (pretty JSON), append-only run history, archived not deleted.
 - **Safety**: no secrets in settings (CLIs own auth); locks prevent cross-session corruption; stale locks reported, never stolen.
 - **Cost transparency**: tokens/cost/time per run, rolled up per ticket and repo.
@@ -258,7 +276,7 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
 
 ## Constraints & assumptions
 
-- **acs feature:** Claude Code plugin API (skills/agents/hooks as documented) is the runtime for the acs pipeline. Different features may target different Claude runtimes — acs targets Claude Code; tabp targets both Claude Cowork and Claude Code.
+- **acs feature (runtime, revised MAR-2):** Claude Code is the **primary / today-shipping** runtime for the acs pipeline (Claude Code plugin API — skills/agents/hooks as documented). acs is **no longer Claude-Code-only**: **OpenAI Codex CLI is a supported pipeline runtime** (Could-have; see Features), so the pipeline targets **≥ 1 of an open set of agent runtimes** rather than Claude Code exclusively. The deterministic layer stays runtime-agnostic stdlib-only Python (Portability NFR); the runtime-specific MECHANISM (hook gating, reflection-subagent protocol, skill/agent dispatch on Codex CLI) is **deferred to the multi-runtime epic's design phase**. Different features may still target different runtimes — tabp targets both Claude Cowork and Claude Code.
 - Delivery is git + GitHub PRs (`gh` assumed); correctness must be checkable by automated tests for the strong-fit domains (see `docs/requirements/overview.md`).
 - Subagents cannot interact with the user — all user interaction happens in coordinators (drives the `needs_input` handoff design).
 - **acs feature — brownfield standardization is additive-only (C-2).** `/acs:standardize-project` operates on an existing repo by ADDITION only: it adds principles/standards docs, config, and missing readiness tooling (coverage/CI/pre-commit/e2e — including scaffolding a repo-side e2e CI workflow/runner and opt-in wiring of a required e2e merge-gate status check), and it MUST NOT move, rename, delete, or rewrite existing source files. **The e2e layer stays OPT-IN: a repo with `settings.e2e` unset has no e2e suite and no e2e merge gate; the gate is configured only on explicit opt-in.** Structural gaps versus the architecture project-structure target are surfaced as recommended follow-up tickets for the user to decide on — never executed as an automatic restructure. This guardrail is deliberate: a wholesale-restructure mandate is explicitly out of scope (it is the over-engineering this product reset once before — see Out of scope). The greenfield/brownfield split is fixed: `/acs:create-project` is greenfield-only and refuses on any repo with substantive sources; brownfield onboarding is `/acs:standardize-project`'s job (C-1).
@@ -338,6 +356,19 @@ report-only; every attempt is audited," with agent-invoked merges additionally r
 approved review (m6). `/acs:ship` still deliberately stops at create-pr (review separation, not
 a merge prohibition). This is a product-level Vision change only; the detailed `/acs:merge-pr`
 behavior lives in `docs/requirements/skills.md` and the skill prose and is delivered by MAR-42.
+
+**Reversal note (MAR-2):** this amendment reverses the prior "non-Claude-Code runtimes
+for the acs pipeline" product decision previously stated as an acs Won't-have. Per
+MAR-2 (user-approved, C-1), **OpenAI Codex CLI is now a supported acs pipeline
+runtime**. acs remains authored and distributed as a Claude plugin and the **one GMS
+Marketplace product** — this adds a **second execution runtime for the pipeline**, not
+a second product and not a per-runtime fork of the pipeline. Claude Code stays the
+primary/today-shipping runtime; Codex CLI is a Could-have whose **MECHANISM** (mapping
+the PreToolUse/SessionEnd hook gating, the planner/executor/verifier reflection-subagent
+protocol, and skill/agent dispatch onto Codex CLI) is **deferred to a dedicated future
+multi-runtime epic's design phase / an ADR** — exactly as this PRD defers tabp's and
+the Notion/remote-docs mechanisms. The GitLab/Bitbucket non-GitHub-forge Won't-have is
+**unaffected** — only the runtime clause is reversed.
 
 Non-GitHub org-policy backends are out of scope — org enforcement targets the GitHub
 org-controlled surface first (org rulesets / org-required workflows); other forges remain
