@@ -35,6 +35,17 @@ the notes.
   in-process `validate_structurally()` engine and is importable directly from
   `validate_xml.py`; `main()` and the CLI are unchanged (AC-6 back-compat).
 
+- **Clarify-batching coordinator contract (MAR-61 AC-7).** All 9 hooked
+  coordinator skill bodies and `docs/requirements/skills.md` now document the
+  grouped-ask rule: when ≥2 clarifications are open, the coordinator presents
+  all of them in ONE grouped interaction instead of serial round-trips.  Each
+  answer is recorded as its own `clarify.py add` entry (one `C-<n>` per
+  question, `--source` preserved); no question may be skipped, merged, or
+  auto-answered outside the existing `--source assumption --rationale "..."`
+  rule.  A `TestClarifyBatchingContract` suite in `test_skill_contracts.py`
+  asserts grouped-ask presence, per-question ledger-entry documentation, and
+  zero-auto-answer documentation across all 9 skills.
+
 - **`/acs:merge-pr` is now agent/model-invocable (MAR-42).** Removed
   `disable-model-invocation` from the skill; the readiness gate (CI, approvals,
   conflicts, protections) and the repo's branch protection are the merge brakes,
