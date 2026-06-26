@@ -201,7 +201,9 @@ final message a handoff like:
 </handoff>
 ```
 
-Validate it with validate_xml.py like every other message.
+Validate it with validate_xml.py like every other message. On invalid:
+re-request the message once with the validation error; still invalid → fail the
+run and record the error in the result document's `errors`.
 
 ## Context pressure
 

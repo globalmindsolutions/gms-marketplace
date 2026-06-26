@@ -113,6 +113,9 @@ silent fallback. Validate all XML messages:
 echo "<xml...>" | python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_xml.py" -
 ```
 
+On invalid: re-request the message once with the validation error; still
+invalid → fail the run and record the error in the result document's `errors`.
+
 Persist each phase output to `<partition>/phases/create-ticket/iter-<n>-<phase>.xml`
 at the phase boundary, BEFORE starting the next phase.
 

@@ -213,6 +213,9 @@ coordinator directly or by the executor) and validate the XML with:
 echo "<xml>" | python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/validate_xml.py" -
 ```
 
+On invalid: re-request the message once with the validation error; still
+invalid → fail the run and record the error in the result document's `errors`.
+
 ### Step 0 — Readiness review
 
 **Before (or as part of) this step**, check the cleanup inventory: does a
