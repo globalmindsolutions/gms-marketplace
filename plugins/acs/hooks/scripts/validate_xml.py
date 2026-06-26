@@ -16,14 +16,18 @@ Strategy (stdlib-only requirement):
   the in-process engine runs silently.  This preserves AC-5 (strict stdlib): no
   mandatory third-party dependency; a stdlib-only interpreter always gets a verdict.
 
-  Gap-closure audit (MAR-61, iteration 2): the in-process validator matches xmllint
-  for the following covered violation classes: bad root element, missing/invalid
-  attribute, bad ticket-id pattern, out-of-order children, wrong list-item tag,
-  bad status/severity enum, duplicate maxOccurs=1 sequence children (cardinality),
-  and xs:decimal grammar for cost-usd (no exponent, no inf/nan, no underscores).
-  The AC-2 parity corpus (tests/acs/test_acs_plugin.py:TestValidators) is the
+  Gap-closure audit (MAR-61): the in-process validator matches xmllint for these
+  violation classes: bad root element, missing/invalid attribute, bad ticket-id
+  pattern, out-of-order children, wrong list-item tag, bad status/severity enum,
+  duplicate maxOccurs=1 sequence children (cardinality), xs:decimal grammar for
+  cost-usd (no exponent, no inf/nan, no underscores), and — closing the content
+  model — undeclared attributes (the XSD declares no anyAttribute/wildcard) and
+  element children inside text-only (xs:string) leaves.  The ALLOWED_ATTRS and
+  TEXT_LEAVES tables below mirror acs-messages.xsd and MUST be kept in sync with
+  it.  The AC-2 parity corpus (tests/acs/test_acs_plugin.py:TestValidators) is the
   binding proof — every listed class produces identical pass/fail verdicts under
-  both paths.  Classes not explicitly listed are not guaranteed to match.
+  both paths.  If the XSD gains a construct not in that corpus, extend the corpus
+  so any in-process/xmllint divergence fails the build.
 
 Usage:
   validate_xml.py <file.xml> [more.xml ...]
@@ -75,6 +79,23 @@ CHILD_ORDER = {
 }
 REQUIRED_CHILDREN = {"task": ["objective"], "result": [], "handoff": ["summary"]}
 
+# Closed content model (mirrors acs-messages.xsd). The XSD declares no
+# anyAttribute / wildcard anywhere, so any attribute not listed here is invalid.
+# Keep in sync with the XSD when it changes.
+ALLOWED_ATTRS = {
+    "task": {"skill", "phase", "ticket-id", "iteration"},
+    "result": {"skill", "phase", "ticket-id", "iteration", "status"},
+    "handoff": {"skill", "ticket-id", "status"},
+    "finding": {"severity", "dimension", "file"},
+    "constraint": {"name"},
+    "metrics": {"tokens-input", "tokens-output", "cost-usd"},
+}
+# Elements typed xs:string in the XSD: text-only, no element children allowed.
+TEXT_LEAVES = frozenset({
+    "objective", "context", "stop-reason", "summary", "next-step",
+    "file", "question", "error",
+})
+
 
 def _attr_errors(root):
     errors = []
@@ -98,7 +119,22 @@ def _attr_errors(root):
         need("status", lambda v: v in RESULT_STATUSES, "one of: %s" % ", ".join(sorted(RESULT_STATUSES)))
     if tag == "handoff":
         need("status", lambda v: v in HANDOFF_STATUSES, "one of: %s" % ", ".join(sorted(HANDOFF_STATUSES)))
+
+    # Closed content model: reject any attribute the XSD does not declare.
+    errors.extend(_undeclared_attr_errors(root))
     return errors
+
+
+def _undeclared_attr_errors(elem):
+    """Reject attributes not declared for *elem* in the closed XSD content model."""
+    allowed = ALLOWED_ATTRS.get(elem.tag)
+    if allowed is None:
+        # Elements with no declared attributes (e.g. inputs, outputs, file,
+        # objective, ...) permit none.
+        allowed = frozenset()
+    return ["<%s> has undeclared attribute %r (allowed: %s)"
+            % (elem.tag, name, ", ".join(sorted(allowed)) or "none")
+            for name in elem.keys() if name not in allowed]
 
 
 def _is_xs_decimal(value):
@@ -151,6 +187,17 @@ def _child_errors(root):
                     severity = item.get("severity")
                     if severity is not None and severity not in ("blocking", "info"):
                         errors.append("<finding severity=%r> must be blocking|info" % severity)
+
+    # Closed content model: text-only (xs:string) leaves admit no element
+    # children, and every descendant's attributes must be declared.
+    for elem in root.iter():
+        if elem is root:
+            continue
+        errors.extend(_undeclared_attr_errors(elem))
+        if elem.tag in TEXT_LEAVES and len(elem):
+            child = list(elem)[0].tag
+            errors.append("<%s> is a text-only element and may not contain child <%s>"
+                          % (elem.tag, child))
     for metrics in root.findall("metrics"):
         for attr in ("tokens-input", "tokens-output"):
             value = metrics.get(attr)
@@ -168,6 +215,8 @@ def _child_errors(root):
 
 
 def validate_structurally(text):
+    if not isinstance(text, str):
+        return ["expected an XML string, got %s" % type(text).__name__]
     try:
         root = ET.fromstring(text)
     except ET.ParseError as exc:

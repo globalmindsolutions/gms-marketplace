@@ -468,6 +468,35 @@ class TestValidators(AcsWorkspaceCase):
         '</result>'
     )
 
+    # (viii) closed content model — the XSD declares no anyAttribute / wildcard,
+    # so an undeclared attribute on any element is invalid (xmllint rejects it;
+    # the in-process validator must too).
+    MALFORMED_UNDECLARED_ATTR_ROOT = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1" bogus="y">'
+        '<objective>x</objective></task>'
+    )
+    MALFORMED_UNDECLARED_ATTR_METRICS = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<metrics cost-usd="0.1" bogus="1"/></result>'
+    )
+    MALFORMED_UNDECLARED_ATTR_FINDING = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<findings><finding severity="info" bogus="z">m</finding></findings></result>'
+    )
+    MALFORMED_UNDECLARED_ATTR_CONSTRAINT = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1"><objective>x</objective>'
+        '<constraints><constraint name="n" extra="z">c</constraint></constraints></task>'
+    )
+    # (ix) text-only (xs:string) leaves admit no element children.
+    MALFORMED_CHILD_IN_FILE = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1"><objective>x</objective>'
+        '<inputs><file>a<sub/></file></inputs></task>'
+    )
+    MALFORMED_CHILD_IN_OBJECTIVE = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<objective>x<nested/></objective></task>'
+    )
+
     VALID_CORPUS = [
         ("valid_task", VALID_TASK),
         ("valid_result", VALID_RESULT),
@@ -494,6 +523,14 @@ class TestValidators(AcsWorkspaceCase):
         ("cost_usd_exponent", MALFORMED_COST_USD_EXPONENT),
         ("cost_usd_underscore", MALFORMED_COST_USD_UNDERSCORE),
         ("cost_usd_empty", MALFORMED_COST_USD_EMPTY),
+        # (viii) closed content model — undeclared attributes
+        ("undeclared_attr_root", MALFORMED_UNDECLARED_ATTR_ROOT),
+        ("undeclared_attr_metrics", MALFORMED_UNDECLARED_ATTR_METRICS),
+        ("undeclared_attr_finding", MALFORMED_UNDECLARED_ATTR_FINDING),
+        ("undeclared_attr_constraint", MALFORMED_UNDECLARED_ATTR_CONSTRAINT),
+        # (ix) text-only leaves admit no element children
+        ("child_in_file", MALFORMED_CHILD_IN_FILE),
+        ("child_in_objective", MALFORMED_CHILD_IN_OBJECTIVE),
     ]
 
     def _load_validate_xml(self):
@@ -946,6 +983,60 @@ class TestValidators(AcsWorkspaceCase):
             any(kw in joined for kw in ("skill", "attribute", "missing", "invalid")),
             "Error detail should mention a relevant keyword; got: %r" % errors
         )
+
+    # -----------------------------------------------------------------------
+    # Closed content model — undeclared attributes + intrusive children
+    # (the XSD has no anyAttribute/wildcard; in-process must match xmllint).
+    # -----------------------------------------------------------------------
+
+    CLOSED_CONTENT_CASES = [
+        ("undeclared_attr_root", MALFORMED_UNDECLARED_ATTR_ROOT),
+        ("undeclared_attr_metrics", MALFORMED_UNDECLARED_ATTR_METRICS),
+        ("undeclared_attr_finding", MALFORMED_UNDECLARED_ATTR_FINDING),
+        ("undeclared_attr_constraint", MALFORMED_UNDECLARED_ATTR_CONSTRAINT),
+        ("child_in_file", MALFORMED_CHILD_IN_FILE),
+        ("child_in_objective", MALFORMED_CHILD_IN_OBJECTIVE),
+    ]
+
+    def test_closed_content_model_rejected_in_process(self):
+        """Undeclared attributes and intrusive children must be rejected in-process."""
+        mod = self._load_validate_xml()
+        for name, xml in self.CLOSED_CONTENT_CASES:
+            errors = mod.validate_structurally(xml)
+            self.assertTrue(
+                errors,
+                "Expected a closed-content-model error for %s but got []; the XSD "
+                "declares no anyAttribute/wildcard, so this must be rejected." % name,
+            )
+
+    @unittest.skipUnless(shutil.which("xmllint"), "xmllint not on PATH")
+    def test_closed_content_model_parity_with_xmllint(self):
+        """Closed-content violations: in-process and xmllint must both return INVALID."""
+        mod = self._load_validate_xml()
+        for name, xml in self.CLOSED_CONTENT_CASES:
+            in_process_ok = (mod.validate_structurally(xml) == [])
+            with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                fh.write(xml)
+                tmp_path = fh.name
+            try:
+                xmllint_ok, xmllint_detail = mod.validate_with_xmllint(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+            self.assertEqual(
+                in_process_ok, xmllint_ok,
+                "PARITY GAP on closed-content case %r: in-process=%s xmllint=%s detail=%r"
+                % (name, in_process_ok, xmllint_ok, xmllint_detail),
+            )
+            self.assertFalse(xmllint_ok, "xmllint should reject %r" % name)
+
+    def test_validate_batch_isolates_non_string_element(self):
+        """A non-string (e.g. None) batch element yields a per-message error, not a crash."""
+        mod = self._load_validate_xml()
+        results = mod.validate_batch([self.VALID_TASK, None])
+        self.assertEqual(len(results), 2)
+        self.assertTrue(results[0][0], "valid message should pass")
+        self.assertFalse(results[1][0], "None element should be reported invalid, not crash")
+        self.assertFalse(mod.batch_overall_ok(results))
 
 
 class TestStatusLines(AcsWorkspaceCase):

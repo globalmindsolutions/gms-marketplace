@@ -26,10 +26,12 @@ the notes.
   the following covered violation classes: bad root element, missing/invalid
   attribute, bad ticket-id pattern, out-of-order children, wrong list-item tag,
   bad status/severity enum, duplicate maxOccurs=1 sequence children
-  (cardinality), and xs:decimal grammar for cost-usd (no exponent, no
-  inf/nan, no underscores).  A parity corpus (`TestValidators` in
-  `tests/acs/test_acs_plugin.py`) asserts identical pass/fail verdicts for each
-  of these classes across both paths.
+  (cardinality), xs:decimal grammar for cost-usd (no exponent, no inf/nan, no
+  underscores), and the closed content model — undeclared attributes (the XSD
+  has no anyAttribute/wildcard) and element children inside text-only
+  (xs:string) leaves are both rejected, matching xmllint.  A parity corpus
+  (`TestValidators` in `tests/acs/test_acs_plugin.py`) asserts identical
+  pass/fail verdicts for each of these classes across both paths.
 
 - **`validate_batch()` / `batch_overall_ok()` — new Python-callable batch
   validation API (MAR-61 AC-4).** `validate_batch(messages)` accepts a list
