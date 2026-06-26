@@ -10,6 +10,7 @@ git repo + workspace, asserting on exit codes and the JSON state files
 Run:  python3 -m unittest discover -s tests -v
 """
 
+import io
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPTS = os.path.join(REPO_ROOT, "plugins", "acs", "hooks", "scripts")
@@ -306,6 +308,321 @@ class TestValidators(AcsWorkspaceCase):
         good = ('<handoff skill="create-spec" ticket-id="SHOP-1" status="needs_input">'
                 '<summary>s</summary><questions><question>q</question></questions></handoff>')
         self.assertEqual(self.run_script("validate_xml.py", "-", stdin=good).returncode, 0)
+
+    # -----------------------------------------------------------------------
+    # AC-2 Parity corpus (T1, keystone) — written FIRST per TDD discipline.
+    # Every XSD violation class is represented; assertions are unconditional
+    # (no xmllint on PATH required).  The xmllint parity leg is conditional.
+    # -----------------------------------------------------------------------
+
+    # Corpus fixture strings — valid messages (one per root element)
+    VALID_TASK = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<objective>Implement feature X</objective>'
+        '<inputs><file>/src/foo.py</file></inputs>'
+        '<constraints><constraint name="c1">no breaking changes</constraint></constraints>'
+        '<context>background info</context>'
+        '</task>'
+    )
+    VALID_RESULT = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<outputs><file>/src/foo.py</file></outputs>'
+        '<findings><finding severity="info">all clear</finding></findings>'
+        '<metrics tokens-input="1000" tokens-output="200" cost-usd="0.05"/>'
+        '<stop-reason>done</stop-reason>'
+        '</result>'
+    )
+    VALID_HANDOFF = (
+        '<handoff skill="create-spec" ticket-id="SHOP-1" status="needs_input">'
+        '<summary>Summarised progress</summary>'
+        '<questions><question>What priority?</question></questions>'
+        '<next-step>resume after user answers</next-step>'
+        '</handoff>'
+    )
+
+    # Corpus fixture strings — malformed messages (one per XSD violation class)
+    # (i) bad root element — root not in {task, result, handoff}
+    MALFORMED_BAD_ROOT = '<foo skill="code" phase="execute" ticket-id="SHOP-1"/>'
+
+    # (ii) missing required attribute — missing 'skill'
+    MALFORMED_MISSING_SKILL = (
+        '<task phase="execute" ticket-id="SHOP-1">'
+        '<objective>obj</objective>'
+        '</task>'
+    )
+
+    # (ii) invalid attribute value — skill not in enum
+    MALFORMED_INVALID_SKILL = (
+        '<task skill="nope" phase="execute" ticket-id="SHOP-1">'
+        '<objective>obj</objective>'
+        '</task>'
+    )
+
+    # (ii) bad ticket-id pattern — must match [A-Z][A-Z0-9]*-[0-9]+
+    MALFORMED_BAD_TICKET_ID = (
+        '<task skill="code" phase="execute" ticket-id="123">'
+        '<objective>obj</objective>'
+        '</task>'
+    )
+
+    # (iii) out-of-order children — constraints before objective in task
+    MALFORMED_OUT_OF_ORDER = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<constraints><constraint name="c1">x</constraint></constraints>'
+        '<objective>obj</objective>'
+        '</task>'
+    )
+
+    # (iv) wrong list item — <bar/> inside <inputs> instead of <file>
+    MALFORMED_WRONG_LIST_ITEM = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<objective>obj</objective>'
+        '<inputs><bar/></inputs>'
+        '</task>'
+    )
+
+    # (v) bad enum — status not in {completed, failed, needs_input}
+    MALFORMED_BAD_STATUS_ENUM = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="bad_status"/>'
+    )
+
+    # (v) bad enum — severity not in {blocking, info}
+    MALFORMED_BAD_SEVERITY_ENUM = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<findings><finding severity="critical">something bad</finding></findings>'
+        '</result>'
+    )
+
+    VALID_CORPUS = [
+        ("valid_task", VALID_TASK),
+        ("valid_result", VALID_RESULT),
+        ("valid_handoff", VALID_HANDOFF),
+    ]
+    MALFORMED_CORPUS = [
+        ("bad_root", MALFORMED_BAD_ROOT),
+        ("missing_skill", MALFORMED_MISSING_SKILL),
+        ("invalid_skill", MALFORMED_INVALID_SKILL),
+        ("bad_ticket_id", MALFORMED_BAD_TICKET_ID),
+        ("out_of_order", MALFORMED_OUT_OF_ORDER),
+        ("wrong_list_item", MALFORMED_WRONG_LIST_ITEM),
+        ("bad_status_enum", MALFORMED_BAD_STATUS_ENUM),
+        ("bad_severity_enum", MALFORMED_BAD_SEVERITY_ENUM),
+    ]
+
+    def _load_validate_xml(self):
+        """Import validate_xml in-process (SCRIPTS is already on sys.path)."""
+        import importlib
+        import importlib.util
+        _target = os.path.join(SCRIPTS, "validate_xml.py")
+        spec = importlib.util.spec_from_file_location("validate_xml", _target)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_ac2_parity_valid_corpus_in_process(self):
+        """Valid corpus messages return [] from validate_structurally (AC-2)."""
+        mod = self._load_validate_xml()
+        for name, xml in self.VALID_CORPUS:
+            errors = mod.validate_structurally(xml)
+            self.assertEqual(errors, [],
+                             "Expected no errors for %s but got: %s" % (name, errors))
+
+    def test_ac2_parity_malformed_corpus_in_process(self):
+        """Malformed corpus messages return non-empty errors from validate_structurally (AC-2)."""
+        mod = self._load_validate_xml()
+        for name, xml in self.MALFORMED_CORPUS:
+            errors = mod.validate_structurally(xml)
+            self.assertTrue(errors,
+                            "Expected errors for %s but got empty list" % name)
+
+    @unittest.skipUnless(shutil.which("xmllint"), "xmllint not on PATH")
+    def test_ac2_parity_corpus_xmllint_matches_in_process(self):
+        """xmllint and in-process paths agree on every corpus message (AC-2 parity)."""
+        mod = self._load_validate_xml()
+        all_cases = list(self.VALID_CORPUS) + list(self.MALFORMED_CORPUS)
+        for name, xml in all_cases:
+            in_process_errors = mod.validate_structurally(xml)
+            in_process_ok = (in_process_errors == [])
+
+            with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                fh.write(xml)
+                tmp_path = fh.name
+            try:
+                xmllint_ok, xmllint_detail = mod.validate_with_xmllint(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+
+            self.assertEqual(
+                in_process_ok, xmllint_ok,
+                "PARITY GAP on %r: in-process=%s xmllint=%s detail=%r errors=%r"
+                % (name, in_process_ok, xmllint_ok, xmllint_detail, in_process_errors)
+            )
+
+    # -----------------------------------------------------------------------
+    # AC-1: No per-message subprocess on the default path
+    # -----------------------------------------------------------------------
+
+    def test_ac1_no_subprocess_on_default_path(self):
+        """Default path (ACS_XML_AUTHORITATIVE unset) spawns zero subprocesses (AC-1)."""
+        mod = self._load_validate_xml()
+        messages = [self.VALID_TASK, self.MALFORMED_BAD_ROOT, self.VALID_RESULT]
+        env_without = {k: v for k, v in os.environ.items()
+                       if k != "ACS_XML_AUTHORITATIVE"}
+        with mock.patch.dict(os.environ, env_without, clear=True):
+            with mock.patch("subprocess.run") as mock_run:
+                for xml in messages:
+                    mod.validate_structurally(xml)
+                self.assertEqual(mock_run.call_count, 0,
+                                 "subprocess.run was called on the default (in-process) path")
+
+    def test_ac1_cli_default_path_is_in_process_not_xmllint(self):
+        """Default CLI path (ACS_XML_AUTHORITATIVE unset) uses in-process engine, not xmllint.
+        The stdout output for a valid message must NOT say 'xmllint' on the default fast path
+        (AC-1: no per-message subprocess spawn on the default path)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0. stderr=%r" % result.stderr)
+        # The in-process fast path should say "in-process" in stdout, NOT "xmllint"
+        self.assertIn("in-process", result.stdout,
+                      "Expected 'in-process' marker in stdout on default path. stdout=%r" % result.stdout)
+        self.assertNotIn("xmllint", result.stdout,
+                         "Default fast path must NOT invoke xmllint. stdout=%r" % result.stdout)
+
+    # -----------------------------------------------------------------------
+    # AC-1/AC-5: Opt-in xmllint via ACS_XML_AUTHORITATIVE
+    # -----------------------------------------------------------------------
+
+    @unittest.skipUnless(shutil.which("xmllint"), "xmllint not on PATH")
+    def test_ac1_optin_xmllint_with_xmllint_present(self):
+        """ACS_XML_AUTHORITATIVE=1 + xmllint on PATH: valid message exits 0 with xmllint marker
+        in stdout (AC-1 opt-in path)."""
+        env = dict(os.environ, ACS_XML_AUTHORITATIVE="1")
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK, env=env)
+        self.assertEqual(result.returncode, 0, "Expected exit 0 for valid message with xmllint. "
+                         "stderr=%r stdout=%r" % (result.stderr, result.stdout))
+        # The xmllint opt-in path prints "valid (xmllint, ...)"
+        self.assertIn("xmllint", result.stdout,
+                      "Expected 'xmllint' in stdout when ACS_XML_AUTHORITATIVE=1 and xmllint present")
+
+    def test_ac5_optin_without_xmllint_still_validates(self):
+        """ACS_XML_AUTHORITATIVE=1 with xmllint absent from PATH: valid message still exits 0
+        (env var has no effect when xmllint absent — AC-5)."""
+        # Strip xmllint from PATH by providing a minimal PATH
+        minimal_path = "/usr/bin:/bin"
+        env = dict(os.environ, ACS_XML_AUTHORITATIVE="1", PATH=minimal_path)
+        # Ensure xmllint is genuinely absent from the minimal PATH
+        import shutil as _shutil
+        orig_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = minimal_path
+        try:
+            xmllint_in_minimal = _shutil.which("xmllint")
+        finally:
+            os.environ["PATH"] = orig_path
+        if xmllint_in_minimal:
+            self.skipTest("xmllint found in minimal PATH %r; can't test absent case" % minimal_path)
+
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0 even when ACS_XML_AUTHORITATIVE=1 and xmllint absent. "
+                         "stderr=%r" % result.stderr)
+        self.assertNotIn("Traceback", result.stderr,
+                         "Unexpected traceback when xmllint absent")
+
+    # -----------------------------------------------------------------------
+    # AC-3: CLI fail-fast on in-process path (no xmllint required)
+    # -----------------------------------------------------------------------
+
+    def _env_no_authoritative(self):
+        """Return env dict without ACS_XML_AUTHORITATIVE (default fast path)."""
+        return {k: v for k, v in os.environ.items() if k != "ACS_XML_AUTHORITATIVE"}
+
+    def test_ac3_bad_xml_exits_1_with_invalid_marker(self):
+        """<bad/> piped to stdin exits 1 with INVALID in stderr on the in-process path (AC-3)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin="<bad/>", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("INVALID", result.stderr)
+
+    def test_ac3_valid_task_exits_0(self):
+        """Valid <task> piped to stdin exits 0 on the in-process path (AC-3)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0 for valid task. stderr=%r" % result.stderr)
+
+    def test_ac3_valid_result_exits_0(self):
+        """Valid <result> piped to stdin exits 0 on the in-process path (AC-3)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_RESULT, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0 for valid result. stderr=%r" % result.stderr)
+
+    def test_ac3_valid_handoff_exits_0(self):
+        """Valid <handoff> piped to stdin exits 0 on the in-process path (AC-3)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_HANDOFF, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0 for valid handoff. stderr=%r" % result.stderr)
+
+    # -----------------------------------------------------------------------
+    # AC-6: Back-compat CLI signature
+    # -----------------------------------------------------------------------
+
+    def test_ac6_positional_file_arg(self):
+        """validate_xml.py <file> exits 0 for a valid XML file (AC-6)."""
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+            fh.write(self.VALID_TASK)
+            tmp = fh.name
+        try:
+            result = self.run_script("validate_xml.py", tmp)
+            self.assertEqual(result.returncode, 0,
+                             "Expected exit 0. stderr=%r" % result.stderr)
+        finally:
+            os.unlink(tmp)
+
+    def test_ac6_multiple_file_args_all_valid(self):
+        """validate_xml.py <file1> <file2> exits 0 when both are valid (AC-6)."""
+        files = []
+        try:
+            for xml in (self.VALID_TASK, self.VALID_RESULT):
+                with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                    fh.write(xml)
+                    files.append(fh.name)
+            result = self.run_script("validate_xml.py", *files)
+            self.assertEqual(result.returncode, 0,
+                             "Expected exit 0. stderr=%r" % result.stderr)
+        finally:
+            for p in files:
+                os.unlink(p)
+
+    def test_ac6_mixed_file_args_exits_1_with_invalid(self):
+        """validate_xml.py <valid> <invalid> exits 1 with INVALID in stderr (AC-6)."""
+        files = []
+        try:
+            for xml in (self.VALID_TASK, self.MALFORMED_BAD_ROOT):
+                with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                    fh.write(xml)
+                    files.append(fh.name)
+            result = self.run_script("validate_xml.py", *files)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("INVALID", result.stderr)
+        finally:
+            for p in files:
+                os.unlink(p)
+
+    def test_ac6_stdin_form(self):
+        """validate_xml.py - with valid task exits 0 (AC-6 back-compat pin for stdin form)."""
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0. stderr=%r" % result.stderr)
+
+    def test_ac6_no_args_exits_1_with_usage(self):
+        """validate_xml.py with no arguments exits 1 and prints usage (AC-6)."""
+        result = self.run_script("validate_xml.py")
+        self.assertEqual(result.returncode, 1)
+        # Usage text goes to stderr (the __doc__ string)
+        self.assertIn("validate_xml.py", result.stderr)
 
 
 class TestStatusLines(AcsWorkspaceCase):

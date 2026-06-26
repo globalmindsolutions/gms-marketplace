@@ -429,8 +429,10 @@ sanctioned way to keep children shippable when a slice alone would break.
 
 `git`, `python3` (3.9+, stdlib only), `gh` (PRs; also tracker sync when
 `tracker.provider=github`), `pre-commit` (recommended — shared local convention
-hooks), `acli` (only when `tracker.provider=jira`), `xmllint` (optional — full
-XSD validation; structural fallback otherwise). `acs_lib.check_toolchain()` is
+hooks), `acli` (only when `tracker.provider=jira`), `xmllint` (optional —
+authoritative XSD validation via `ACS_XML_AUTHORITATIVE=1`; the default fast
+path is the in-process stdlib validator which is XSD-equivalent and requires no
+external tool). `acs_lib.check_toolchain()` is
 the single source of truth for this list (kind = required | recommended |
 optional, with per-platform install commands); `/init` Step 0b reports it and
 offers to install the missing required/recommended tools before configuring

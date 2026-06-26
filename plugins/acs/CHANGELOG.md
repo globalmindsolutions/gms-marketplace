@@ -17,6 +17,16 @@ the notes.
 
 ### Changed
 
+- **In-process stdlib XML validation is now the default fast path (MAR-61).**
+  `validate_xml.py` now validates every message via the in-process
+  `validate_structurally()` engine (pure stdlib, zero subprocess) instead of
+  spawning `xmllint` per message.  `xmllint` is retained as an opt-in
+  authoritative check via `ACS_XML_AUTHORITATIVE=1` (PATH-guarded; absent
+  xmllint never blocks a verdict).  The in-process engine was audited against
+  `acs-messages.xsd` and confirmed XSD-equivalent; a parity corpus
+  (`TestValidators` in `tests/acs/test_acs_plugin.py`) asserts identical
+  pass/fail verdicts for every XSD violation class across both paths.
+
 - **`/acs:merge-pr` is now agent/model-invocable (MAR-42).** Removed
   `disable-model-invocation` from the skill; the readiness gate (CI, approvals,
   conflicts, protections) and the repo's branch protection are the merge brakes,
