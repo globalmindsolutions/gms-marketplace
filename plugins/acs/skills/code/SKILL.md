@@ -99,9 +99,11 @@ pass), and continue from where it points.
 
 ## Reflection loop
 
-### Verify-depth (lane-driven iteration ceiling)
+### Verify-depth (lane-driven iteration ceiling — initial ceiling)
 
-Before starting the reflection loop, determine the verify depth for this ticket:
+Before starting the reflection loop, determine the **initial** verify depth for
+this ticket (this ceiling may be raised monotonically by the in-loop escalation
+check described in the next section — it is never lowered):
 
 1. Read `ticket.lane` and `ticket.stakes` from `context.ticket` (fields added
    by MAR-56; available in `context.ticket.lane` and `context.ticket.stakes`).
@@ -121,7 +123,70 @@ Before starting the reflection loop, determine the verify depth for this ticket:
   checkpoint is the PR review before merge.
 - The **TDD/coverage gate (see `### Coverage hard fail` below) runs in FULL in
   every lane and is NEVER trimmed by verify-depth selection**. Invariant (a)
-  holds regardless of lane.
+  holds regardless of lane. Escalation never relaxes the coverage gate — it can
+  only tighten it (higher lane → higher rigor).
+
+### In-loop escalation check (upward-only, MAR-57)
+
+At the **start of each iteration** — after the verifier for the previous
+iteration has run and before launching the current iteration's execute phase —
+evaluate three upward-escalation triggers. Completed iterations are NEVER
+discarded; escalation continues from the current point at higher rigor WITHOUT
+restarting the run (AC-1 / no-restart guarantee).
+
+**Three triggers (exactly; no others) — evaluated on the FIRST signal, immediately:**
+
+**(a) Verifier finding signaling higher stakes/size.** The coordinator inspects
+the verifier's findings for any item whose dimension is "Architecture & system
+design", "Security", or "Business logic" and whose text indicates the touched
+surface is higher-stakes or larger than currently classified. No new structured
+verifier field is added (reuse existing finding signals only). The coordinator
+applies judgment over finding text; the deterministic path is trigger (b).
+
+**(b) `high_stakes_paths` glob matched mid-implementation.** After the execute
+phase writes files, the coordinator calls `recommend_stakes(changed_paths,
+settings)` (`acs_lib.py`) over the iteration's changed file set. A return value
+of `"high"` fires trigger (b). Stakes is then raised to `"high"` for the new
+axes. This is the deterministic, fully unit-testable trigger; it reuses the
+`high_stakes_paths` setting mechanism — no re-implementation.
+
+**(c) Explicit user/agent escalation request.** Any in-flight message from the
+user, the coordinator, or any subagent (executor or verifier) may carry an
+explicit escalation request. Any subagent may RAISE rigor; none may lower it.
+The coordinator recognizes a request as explicit only when it unambiguously
+states a higher lane or axis value.
+
+**On-trigger escalation sequence (when any trigger fires):**
+
+1. Determine new axes: `size` and `stakes` may only be raised (never lowered
+   automatically). For trigger (b), raise `stakes` to `"high"`. For trigger
+   (a)/(c), raise whichever axis the signal indicates.
+2. Call `escalate_lane(current_lane, new_size, new_stakes, needs_design,
+   ticket_type)` (`acs_lib.py`) to obtain `(new_lane, new_depth, new_ceiling)`.
+   Lane is never hand-set — `derive_lane` inside `escalate_lane` is the single
+   authoritative producer (ADR 0031).
+3. If `new_lane == current_lane` (no raise needed): no-op, continue.
+4. If `new_lane` is strictly higher (per `lane_rank`):
+   a. Update the in-memory ticket object's `size`, `stakes`, and `lane` fields.
+   b. Persist to `ticket.json` via `save_ticket(tdir, ticket)` — writes the new
+      axes and `lane`.
+   c. Persist to `pipeline-state.json` via `update_pipeline(tdir, ticket_id,
+      "code", "in_progress", lane=new_lane)`.
+   d. Persist to `tickets-index.json` via `update_index(workspace, repo_id,
+      ticket)`.
+   e. Raise the in-flight iteration ceiling to `max(current_ceiling,
+      new_ceiling)` — monotone raise only, never lower an already-higher
+      ceiling (AC-1/AC-7).
+   f. Log the escalation event (ticket id, from-lane, to-lane, trigger source,
+      new ceiling) as a coordinator note in the run state.
+
+**Absent or ambiguous signals — no-op (AC-7 conservative default):**
+When none of the three triggers fires in an iteration, the coordinator makes no
+axis or lane changes. Unrecognized or ambiguous signals (e.g. a verifier finding
+that mentions security but concludes the surface is within scope) do not trigger
+escalation — the coordinator must observe an unambiguous signal. A ticket stays
+at its current lane when in-flight signals are absent, ambiguous, or
+unrecognized; the lane is never lowered.
 
 Run plan -> execute -> verify, at most verify_depth-determined iterations (light: cap 1; full: cap 3). Spawn subagents with the
 Agent tool: `acs:code-planner`, `acs:code-executor`, `acs:code-verifier` (fall

@@ -363,5 +363,121 @@ class TestMergePrBehindAutoUpdate(unittest.TestCase):
             "of its heading (MAR-47 C-10)")
 
 
+class TestCodeSkillEscalation(unittest.TestCase):
+    """MAR-57 Spec 02 (AC-1, AC-2, AC-6): pin the in-loop escalation contract in
+    plugins/acs/skills/code/SKILL.md. Doc-assertion tests that read the prose
+    and assert the presence of normative tokens. The tests are RED before the
+    escalation subsection is added; GREEN after.
+    """
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def _body(self):
+        return read(self.skill_path("code"))
+
+    # --- AC-6: exactly three triggers enumerated ---
+
+    def test_trigger_a_verifier_finding(self):
+        """AC-6: code/SKILL.md must name trigger (a) — verifier finding signaling higher
+        stakes/size."""
+        body = self._body()
+        # Accept either 'verifier finding' or 'finding' near 'stakes' or 'size'
+        self.assertIsNotNone(
+            re.search(r"(?i)verifier finding|finding.*higher.{0,60}(stakes|size)", body),
+            "code/SKILL.md must enumerate trigger (a): verifier finding signaling "
+            "higher stakes/size (MAR-57 AC-6)")
+
+    def test_trigger_b_high_stakes_paths_glob(self):
+        """AC-6: code/SKILL.md must name trigger (b) using high_stakes_paths (the glob
+        mechanism, not a re-implementation)."""
+        body = self._body()
+        self.assertIn("high_stakes_paths", body,
+                      "code/SKILL.md must reference high_stakes_paths for trigger (b) "
+                      "(MAR-57 AC-6 — reuse glob mechanism, not a re-implementation)")
+
+    def test_trigger_c_explicit_user_agent_request(self):
+        """AC-6: code/SKILL.md must name trigger (c) — explicit user/agent escalation
+        request."""
+        body = self._body()
+        self.assertIsNotNone(
+            re.search(r"(?i)explicit.{0,40}(user|agent)|user.{0,40}agent.{0,40}(escalat|request)",
+                      body),
+            "code/SKILL.md must enumerate trigger (c): explicit user/agent escalation "
+            "request (MAR-57 AC-6)")
+
+    def test_escalate_lane_named(self):
+        """AC-4/AC-6: code/SKILL.md must name escalate_lane (the Spec-01 helper) so the
+        coordinator recomputes via the canonical derive_lane path (not hand-set)."""
+        body = self._body()
+        self.assertIn("escalate_lane", body,
+                      "code/SKILL.md must reference escalate_lane (MAR-57 AC-4/AC-6)")
+
+    # --- AC-2: first-signal / immediate evaluation ---
+
+    def test_first_signal_evaluated_immediately(self):
+        """AC-2: code/SKILL.md must state that escalation is evaluated on the FIRST
+        signal (not after N findings or cap exhaustion)."""
+        body = self._body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(first.{0,30}signal|immediately|on.{0,30}first)", body),
+            "code/SKILL.md must state escalation is evaluated on the first signal / "
+            "immediately (MAR-57 AC-2)")
+
+    # --- AC-1: no-restart / continue-from-current-point ---
+
+    def test_no_restart_property(self):
+        """AC-1: code/SKILL.md must state the no-restart / continue-from-current-point
+        property: completed work is not discarded when escalation fires."""
+        body = self._body()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)(no.restart|without restart|without discard|continue.{0,60}"
+                r"(current|completed)|completed work)",
+                body),
+            "code/SKILL.md must state the no-restart / continue-from-current-point "
+            "property on escalation (MAR-57 AC-1)")
+
+    # --- AC-1/AC-7: upward-only, ceiling never lowered ---
+
+    def test_upward_only_stated(self):
+        """AC-1/AC-7: code/SKILL.md must state the lane is only ever raised, never
+        lowered (upward-only monotone escalation)."""
+        body = self._body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(upward.only|only.{0,30}rais|never.{0,30}lower|monoton)", body),
+            "code/SKILL.md must state upward-only / never-lower escalation "
+            "(MAR-57 AC-1/AC-7)")
+
+    # --- AC-4: re-persist to all three state files ---
+
+    def test_repersist_ticket_json(self):
+        """AC-4: code/SKILL.md must state that the escalated lane is persisted to
+        ticket.json via save_ticket (or by name)."""
+        body = self._body()
+        self.assertTrue(
+            "ticket.json" in body or "save_ticket" in body,
+            "code/SKILL.md must mention ticket.json or save_ticket for re-persist "
+            "(MAR-57 AC-4)")
+
+    def test_repersist_pipeline_state(self):
+        """AC-4: code/SKILL.md must state that pipeline-state.json is updated on
+        escalation via update_pipeline."""
+        body = self._body()
+        self.assertTrue(
+            "pipeline-state.json" in body or "update_pipeline" in body,
+            "code/SKILL.md must mention pipeline-state.json or update_pipeline for "
+            "re-persist (MAR-57 AC-4)")
+
+    def test_repersist_tickets_index(self):
+        """AC-4: code/SKILL.md must state that tickets-index.json is updated on
+        escalation via update_index."""
+        body = self._body()
+        self.assertTrue(
+            "tickets-index.json" in body or "update_index" in body,
+            "code/SKILL.md must mention tickets-index.json or update_index for "
+            "re-persist (MAR-57 AC-4)")
+
+
 if __name__ == "__main__":
     unittest.main()

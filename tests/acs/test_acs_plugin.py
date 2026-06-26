@@ -1924,3 +1924,192 @@ class TestEscalateLane(unittest.TestCase):
             lib.escalate_lane("SMALL", "large", "normal", False, "story")
             after_files = set(os.listdir(tmpdir))
         self.assertEqual(before_files, after_files)
+
+
+## MAR-57 spec 02 — TestInLoopEscalation
+
+
+class TestInLoopEscalation(AcsWorkspaceCase):
+    """MAR-57 Spec 02 (AC-1, AC-4, AC-6, AC-7): assert that the escalation sequence
+    described in code/SKILL.md (three triggers -> escalate_lane -> persist via the
+    existing writers) correctly updates all three state files.
+
+    These tests mirror the coordinator's in-loop sequence directly:
+      1. escalate_lane(current, new_size, new_stakes, ...) -> (new_lane, depth, ceiling)
+      2. ticket["lane"] = new_lane; save_ticket(tdir, ticket)
+      3. update_pipeline(tdir, ticket_id, "code", "in_progress", lane=new_lane)
+      4. update_index(workspace, repo_id, ticket)
+
+    Each test seeds a ticket at a specific lane and exercises one outcome of that
+    sequence (raise, hold, ceiling) against the persisted JSON.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Seed: SMALL lane (size=small, stakes=normal)
+        self.ticket_id = self.new_ticket("Escalation test", "story",
+                                         "--size", "small", "--stakes", "normal")
+        self._tdir = self.tdir(self.ticket_id)
+        self._ticket = lib.load_ticket(self._tdir)
+
+    # --- AC-4: escalation writes raised lane to ticket.json ---
+
+    def test_escalation_raises_ticket_json_lane(self):
+        """AC-4: seed=SMALL; escalate axes to standard/normal -> STANDARD;
+        save_ticket writes new lane; reload confirms ticket['lane'] == 'STANDARD'
+        and equals derive_lane(new_size, new_stakes, needs_design, type)."""
+        ticket = self._ticket
+        self.assertEqual(ticket["lane"], "SMALL")  # pre-condition
+
+        # Simulate trigger: axes raised to standard/normal -> STANDARD candidate
+        new_lane, _, _ = lib.escalate_lane(
+            ticket["lane"], "standard", "normal",
+            ticket["needs_design"], ticket["type"]
+        )
+        self.assertEqual(new_lane, "STANDARD")
+
+        # Persist (as coordinator does)
+        ticket["size"] = "standard"
+        ticket["stakes"] = "normal"
+        ticket["lane"] = new_lane
+        lib.save_ticket(self._tdir, ticket)
+
+        # Reload and assert
+        reloaded = lib.load_ticket(self._tdir)
+        self.assertEqual(reloaded["lane"], "STANDARD")
+        expected = lib.derive_lane("standard", "normal", reloaded["needs_design"],
+                                   reloaded["type"])
+        self.assertEqual(reloaded["lane"], expected,
+                         "Persisted lane must equal derive_lane(new_size, new_stakes, "
+                         "needs_design, type) (AC-4)")
+
+    # --- AC-4: escalation writes raised lane to pipeline-state.json ---
+
+    def test_escalation_writes_pipeline_state_lane(self):
+        """AC-4: seed=SMALL; after escalation, update_pipeline persists new lane
+        'STANDARD' to pipeline-state.json."""
+        ticket = self._ticket
+        new_lane, _, _ = lib.escalate_lane(
+            ticket["lane"], "standard", "normal",
+            ticket["needs_design"], ticket["type"]
+        )
+        self.assertEqual(new_lane, "STANDARD")
+
+        lib.update_pipeline(self._tdir, self.ticket_id, "code", "in_progress",
+                            lane=new_lane)
+
+        data = lib.read_json(os.path.join(self._tdir, "pipeline-state.json"))
+        self.assertEqual(data["lane"], "STANDARD",
+                         "pipeline-state.json must carry escalated lane (AC-4)")
+
+    # --- AC-4: escalation writes raised lane to tickets-index.json ---
+
+    def test_escalation_writes_index_lane(self):
+        """AC-4: seed=SMALL; after escalation, update_index persists new lane
+        'STANDARD' to tickets-index.json."""
+        ticket = self._ticket
+        new_lane, _, _ = lib.escalate_lane(
+            ticket["lane"], "standard", "normal",
+            ticket["needs_design"], ticket["type"]
+        )
+        self.assertEqual(new_lane, "STANDARD")
+
+        ticket["lane"] = new_lane
+        lib.update_index(self.ws, "acme-shop", ticket)
+
+        with open(lib.index_path(self.ws, "acme-shop")) as fh:
+            index = json.load(fh)
+        self.assertEqual(index["tickets"][self.ticket_id]["lane"], "STANDARD",
+                         "tickets-index.json must carry escalated lane (AC-4)")
+
+    # --- AC-7/AC-3: lower candidate leaves all state unchanged ---
+
+    def test_lower_candidate_leaves_all_state_unchanged(self):
+        """AC-7/AC-3: seed=STANDARD; a TRIVIAL candidate is lower -> escalate_lane
+        returns STANDARD (hold); no writer is called; files remain at STANDARD."""
+        # Re-seed at STANDARD
+        ticket_id = self.new_ticket("Hold test", "story",
+                                    "--size", "standard", "--stakes", "normal")
+        tdir = self.tdir(ticket_id)
+        ticket = lib.load_ticket(tdir)
+        self.assertEqual(ticket["lane"], "STANDARD")  # pre-condition
+
+        # Simulate trigger returning lower candidate (TRIVIAL)
+        new_lane, _, _ = lib.escalate_lane(
+            ticket["lane"], "trivial", "normal",
+            ticket["needs_design"], ticket["type"]
+        )
+        # clamp: candidate TRIVIAL < current STANDARD -> hold at STANDARD
+        self.assertEqual(new_lane, "STANDARD",
+                         "escalate_lane must hold at STANDARD when candidate is lower (AC-3/AC-7)")
+
+        # Coordinator rule: new_lane == current_lane -> no-op, no writer called.
+        # We verify by NOT calling any writer and confirming state is unchanged.
+        reloaded = lib.load_ticket(tdir)
+        self.assertEqual(reloaded["lane"], "STANDARD",
+                         "ticket.json lane must not change when escalate_lane holds (AC-7)")
+
+    # --- AC-1: ceiling raised on escalation ---
+
+    def test_ceiling_raised_on_escalation(self):
+        """AC-1: seed=SMALL (light, ceiling=1); escalate to STANDARD (full, ceiling=3);
+        new ceiling == VERIFY_ITERATION_CAP['full'] == 3."""
+        ticket = self._ticket
+        self.assertEqual(ticket["lane"], "SMALL")
+
+        new_lane, depth, new_ceiling = lib.escalate_lane(
+            ticket["lane"], "standard", "normal",
+            ticket["needs_design"], ticket["type"]
+        )
+        self.assertEqual(new_lane, "STANDARD")
+        self.assertEqual(depth, "full")
+        self.assertEqual(new_ceiling, lib.VERIFY_ITERATION_CAP["full"],
+                         "Ceiling must be VERIFY_ITERATION_CAP['full']==3 after escalation (AC-1)")
+        self.assertEqual(new_ceiling, 3)
+
+    # --- AC-1/AC-7: ceiling is monotone — never lowered ---
+
+    def test_ceiling_is_monotone_never_lowered(self):
+        """AC-1/AC-7: if coordinator already has ceiling=3 and escalate_lane
+        returns the same or lower candidate, ceiling must not decrease below 3."""
+        # current=STANDARD (ceiling=3), lower candidate -> hold at STANDARD
+        ticket = self._ticket
+        ticket["lane"] = "STANDARD"
+
+        new_lane, depth, new_ceiling = lib.escalate_lane(
+            "STANDARD", "trivial", "normal",
+            ticket["needs_design"], ticket["type"]
+        )
+        # Hold: new_lane == STANDARD -> depth == 'full', ceiling == 3
+        self.assertEqual(new_lane, "STANDARD")
+        self.assertEqual(new_ceiling, 3)
+
+        # Coordinator rule: actual ceiling = max(current_ceiling, new_ceiling)
+        # If current ceiling was already 3, it must stay 3.
+        current_ceiling = 3
+        actual_ceiling = max(current_ceiling, new_ceiling)
+        self.assertEqual(actual_ceiling, 3,
+                         "Ceiling must stay 3 after a no-raise call (AC-1/AC-7)")
+
+    # --- AC-6: trigger (b) uses recommend_stakes / high_stakes_paths glob ---
+
+    def test_trigger_b_uses_recommend_stakes(self):
+        """AC-6: trigger (b) reuses recommend_stakes() over the changed file set;
+        a path matching the auth/** glob returns 'high'; passing stakes='high' to
+        escalate_lane from TRIVIAL produces STANDARD (Rule 3 floor — AC-6)."""
+        # Confirm recommend_stakes() returns 'high' for an auth/ path
+        stakes_result = lib.recommend_stakes(["auth/login.py"], None)
+        self.assertEqual(stakes_result, "high",
+                         "recommend_stakes must return 'high' for auth/ path (AC-6 trigger b)")
+
+        # Pass resulting stakes to escalate_lane (as coordinator does on trigger b)
+        new_lane, _, _ = lib.escalate_lane(
+            "TRIVIAL", "trivial", stakes_result, False, "story"
+        )
+        # Rule 3: stakes=high -> STANDARD floor; STANDARD > TRIVIAL -> escalate
+        self.assertEqual(new_lane, "STANDARD",
+                         "TRIVIAL + high stakes (trigger b) must escalate to STANDARD "
+                         "(Rule 3, AC-6)")
+        # Confirm lane equals derive_lane (single authority, AC-4)
+        expected = lib.derive_lane("trivial", "high", False, "story")
+        self.assertEqual(new_lane, expected)
