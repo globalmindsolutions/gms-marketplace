@@ -68,10 +68,14 @@ Requirements:
   - The **TDD/coverage gate runs in full in every lane and is never trimmed by
     verify-depth selection** (invariant a, MAR-55). Depth selection is not a
     verify dimension that light mode drops.
-- Subagent naming convention for triad-running skills: `<skill>-planner`,
-  `<skill>-executor`, `<skill>-verifier`. 27 agent files exist on disk in total
-  and are retained (C-4). The nine triad-running skills are listed in the
-  heading above (six workflow/product skills plus the product-level group).
+- Subagent naming convention: `<skill>-planner`, `<skill>-executor`,
+  `<skill>-verifier`. 27 agent files exist on disk in total and are retained
+  (C-4) — three role files for each of nine skill prefixes that have agent
+  files. Only the **six** triad-keeping skills listed in the heading above
+  actively spawn the full plan→execute→verify triad. The other three prefixes
+  belong to the **apply-work** skills, which run inline and never spawn a
+  plan-phase or verify-phase subagent (see the "Apply-work skills" subsection
+  below).
 - For the **apply-work** group, only the executor-suffix agent file may be
   delegated to at most once per invocation; the plan-phase and verify-phase
   agent files are retained on disk but the coordinator no longer spawns them.
