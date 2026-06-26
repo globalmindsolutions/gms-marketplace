@@ -310,7 +310,7 @@ MANDATORY final step — never skipped, also on failure:
    `children` is `[]` for non-epics. `prd_trace.feature` is the PRD feature/goal
    the ticket traces to (null when no PRD exists); `prd_trace.divergence` is null
    or the user-confirmed divergence one-liner. On failure keep whatever is true
-   (e.g. minted children) and record verifier findings under `findings` with
+   (e.g. minted children) and record blocking findings under `findings` with
    `severity: "blocking"`. Estimate `tokens`/`cost_usd` for this run.
 
 2. Run:
