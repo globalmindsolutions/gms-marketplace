@@ -9,9 +9,15 @@ read-only PM metrics dashboard (`/metrics`), and the read-only usage dashboard
 conditional).
 Every **workflow** skill MUST:
 
-- run the Reflection cycle (plan → execute → verify) with its own
-  `<skill>-planner`, `<skill>-executor`, `<skill>-verifier` subagents
-  ([reflection.md](reflection.md));
+- Six **workflow/product skills** (create-spec, code, create-prd,
+  create-design, create-architecture, create-project) run the full Reflection
+  cycle (plan → execute → verify) with their own `<skill>-planner`,
+  `<skill>-executor`, `<skill>-verifier` subagents
+  ([reflection.md](reflection.md)). Three **apply-work skills**
+  (create-pr, merge-pr, create-ticket) run **inline** per MAR-55 invariant
+  (b): the coordinator, optionally delegating to at most one executor subagent,
+  performs the apply-work directly — no planner subagent, no verifier subagent,
+  in every lane.
 - be gated by a pre-hook and persisted by a post-hook
   ([hooks.md](hooks.md));
 - read and write **only** inside `<workspace>/<repo>/<ticket-id>/` for state
@@ -20,7 +26,8 @@ Every **workflow** skill MUST:
 - read configuration from the `.acs` `settings.json`
   ([configuration.md](configuration.md)), and spawn its
   planner/executor/verifier on the models and effort levels configured there
-  ([configuration.md](configuration.md#subagent-models));
+  ([configuration.md](configuration.md#subagent-models)) (applies to the six
+  triad-keeping skills only — apply-work skills run inline);
 - (except `/create-ticket`) resolve the target `<ticket-id>` before doing
   anything — explicit argument, else session context, else branch name
   ([workflow.md](workflow.md#ticket-context));
@@ -28,7 +35,13 @@ Every **workflow** skill MUST:
   (`clarifications.json`): research first, ask once at the cheapest phase
   (re-asking an answered question is a defect), record answers before acting
   on them, and record unanswerable decisions as visible **assumptions** with
-  rationale ([workspace-and-state.md](workspace-and-state.md));
+  rationale ([workspace-and-state.md](workspace-and-state.md)); when ≥2
+  clarifications are open, present all of them to the user in ONE grouped
+  interaction (e.g. a single AskUserQuestion with a numbered list) — not
+  serial round-trips; record each answer as its own `clarify.py add` entry
+  (one `C-<n>` per question, `--source` preserved); never skip, merge, or
+  auto-answer a question outside the `--source assumption --rationale "..."`
+  rule (MAR-61 AC-7);
 - end every direct invocation with the **standard completion report**
   (Ticket / Status / Results / Findings / Artifacts / Metrics / Next), rendered
   only after the post-hook succeeded; under `/ship` the compact XML handoff
@@ -357,8 +370,11 @@ Purpose: turn a raw user prompt into a well-formed ticket.
     **`acli`** for Jira — which handle authentication themselves.
 - MUST persist the ticket (and its `<ticket-id>`) into the workspace; the
   `<ticket-id>` names the workspace partition for the whole pipeline.
-- Subagents: `create-ticket-planner`, `create-ticket-executor`,
-  `create-ticket-verifier`.
+- Inline shape (MAR-55 invariant (b)): the coordinator runs apply-work
+  directly, optionally delegating to at most one `create-ticket-executor`
+  subagent; no planner subagent; no verifier subagent. Correctness is gated by
+  schema validation and the user-confirmation gate (size/stakes/lane/needs_design),
+  not an in-skill verifier.
 - Ticket ids use the **per-repo prefix + sequence** (e.g. `SHOP-123`); the
   per-repo counter lives in `<workspace>/<repo>/counters.json`.
 - MAY **import an existing remote ticket**: `/create-ticket <remote-key>`
@@ -543,6 +559,76 @@ Purpose: implement the specs in the consumer repo using TDD.
   and embeds the `<ticket-id>` so later skills and hooks can resolve ticket
   context from it.
 
+### Mid-flight lane escalation (MAR-57)
+
+When a ticket is being processed by `/code` and an in-flight signal reveals
+the work is higher-stakes or larger than its original classification, the
+pipeline automatically escalates to the higher lane without restarting the
+run. The following contract governs all automatic mid-flight lane changes:
+
+1. **Upward-only automatic escalation.** Escalation is always upward-only:
+   no automatic or unattended code path lowers a ticket's `lane` or its
+   authoritative `stakes` or `size` below a user-confirmed value. When an
+   in-flight signal fires, the coordinator recomputes and raises the lane
+   immediately — on the **first** such signal, conservative rigor-sooner —
+   without waiting for N persistent findings or for the verify cap to be
+   exhausted. Completed work is preserved; there is no restart.
+
+2. **The trigger set is exactly three (a), (b), (c) — bounded:**
+   - (a) A verifier finding signaling higher stakes or larger scope than the
+     ticket's current classification.
+   - (b) A `high_stakes_paths` glob match on a file touched during the
+     implementation iteration — reuses the `recommend_stakes`/`high_stakes_paths`
+     glob mechanism from `settings.json` (the same path-glob matching used at
+     `/create-ticket` time; no re-implementation of the glob logic).
+   - (c) An explicit user or agent escalation request (any subagent, coordinator,
+     or user may raise rigor; subagents may NEVER lower it).
+   No trigger outside this set causes an automatic escalation.
+
+3. **Recompute via `derive_lane` — single routing authority.** On escalation,
+   the new lane is always computed via `derive_lane(size, stakes, needs_design,
+   type)` (never hand-set; ADR 0030). The new verify depth and iteration ceiling
+   are computed via `verify_depth(new_lane, new_stakes)` and
+   `VERIFY_ITERATION_CAP[depth]`. All three are recomputed from the authoritative
+   axes, then persisted via the escalation helper `escalate_lane`.
+
+4. **Re-persist via existing writers — no new state-file fields.** The escalated
+   lane is written back to `ticket.json` (via `save_ticket`), `pipeline-state.json`
+   (via `update_pipeline`), and `tickets-index.json` (via `update_index`). No new
+   fields are added to any state file.
+
+5. **Axis monotone guard (`guard_axes`).** The authoritative `size` and `stakes`
+   axes may be automatically raised by an in-flight trigger, but MUST NOT be
+   automatically lowered below a user-confirmed value. The `guard_axes` helper
+   enforces this: given the current confirmed axes and the proposed new axes, it
+   returns the element-wise maximum by rank — current wins when the proposed is
+   lower.
+
+6. **De-escalation is never automatic or silent (negative guarantee).** No
+   automatic or unattended code path lowers a ticket's `lane`, `stakes`, or
+   `size` below a user-confirmed value. De-escalation requires explicit user
+   confirmation (mirrors the existing create-ticket rule for stakes; see
+   classification contract above). An interactive mid-flight downgrade command
+   is deferred (out of scope — not yet implemented).
+
+7. **Stage re-introduction on fast-lane escalation.** A ticket that escalates
+   from a fast lane (TRIVIAL/SMALL, where `create-spec` is folded into `/code`'s
+   plan phase) into STANDARD/COMPLEX picks up the create-spec rigor it would have
+   skipped, as documented in the `create-spec/SKILL.md` "Escalation pickup"
+   subsection. The coordinator invokes the pickup before proceeding to the
+   remaining implementation steps; the higher verify ceiling (recomputed at
+   escalation time) applies from that point forward.
+
+8. **Conservative default preserved.** When in-flight signals are absent,
+   ambiguous, or unrecognized, the ticket stays at its current lane. The
+   default floor for unknown/absent `lane` is STANDARD — never a fast lane on
+   ambiguous inputs.
+
+9. **Sibling behavior unchanged.** The fast-lane fold (MAR-59: TRIVIAL/SMALL
+   `create-spec` folded into `/code` plan phase) applies to non-escalating tickets
+   and is not changed by this contract. The apply-tier inlining (MAR-60:
+   `create-pr` → `merge-pr` → `create-ticket`) is also unchanged.
+
 ## 5. `/create-pr`
 
 Purpose: ship the implementation as a pull request.
@@ -554,7 +640,10 @@ Purpose: ship the implementation as a pull request.
   specs, `code-state.json` summary incl. review findings) rather than
   conversation history.
 - MUST record the PR reference (number/URL) in the workspace state.
-- Subagents: `create-pr-planner`, `create-pr-executor`, `create-pr-verifier`.
+- Inline shape (MAR-55 invariant (b)): the coordinator runs apply-work
+  directly, optionally delegating to at most one `create-pr-executor`
+  subagent; no planner subagent; no verifier subagent. Correctness was gated
+  by the upstream code-verifier; the human checkpoint is the PR review.
 - PR title and PR description MUST follow the formats configured in
   `settings.json` ([configuration.md](configuration.md)).
 - The PR targets the repo's **default branch** and MUST carry the **`ACS`**
@@ -585,7 +674,10 @@ Purpose: land the change.
 - When the merged ticket is the last open child of an epic, the epic MUST be
   auto-marked done ([workflow.md](workflow.md#epic-fan-out)) —
   performed by the `post-merge-pr` hook.
-- Subagents: `merge-pr-planner`, `merge-pr-executor`, `merge-pr-verifier`.
+- Inline shape (MAR-55 invariant (b)): the coordinator runs apply-work
+  directly, optionally delegating to at most one `merge-pr-executor`
+  subagent; no planner subagent; no verifier subagent. Correctness was gated
+  by the upstream code-verifier.
 - Merge strategy is configurable via `merge_strategy` in `settings.json`
   (`squash` | `merge` | `rebase`), default **`squash`**.
 - Post-merge actions (all required): **delete the branch**, **clean up the

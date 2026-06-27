@@ -15,14 +15,29 @@ The workflow is built on a **coordinator–subagents** architecture:
 
 ## Reflection pattern: plan → execute → verify
 
-Every workflow skill MUST apply the Reflection pattern as a
-**plan–execute–verify cycle**, with a **different subagent for each phase**:
+The six **triad-keeping skills** (create-spec, code, create-prd, create-design,
+create-architecture, create-project) MUST apply the Reflection pattern as a
+**plan–execute–verify cycle**, with a **different subagent for each phase**.
+Each phase runs in a separate context window so the verify phase judges the work
+fresh rather than rubber-stamping its own output. The table below shows the three
+phases and their responsibilities for a representative triad-running skill:
 
-| Phase | Subagent (example for `/create-ticket`) | Responsibility |
-|-------|------------------------------------------|----------------|
-| Plan | `create-ticket-planner` | Analyze inputs (workspace state, repo, docs, config); produce a concrete plan for the executor. |
-| Execute | `create-ticket-executor` | Carry out the plan; produce the skill's artifacts (ticket, design, specs, code, PR, merge). |
-| Verify | `create-ticket-verifier` | Independently check the executor's output against the plan and the skill's quality bar; report pass/fail with findings. |
+| Phase | Subagent (example for `/code`) | Responsibility |
+|-------|--------------------------------|----------------|
+| Plan | `code-planner` | Analyze inputs (workspace state, repo, docs, config); produce a concrete plan for the executor. |
+| Execute | `code-executor` | Carry out the plan; produce the skill's artifacts (ticket, design, specs, code, PR, merge). |
+| Verify | `code-verifier` | Independently check the executor's output against the plan and the skill's quality bar; report pass/fail with findings. |
+
+### Apply-work skills: inline shape (MAR-55 invariant (b))
+
+The **apply-work** group — `/acs:create-pr`, `/acs:merge-pr`, and
+`/acs:create-ticket` — does **not** apply the Reflection pattern. These skills
+are inline and deterministic: the coordinator handles the work directly,
+optionally delegating to at most one executor subagent. No plan-phase subagent
+and no verify-phase subagent are spawned — this holds in every lane. Upstream
+quality is gated by the code-verifier (before the PR is opened or merged) or by
+the user-confirmation gate (at ticket creation); there is no in-skill verify
+phase for these three skills.
 
 Requirements:
 
@@ -53,10 +68,32 @@ Requirements:
   - The **TDD/coverage gate runs in full in every lane and is never trimmed by
     verify-depth selection** (invariant a, MAR-55). Depth selection is not a
     verify dimension that light mode drops.
+
+  **Mid-flight ceiling raise on escalation (MAR-57).** The lane-driven ceiling
+  stated above is the *initial* ceiling, computed at the start of the `/code`
+  run. If an in-flight escalation trigger fires mid-run (verifier finding of
+  higher stakes/size, a `high_stakes_paths` glob match on a touched file, or an
+  explicit user/agent request), the coordinator recomputes the ceiling via
+  `VERIFY_ITERATION_CAP[verify_depth(new_lane, new_stakes)]` and raises the
+  in-flight ceiling **monotonically** — it is never lowered. A ticket that
+  starts at a TRIVIAL/SMALL ceiling (1 iteration) and escalates to
+  STANDARD/COMPLEX (3 iterations) immediately acquires the full 3-iteration
+  ceiling for all remaining iterations. The absolute invariants above (verifier
+  always runs in every lane; TDD/coverage gate immutable in every lane) hold
+  regardless of any in-flight ceiling change.
+
 - Subagent naming convention: `<skill>-planner`, `<skill>-executor`,
-  `<skill>-verifier` for all six workflow skills, plus the product-level
-  `/create-prd`, `/create-architecture`, and `/create-project` triples —
-  27 subagents total.
+  `<skill>-verifier`. 27 agent files exist on disk in total and are retained
+  (C-4) — three role files for each of nine skill prefixes that have agent
+  files. Only the **six** triad-keeping skills listed in the heading above
+  actively spawn the full plan→execute→verify triad. The other three prefixes
+  belong to the **apply-work** skills, which run inline and never spawn a
+  plan-phase or verify-phase subagent (see the "Apply-work skills" subsection
+  below).
+- For the **apply-work** group, only the executor-suffix agent file may be
+  delegated to at most once per invocation; the plan-phase and verify-phase
+  agent files are retained on disk but the coordinator no longer spawns them.
+  See the "Apply-work skills" subsection above for the full inline shape.
 - Each role's **model and reasoning effort are user-configurable** in
   `settings.json` (`models.planner` / `executor` / `verifier`, with
   per-skill overrides); unset values inherit the parent context's model and
