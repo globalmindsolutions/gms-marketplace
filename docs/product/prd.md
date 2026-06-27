@@ -48,6 +48,16 @@ docs. A pipeline that **requires** a PRD to start locks those teams out; they
 need to deliver tracker-defined work through the same gates without first
 authoring product docs they do not have.
 
+Today the pipeline runs the full plan-execute-verify ladder (create-ticket →
+[create-design] → create-spec → code → create-pr → merge-pr) on **every** ticket
+regardless of size. An over-engineering audit found that a trivial one-line ticket
+pays ~5 coordinators + ~15 subagent spawns (~20 fresh model contexts), so simple,
+supervised changes cost disproportionate wall-clock time and token/cost. The rigor
+that is the product is right for unattended and complex work, but is double-paid on
+interactive simple work where a human is already the reviewer. Rigor is scaled today
+by design-significance (the `needs_design` flag) but never by implementation size or
+supervision level.
+
 **tabp feature problem:** Manual CV-vs-JD screening is slow, inconsistent, and hard to audit for
 fairness — hiring managers cannot reproduce scoring decisions or demonstrate
 that protected characteristics played no role.
@@ -74,7 +84,7 @@ that protected characteristics played no role.
 | G3 — Quality via reflection | ≥ 90% of `/code` runs reach zero verifier findings within the 3-iteration cap; coverage target met or hard-failed (never silently waived). |
 | G4 — Reviewable delivery | ≥ 80% of story/task PRs ≤ ~400 changed lines; every PR carries ticket trace, test plan, and findings. |
 | G5 — Auditability | Every decision (clarification, assumption, finding, phase output) recoverable from the ticket partition; cost/tokens/time recorded per run, ticket, and repo. First measured 2026-06-13 (acs v0.1.2, M2-0 spike, 5 runs): ~$2.43 total, ~385k in / ~72k out tokens, ~1770 working-seconds, all recoverable from the partition. |
-| G6 — Portability | Works on any git repo with `python3` + `gh`; zero pip installs; one `/acs:init` to onboard. First validated 2026-06-13 (acs v0.1.2, M2-0 spike): clean install + `/acs:init` in a throwaway repo, no Duplicate-hooks load failure. Each acs doc set (`prd`, `architecture`, `requirements`, `adr`, and future `standards`/`principles`/`quality`/`operations`) is independently relocatable to an external/absolute filesystem path via configuration; 100% of producer-skill runs preserve the per-backend reviewability + Git-audit guarantee (local/external-local = reviewable diff / repo PR; remote = backend-native review); 0 doc-set writes bypass the configured backend review path; measured per release. |
+| G6 — Portability | Works on any git repo with `python3` + `gh`; zero pip installs; one `/acs:init` to onboard. First validated 2026-06-13 (acs v0.1.2, M2-0 spike): clean install + `/acs:init` in a throwaway repo, no Duplicate-hooks load failure. Each acs doc set (`prd`, `architecture`, `requirements`, `adr`, and future `standards`/`principles`/`quality`/`operations`) is independently relocatable to an external/absolute filesystem path via configuration; 100% of producer-skill runs preserve the per-backend reviewability + Git-audit guarantee (local/external-local = reviewable diff / repo PR; remote = backend-native review); 0 doc-set writes bypass the configured backend review path; measured per release. The acs pipeline is **runtime-portable**: the same gated pipeline (gating, TDD, coverage hard-fail, 11-dimension review, audit) runs on **≥ 2 supported runtimes** (Claude Code today + OpenAI Codex CLI), with **0 gate escapes and 0 lost audit-trail artifacts** on a published end-to-end run on the second runtime, **validated within 1 release of the Codex CLI runtime capability shipping** (mirrors how G1/G2/G6 were first validated by the M2-0 spike). |
 | G7 — Observability | Dashboard renders all 6 panels (throughput, pipeline funnel, cost/time per step, coverage vs target, review iterations, token burn by role) in ≤ 5 s for ≤ 50 tickets; reads only workspace artifacts; requires no network calls and no new config beyond `.acs/settings.json`. In-session status lines, when wired, preserve 100% of Claude Code's default status-line fields and add acs state on top (zero default fields lost), render in < 100 ms per refresh, and never crash — any failure falls back to a valid line. |
 | G8 — Skill quality coverage | Structure, gating, and routing covered for 100% of skills (free, every PR); every critical-path skill has behavioral (artifact-level) eval coverage; no new skill ships without ≥ a trigger eval (CI guardrail). |
 | G9 — Enforceable conventions | The configured branch/PR/commit formats are enforceable as a required merge gate on the consumer repo, blocking non-exempt violating PRs even when they bypassed `/acs:create-pr` (escape hatch: the `acs-exempt` label / release-branch allowlist). MAR-9 (PR #50, pending merge) completes the consumer side of that escape hatch: a legitimate non-ticket exempt PR lands via the sanctioned `/acs:merge-pr --pr` path (same readiness + branch/worktree cleanup as the ticket path, no ticket/partition/tracker/archive; it refuses and redirects ticket-backed PRs), and `/acs:init` Step 7e writes an idempotent `CLAUDE.md` acs-managed block that makes the pipeline the *default* for in-repo agent sessions (steering changes through `/acs:ship` rather than ad-hoc PRs). The gate itself is existence-proven by the live required-check ruleset on this repo's own `main` (ruleset 17602044, `active`; "Branch / PR / commit conventions" is a required status-check context). |
@@ -82,6 +92,9 @@ that protected characteristics played no role.
 | G11 — Tracker-first delivery / graceful degradation | A repo with **no PRD/architecture** delivers a remote-tracker-defined ticket end-to-end through the **same gates** (TDD, coverage hard-fail, 11-dimension review, audit, merge readiness) with **zero gate escapes** and **zero "missing PRD" hard-blocks** — the absent upstream artifact makes only its own trace step N/A, never blocking the run. Target: **100% of tracker-first runs (PRD absent) complete without a missing-upstream hard-block AND with 0 gate escapes**, validated on **≥ 1 real PRD-less repo within 1 release of the capability shipping**; tracker-issue acceptance criteria are carried into the spec for **100%** of such runs. |
 | G12 — Org-level enforceable policy | An organization can define enforcement policy (required convention checks, security gates, standards/conventions floors) once and have it apply as a **non-overridable floor** across all its repos, with repos able to tighten but not loosen it, exemptions granted only at the org layer, and every effective rule traceable to the layer it came from. **Measurable success metric:** on a pilot org of **≥ 3 repos**, **100% of those repos enforce the org-mandated convention/security checks as required status checks with 0 repo-level self-exemptions of a mandated rule**, and a deliberately non-conforming PR in any pilot repo is **blocked from merge** — first validated within **1 release** of the org-policy capability shipping (mirrors how G1/G9 are validated by an observed live gate, e.g. ruleset 17602044, prd.md). |
 | G13 — Enforceable e2e integrity | When the optional e2e merge gate is enabled on a consumer repo, **0 PRs merge with a red e2e suite** (the required e2e status check is a fail-closed merge brake, symmetric to the G9 convention gate and the G3 coverage hard-fail), AND **100% of specs whose changeset touches a user-facing / cross-component surface declare e2e impact** (the spec's Test plan states e2e impact or an explicit "no e2e impact" reason — the code-verifier blocks any declared-impact spec lacking matching e2e test diffs; no zero-findings verdict without a green e2e run). The opt-in invariant holds: a repo with `settings.e2e` unset has no e2e suite and no e2e gate. Measured per release on the dogfood repo (gate-enabled repos). Traces the Tech-lead persona. |
+| G14 — Complexity-adaptive delivery efficiency | A trivial, human-supervised ticket is delivered for substantially less wall-clock time and token/cost than the full pipeline. **Metric:** median wall-clock time AND median token/cost for a trivial-tier ticket are each reduced **≥ 60%** vs the same ticket run through the full plan-execute-verify ladder, measured on the dogfood repo within **1 release** of the capability shipping. |
+| G15 — Fast-lane adoption | A meaningful share of tickets flow through the trivial/standard fast lanes rather than the full ladder. **Metric:** **≥ 50%** of delivered tickets use the trivial- or standard-tier fast lane (vs the full complex/unattended ladder), measured per release on the dogfood repo once the tiers ship. |
+| G16 — Rigor preserved where it matters (no regression) | Reducing process volume on simple work must not lower defect-catch. The verifier gates on every lane (autonomous-first); lighter lanes reduce only the verify-iteration ceiling, never whether the verifier or the TDD/coverage gate runs. **Metric:** **0 regression** in the code verifier's defect-catch rate — the TDD/coverage gate's hard-fail behavior is 100% in force on every lane, and full verify (the 11-dimension review) stays 100% on standard/complex lanes; measured by the existing eval harness (E1) showing no drop in verifier-caught findings per release vs the pre-feature baseline. |
 
 ### tabp feature — success metrics
 
@@ -131,6 +144,44 @@ feature sections here.
   persona). *(Must have — urgent; see roadmap E6.)* The mechanism (config key name,
   explicit opt-in vs auto-detect, design-step optionality) is **deferred to the
   tracker-first epic's design phase** — this PRD states the requirement (what).
+- **Complexity-adaptive delivery** — acs scales the amount of process/structure it
+  applies to a ticket based on the ticket's **complexity** AND the level of **human
+  supervision**, instead of running the full plan-execute-verify ladder on every
+  ticket. **Framing principle (autonomous-first):** acs is autonomous-first — the
+  in-loop quality gate on every lane is the **verifier subagent**, and the
+  human-in-the-loop checkpoint is the **PR review** before merge, not an inline
+  human-approval gate. What scales with complexity is the *amount of process*
+  (decomposition stages and verify iteration depth), **not whether the verifier
+  runs**: the verifier always runs, and the TDD/coverage gate always runs, in
+  every lane. (This generalizes Claude Code's own adaptivity — Plan mode for
+  complex, skipped for simple — but keeps an automated in-loop gate because acs
+  must stay correct on unattended `/acs:ship` runs where no human is watching.)
+  Routing is **two axes — size × stakes** — assembled into four lanes; lighter
+  lanes reduce process volume but never drop a gate. Four delivery lanes:
+  1. **TRIVIAL** (trivial size, not high stakes) — no standalone create-spec and
+     no separate planner subagent (spec authoring is folded into `/code`'s plan
+     phase); **light verify**: a single verifier pass that may iterate at most
+     **once** on blocking findings (`VERIFY_ITERATION_CAP["light"] = 1`). The
+     verifier still gates; there is no human-approval gate.
+  2. **SMALL** (small size, not high stakes) — same fast-lane fold and **light
+     verify** (1-iteration cap) as TRIVIAL.
+  3. **STANDARD** (standard size, or any ticket with `needs_design`) — full
+     create-spec path; **full verify** (the existing up-to-3-iteration
+     plan→execute→verify loop + 11-dimension review + e2e when configured).
+     Apply-work skills (create-pr, merge-pr, create-ticket) run **inline**
+     (coordinator + at most one executor), never a full triad, in every lane.
+  4. **COMPLEX / UNATTENDED** (large size, epic, or `/acs:ship` autonomous run) —
+     **full verify** exactly as today; the persisted artifacts are the audit
+     trail; preserves the rigor that is the product.
+
+  **High-stakes floor:** `stakes = high` resolves to at least STANDARD (full
+  verify) regardless of size — a defense-in-depth floor a small lane value can
+  never bypass. **Mid-flight escalation** raises a ticket to a higher lane (and
+  re-introduces any skipped stage) on the first higher-stakes signal, upward-only
+  and automatic; de-escalation is never automatic. The lane is set once,
+  user-confirmed, at create-ticket alongside `needs_design`; default is
+  full/standard rigor; lighter lanes are opt-in and rigor is never silently
+  dropped. Traces **G14, G15, G16**.
 
 **Should have** *(shipped in v0.1, maturing)*
 - Two-way tracker sync (GitHub Projects / Jira via `gh` / `acli`), remote import.
@@ -173,9 +224,28 @@ feature sections here.
   workflows vs a versioned policy pack the repo cannot edit; the non-overridable mandate
   encoding) is deferred to a future design epic / ADR, per Constraints.)*
 
+- **Multi-runtime support — OpenAI Codex CLI as an acs pipeline runtime** — the acs
+  gated pipeline (ordering/gating, TDD, coverage hard-fail, the 11-dimension review
+  loop, resumable workspace state, audit trail, merge readiness) becomes runnable on
+  **OpenAI Codex CLI** in addition to Claude Code, so a team standardized on Codex CLI
+  can adopt acs without switching agent runtimes. acs stays authored and distributed
+  as a Claude plugin; this adds a **second execution runtime for the pipeline**, not a
+  second product. The **MECHANISM** — how the Claude-Code-specific mechanisms map onto
+  Codex CLI (the PreToolUse/SessionEnd hook gating, the planner/executor/verifier
+  reflection-subagent protocol, skill/agent dispatch, per-role model/effort config,
+  self-reported cost/tokens) and which gates are enforced natively vs via a portable
+  shim — is **deferred to a dedicated future multi-runtime epic's design phase**,
+  mirroring how this PRD defers the Notion/remote-docs and org-policy mechanisms. The
+  deterministic layer is already stdlib-only Python (Portability NFR), which is the
+  portable substrate this builds on. Traces **extended G6** (runtime portability).
+  *(Proposed — the MECHANISM is deferred to the multi-runtime epic's design phase /
+  an ADR, per Constraints. Reverses the prior acs Won't-have — see Reversal note
+  (MAR-2) in Out of scope.)*
+
 **Won't have (now)** *(acs feature scope)*
-- Non-GitHub forges (GitLab/Bitbucket); non-Claude-Code runtimes for the acs pipeline.
+- Non-GitHub forges (GitLab/Bitbucket). *(The former "non-Claude-Code runtimes for the acs pipeline" Won't-have is **reversed by MAR-2** — OpenAI Codex CLI is now a supported pipeline runtime; see the acs Could-have **Multi-runtime support (OpenAI Codex CLI)** feature and the Reversal note (MAR-2) in Out of scope.)*
 - Non-Notion remote docs providers (Confluence, Google Docs, SharePoint) — Notion is the only named remote provider; general CMS / doc-graph re-architecture is out of scope; bidirectional Notion→repo editing is out of scope now (authoritative-remote means Notion is the system of record with no repo copy, not a two-way file sync).
+- Automatic downgrade of a ticket's complexity/supervision tier without explicit user confirmation — tiers are always user-confirmed; the system never silently reduces rigor.
 
 ### Feature: tabp (recruiting/talent toolkit for the TABP team)
 
@@ -245,7 +315,7 @@ These NFRs apply across all marketplace features. Each feature realizes them thr
 its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patterns).
 
 - **Determinism where possible**: ordering, gating, state writes, id allocation are scripts, never prose; gates fail closed.
-- **Portability**: hooks and helpers are stdlib-only Python ≥ 3.9; no network dependencies of their own. `/acs:init` Step 0b runs a toolchain preflight — it detects and offers to install the tools acs leans on (`git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli`) so onboarding fails up front with consent rather than mid-pipeline; the convention checker stays stdlib-only so no acs install is needed on the CI runner.
+- **Portability**: hooks and helpers are stdlib-only Python ≥ 3.9; no network dependencies of their own. `/acs:init` Step 0b runs a toolchain preflight — it detects and offers to install the tools acs leans on (`git`, `python3`, `gh`, `pre-commit`, `xmllint`, `acli`) so onboarding fails up front with consent rather than mid-pipeline; the convention checker stays stdlib-only so no acs install is needed on the CI runner. Runtime coupling is **isolated**: the deterministic layer (gating, state, id allocation, metrics, convention checks) stays runtime-agnostic stdlib-only Python so the acs pipeline can target a second agent runtime (e.g. OpenAI Codex CLI) without rewriting that core; runtime-specific glue (hook dispatch, subagent protocol) is the only part that varies per runtime (mechanism deferred to the multi-runtime epic).
 - **Auditability**: every state file human-readable (pretty JSON), append-only run history, archived not deleted.
 - **Safety**: no secrets in settings (CLIs own auth); locks prevent cross-session corruption; stale locks reported, never stolen.
 - **Cost transparency**: tokens/cost/time per run, rolled up per ticket and repo.
@@ -255,10 +325,32 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
   artifact makes only its own trace step N/A — never a hard block**. The pipeline's
   gates (ordering, TDD, coverage, review, audit, merge readiness) **fail closed
   regardless** of how many upstream docs exist.
+- **Verifier-as-gate with lane-driven depth (autonomous-first)**: the verifier
+  subagent is the **in-loop quality gate on every lane** — it always runs; the
+  human-in-the-loop checkpoint is the PR review, not an inline approval. What
+  scales with the lane is **verify depth**, not whether the verifier runs:
+  `verify_depth(size, stakes)` returns `light` (a single verifier pass, iteration
+  cap 1) for TRIVIAL/SMALL low/normal-stakes tickets and `full` (the up-to-3
+  iteration loop + 11-dimension review + e2e when configured) for
+  STANDARD/COMPLEX and **all** high-stakes tickets. The code TDD/coverage gate
+  **always** runs in full in every lane and is never trimmed by depth selection.
+  Gates fail closed — the gate is never the thing dropped; the lighter lane only
+  reduces *iteration ceiling and decomposition stages*. (Composes with "Graceful
+  degradation of the conformance chain" above: lane-driven depth scales
+  *process volume*, the chain's gates still fail closed.)
+- **Deterministic apply-tier executors**: apply-tier skills (create-ticket, create-pr,
+  merge-pr) have deterministic executors with judgment front-loaded into
+  clarification/gates; they do **not** need an iterating plan-execute-verify reflection
+  loop. create-ticket's structural checks (schema-completeness, link bidirectionality)
+  are a **script check, not an LLM verifier**.
+- **Message-validation / per-send performance**: in-process / batched XML message
+  validation instead of a `validate_xml.py` subprocess on every send AND receive (a
+  simple ticket currently fires ~24–30 subprocess spawns); batch `clarify.py`
+  record-before-act calls.
 
 ## Constraints & assumptions
 
-- **acs feature:** Claude Code plugin API (skills/agents/hooks as documented) is the runtime for the acs pipeline. Different features may target different Claude runtimes — acs targets Claude Code; tabp targets both Claude Cowork and Claude Code.
+- **acs feature (runtime, revised MAR-2):** Claude Code is the **primary / today-shipping** runtime for the acs pipeline (Claude Code plugin API — skills/agents/hooks as documented). acs is **no longer Claude-Code-only**: **OpenAI Codex CLI is a supported pipeline runtime** (Could-have; see Features), so the pipeline targets **≥ 1 of an open set of agent runtimes** rather than Claude Code exclusively. The deterministic layer stays runtime-agnostic stdlib-only Python (Portability NFR); the runtime-specific MECHANISM (hook gating, reflection-subagent protocol, skill/agent dispatch on Codex CLI) is **deferred to the multi-runtime epic's design phase**. Different features may still target different runtimes — tabp targets both Claude Cowork and Claude Code.
 - Delivery is git + GitHub PRs (`gh` assumed); correctness must be checkable by automated tests for the strong-fit domains (see `docs/requirements/overview.md`).
 - Subagents cannot interact with the user — all user interaction happens in coordinators (drives the `needs_input` handoff design).
 - **acs feature — brownfield standardization is additive-only (C-2).** `/acs:standardize-project` operates on an existing repo by ADDITION only: it adds principles/standards docs, config, and missing readiness tooling (coverage/CI/pre-commit/e2e — including scaffolding a repo-side e2e CI workflow/runner and opt-in wiring of a required e2e merge-gate status check), and it MUST NOT move, rename, delete, or rewrite existing source files. **The e2e layer stays OPT-IN: a repo with `settings.e2e` unset has no e2e suite and no e2e merge gate; the gate is configured only on explicit opt-in.** Structural gaps versus the architecture project-structure target are surfaced as recommended follow-up tickets for the user to decide on — never executed as an automatic restructure. This guardrail is deliberate: a wholesale-restructure mandate is explicitly out of scope (it is the over-engineering this product reset once before — see Out of scope). The greenfield/brownfield split is fixed: `/acs:create-project` is greenfield-only and refuses on any repo with substantive sources; brownfield onboarding is `/acs:standardize-project`'s job (C-1).
@@ -280,6 +372,7 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
   auto-PRD-generation would repeat the abandoned MAR-16..24 over-engineering (see Out
   of scope).
 - **acs feature — org enforcement uses an org-controlled, non-overridable source; layers are additive (C-6).** Org-level *defaults* extend today's most-specific-wins cascade (a new org source resolved below user, fully overridable). Org-level *mandates* are the opposite: because a CI gate sees only the checked-out repo (the convention checker reads the committed project `.acs/settings.json`, not a developer home dir) and the cascade is most-specific-wins (a repo layer would silently override an org layer), an enforceable org mandate MUST come from an org-controlled source the repo cannot edit and/or use inverted **floor** precedence (repo may tighten, never loosen), with exemptions granted only at the org layer (a repo cannot self-exempt from a mandate) and every effective rule carrying provenance (which layer it came from). Introducing org/department layers is **additive and non-breaking**: with no org source configured, resolution is identical to today's user + team(project) behavior. The MECHANISM (cascade extension vs GitHub org rulesets / org-required workflows vs a versioned policy pack) is deferred to a future design epic / ADR (this PRD states the WHAT).
+- **acs feature — complexity tier is a confirmed flag set once at create-ticket; default is full rigor; lighter tiers are opt-in (C-7).** The complexity/supervision tier is set **once, user-confirmed, at create-ticket**, alongside the existing `needs_design` flag and following that exact precedent (a confirmed flag gating downstream skills). The **default stays full/standard rigor**; trivial/small fast lanes are **opt-in**, so rigor is **never silently dropped**. The code TDD/coverage gate and the in-loop verifier gate both run in every lane (autonomous-first); what the lighter lanes make conditional is the **verify depth** (light = single pass, iteration cap 1) and the heavyweight decomposition stages (standalone create-spec / separate planner), never whether a gate runs. (Mirrors how `needs_design` is a confirmed flag gating the design step.) Cross-reference: the Out of scope section records that automatic downgrade of a ticket's complexity/supervision tier without explicit user confirmation is out of scope. *(Assumption: this constraint follows the `needs_design` confirmed-flag precedent — verified in `ticket.json` (`"needs_design": false` field present), confirming the precedent exists and no new pattern is invented.)*
 
 ## Out of scope
 
@@ -339,6 +432,19 @@ approved review (m6). `/acs:ship` still deliberately stops at create-pr (review 
 a merge prohibition). This is a product-level Vision change only; the detailed `/acs:merge-pr`
 behavior lives in `docs/requirements/skills.md` and the skill prose and is delivered by MAR-42.
 
+**Reversal note (MAR-2):** this amendment reverses the prior "non-Claude-Code runtimes
+for the acs pipeline" product decision previously stated as an acs Won't-have. Per
+MAR-2 (user-approved, C-1), **OpenAI Codex CLI is now a supported acs pipeline
+runtime**. acs remains authored and distributed as a Claude plugin and the **one GMS
+Marketplace product** — this adds a **second execution runtime for the pipeline**, not
+a second product and not a per-runtime fork of the pipeline. Claude Code stays the
+primary/today-shipping runtime; Codex CLI is a Could-have whose **MECHANISM** (mapping
+the PreToolUse/SessionEnd hook gating, the planner/executor/verifier reflection-subagent
+protocol, and skill/agent dispatch onto Codex CLI) is **deferred to a dedicated future
+multi-runtime epic's design phase / an ADR** — exactly as this PRD defers tabp's and
+the Notion/remote-docs mechanisms. The GitLab/Bitbucket non-GitHub-forge Won't-have is
+**unaffected** — only the runtime clause is reversed.
+
 Non-GitHub org-policy backends are out of scope — org enforcement targets the GitHub
 org-controlled surface first (org rulesets / org-required workflows); other forges remain
 Won't-have, consistent with the acs Won't-have above. Automatic org-wide migration or bulk
@@ -346,3 +452,6 @@ retrofitting of existing repos to an org policy is out of scope — applying org
 repo is an opt-in/rollout action surfaced per repo, never an automatic mass rewrite (same
 additive, no-wholesale-restructure discipline as C-2 above and the MAR-16..24 reset note
 above). A general non-GitHub policy distribution system is out of scope.
+
+Automatic downgrade of a ticket's complexity/supervision tier without explicit user
+confirmation — tiers are always user-confirmed; the system never silently reduces rigor.

@@ -261,6 +261,29 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
   Could-have feature. The MECHANISM is settled in this epic's **design phase / an ADR**,
   consistent with how the tabp-upgrade and standards epics defer mechanism. Traces **G12**
   (+ the Org/Platform-admin persona).
+- **Epic: complexity-adaptive delivery** — acs scales process to ticket complexity ×
+  human supervision (three tiers: trivial / standard / complex-unattended). Maps to PRD
+  **G14, G15, G16** and the acs Must-have **Complexity-adaptive delivery** feature
+  ([`prd.md`](prd.md#features-moscow)). Parallel to the other M3 epics above; independent
+  of the doc-set and standards work (touches pipeline process-volume, not the doc-set
+  surface). Child workstreams (sequenced):
+  1. **Trivial/small fast-lane** — fold create-spec (and the separate planner) into
+     `/code`'s plan phase for TRIVIAL/SMALL lanes; the verifier still gates (light
+     verify) and the TDD/coverage gate still runs — no human-approval gate
+     replaces them (autonomous-first).
+  2. **Verifier-as-gate + lane-driven verify depth** — the verifier subagent is the
+     in-loop quality gate on every lane (it always runs); `verify_depth(size,
+     stakes)` scales the iteration ceiling (`light` = 1, `full` = 3), with a
+     high-stakes floor to `full`. The code TDD/coverage gate always stays
+     regardless of lane.
+  3. **Apply-tier inlining** — sequence **merge-pr first** (its existing exempt-PR mode,
+     E5.5 / MAR-9, already runs the inline coordinator+executor shape as a working
+     template), then **create-pr**, then **create-ticket**.
+  4. **In-process / batched XML validation + clarify batching** — replace per-send/receive
+     `validate_xml.py` subprocess spawns with in-process/batched validation; batch
+     `clarify.py` record-before-act calls.
+  5. **create-ticket complexity-tier flag** — set the user-confirmed tier at ticket
+     creation, alongside `needs_design` (C-7 precedent).
 - Semver stability promise for state-file schemas (migration notes per minor).
 
 ## tabp plugin track
@@ -361,6 +384,34 @@ are Won't-have now; they may be considered as future extensions after this epic 
 **Implementation note:** this is a future epic pending design — this milestone entry
 defines what to deliver and its scope boundary; the design and implementation tickets
 carry the build work.
+
+### acs M-future — Multi-runtime support (OpenAI Codex CLI) *(future — pending multi-runtime epic)*
+
+Maps to PRD extended G6 (runtime portability) and the acs Could-have **Multi-runtime
+support — OpenAI Codex CLI** feature ([`prd.md`](prd.md#features-moscow)). Reverses the
+prior acs "non-Claude-Code runtimes" Won't-have (Reversal note MAR-2).
+
+Make the acs gated pipeline runnable on **OpenAI Codex CLI** in addition to Claude Code:
+
+- **Runtime abstraction.** Identify which pipeline mechanisms are Claude-Code-specific
+  (PreToolUse/SessionEnd hook gating, the planner/executor/verifier reflection-subagent
+  protocol, skill/agent dispatch, per-role model/effort config, self-reported
+  cost/tokens) vs runtime-agnostic (the stdlib-only deterministic layer: gating, state,
+  ids, metrics, convention checks).
+- **Codex CLI runtime adapter.** Map each Claude-Code-specific mechanism onto Codex
+  CLI's equivalents (or a portable shim), preserving the **same gates** — 0 gate
+  escapes, full audit trail — on the second runtime.
+- **Validation (extended G6).** Publish an end-to-end run of the acs pipeline on Codex
+  CLI with 0 gate escapes and 0 lost audit-trail artifacts, within 1 release of the
+  capability shipping (the G6 runtime-portability metric).
+
+**Deferral:** the MECHANISM (the hook-gating / subagent-protocol / dispatch mapping and
+which gates are native vs shimmed on Codex CLI) is deferred to this epic's dedicated
+design phase / an ADR; this epic requires its own `/acs:create-design` run before
+implementation. Mirrors the Notion/remote-docs and tabp-upgrade deferrals.
+
+**Implementation note:** this is a future epic pending design — this entry defines what
+to deliver and its scope boundary; the design and implementation tickets carry the build.
 
 ## Later / icebox
 

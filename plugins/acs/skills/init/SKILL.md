@@ -159,6 +159,9 @@ gets its own prefix; the sequence counter lives in the workspace.
 
 Present these as a batch (AskUserQuestion or a compact list) with their
 defaults; accept the defaults silently if the user says "defaults are fine".
+The one exception is **`### models`** below: on a fresh init, present the
+model-selection choice explicitly (it is a first-class setup decision, not a
+silently-defaulted key) — see that subsection.
 
 - `test_coverage_percent` — default `90`. Validate: a number in `(0, 100]`;
   reject and re-ask otherwise. Hard-fail target for the `/acs:code` TDD cycle.
@@ -235,17 +238,35 @@ description, commit messages) — offered in Step 7c. If the user asks during
 init to "enforce conventions" or "stop the pipeline being bypassed", that is
 Step 7c.
 
-### models — optional, default inherit
+### models — choose per-role models
 
-Ask only if the user wants per-role model control. Shape per role
-(`planner`, `executor`, `verifier`, `coordinator`): a model string (e.g.
-`"sonnet"`) or `{"model": "...", "effort": "low|medium|high|xhigh|max|inherit"}`,
-plus per-skill `models.overrides.<skill>.<role>`. Resolution is per field:
-override -> role -> inherit. If the user sets `models.coordinator`, tell them
-it governs the `/acs:ship` coordinator's own session — under `/acs:ship` each
-step skill is invoked directly in that session, so there is no separate
-per-step agent for the key to apply to; a directly invoked skill runs in the
-user's session on the session's model.
+**On a fresh init, ALWAYS ask this** (not only on request) — model choice is a
+first-class setup decision. Present the choice with AskUserQuestion, offering:
+
+1. **Recommended (default)** — `planner: opus`, `executor: sonnet`,
+   `verifier: opus`, `coordinator: opus`: strong reasoning for planning/review,
+   a faster/cheaper model for the mechanical execution role. Pick this and move
+   on if unsure.
+2. **Inherit the session model** — set nothing; every role runs on whatever
+   model the user's Claude Code session is using (cheapest to reason about, no
+   per-role split).
+3. **Custom** — let the user set any of the four roles individually.
+
+On a **re-run**, show the currently-resolved per-role models (and where each
+came from) and ask only whether to change them — do not force a re-pick.
+
+Shape per role (`planner`, `executor`, `verifier`, `coordinator`): a model
+string (e.g. `"sonnet"`) or
+`{"model": "...", "effort": "low|medium|high|xhigh|max|inherit"}`, plus
+per-skill `models.overrides.<skill>.<role>`. Any non-empty model string is
+accepted (so newer model names work without a skill update); resolution is per
+field: override -> role -> inherit. Write the `models` object only when the user
+picks Recommended or Custom; for Inherit, omit it entirely (inherit is the
+schema default). If the user sets `models.coordinator`, tell them it governs the
+`/acs:ship` coordinator's own session — under `/acs:ship` each step skill is
+invoked directly in that session, so there is no separate per-step agent for the
+key to apply to; a directly invoked skill runs in the user's session on the
+session's model.
 
 ## Step 5 — Write the files
 

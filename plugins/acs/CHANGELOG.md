@@ -17,6 +17,41 @@ the notes.
 
 ### Changed
 
+- **In-process stdlib XML validation is now the default fast path (MAR-61).**
+  `validate_xml.py` now validates every message via the in-process
+  `validate_structurally()` engine (pure stdlib, zero subprocess) instead of
+  spawning `xmllint` per message.  `xmllint` is retained as an opt-in
+  authoritative check via `ACS_XML_AUTHORITATIVE=1` (PATH-guarded; absent
+  xmllint never blocks a verdict).  The in-process engine matches xmllint for
+  the following covered violation classes: bad root element, missing/invalid
+  attribute, bad ticket-id pattern, out-of-order children, wrong list-item tag,
+  bad status/severity enum, duplicate maxOccurs=1 sequence children
+  (cardinality), xs:decimal grammar for cost-usd (no exponent, no inf/nan, no
+  underscores), and the closed content model — undeclared attributes (the XSD
+  has no anyAttribute/wildcard) and element children inside text-only
+  (xs:string) leaves are both rejected, matching xmllint.  A parity corpus
+  (`TestValidators` in `tests/acs/test_acs_plugin.py`) asserts identical
+  pass/fail verdicts for each of these classes across both paths.
+
+- **`validate_batch()` / `batch_overall_ok()` — new Python-callable batch
+  validation API (MAR-61 AC-4).** `validate_batch(messages)` accepts a list
+  of XML message strings and returns a per-message `(ok, errors)` tuple list
+  in a single call with zero subprocess spawns; `batch_overall_ok(results)`
+  returns `False` when any member is invalid.  The batch API calls the
+  in-process `validate_structurally()` engine and is importable directly from
+  `validate_xml.py`; `main()` and the CLI are unchanged (AC-6 back-compat).
+
+- **Clarify-batching coordinator contract (MAR-61 AC-7).** All 9 hooked
+  coordinator skill bodies and `docs/requirements/skills.md` now document the
+  grouped-ask rule: when ≥2 clarifications are open, the coordinator presents
+  all of them in ONE grouped interaction instead of serial round-trips.  Each
+  answer is recorded as its own `clarify.py add` entry (one `C-<n>` per
+  question, `--source` preserved); no question may be skipped, merged, or
+  auto-answered outside the existing `--source assumption --rationale "..."`
+  rule.  A `TestClarifyBatchingContract` suite in `test_skill_contracts.py`
+  asserts grouped-ask presence, per-question ledger-entry documentation, and
+  zero-auto-answer documentation across all 9 skills.
+
 - **`/acs:merge-pr` is now agent/model-invocable (MAR-42).** Removed
   `disable-model-invocation` from the skill; the readiness gate (CI, approvals,
   conflicts, protections) and the repo's branch protection are the merge brakes,

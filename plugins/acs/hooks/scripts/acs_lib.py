@@ -139,6 +139,124 @@ Used by the /acs:code coordinator to bound the reflection loop:
 """
 
 
+# ---------------------------------------------------------------------------
+# Lane-rank primitives (MAR-57 / ADR 0030)
+# ---------------------------------------------------------------------------
+
+LANE_ORDER: list = ["TRIVIAL", "SMALL", "STANDARD", "COMPLEX"]
+"""Canonical lane ordering from lowest to highest rigor (ADR 0030).
+
+Index 0 = TRIVIAL (lowest) … index 3 = COMPLEX (highest).
+Used by lane_rank() for comparisons only; never use this list to produce
+a lane value — derive_lane() is the single authoritative producer (ADR 0030:56-61).
+"""
+
+
+def lane_rank(lane):
+    """Return the integer rank of *lane* in LANE_ORDER (0=TRIVIAL … 3=COMPLEX).
+
+    Rule evaluation order:
+      - Recognized uppercase lane value ('TRIVIAL', 'SMALL', 'STANDARD', 'COMPLEX')
+        -> its index in LANE_ORDER.
+      - Absent (None), empty, or any unrecognized string (including lowercase)
+        -> 2 (STANDARD rank, conservative floor — design.md invariant (c) / AC-7).
+
+    This function is a *comparison helper* only: it never produces a lane value.
+    The single authoritative producer remains derive_lane() (ADR 0030:56-61).
+    Pure function; no I/O, no side effects; stdlib only.
+    """
+    try:
+        return LANE_ORDER.index(lane)
+    except (ValueError, TypeError):
+        return LANE_ORDER.index("STANDARD")  # conservative floor for absent/unknown
+
+
+def escalate_lane(current_lane, size, stakes, needs_design, ticket_type, settings=None):
+    """Return the higher of (current_lane, candidate) as a (lane, depth, ceiling) triple.
+
+    The candidate lane is computed exclusively via derive_lane(size, stakes,
+    needs_design, ticket_type) — never hand-set (ADR 0030:56-61 / AC-4).
+
+    Clamp semantics (upward-only, AC-1 / AC-3 / AC-7):
+      - candidate rank > current rank -> escalate: return candidate lane.
+      - candidate rank <= current rank -> hold: return current_lane unchanged.
+      - current_lane is None/unknown -> treated as STANDARD rank (2) for comparison,
+        conservative floor: a COMPLEX candidate still fires; TRIVIAL/SMALL do not.
+
+    The returned triple is always consistent:
+      lane    — the higher of current_lane or candidate (string)
+      depth   — verify_depth(lane, stakes)
+      ceiling — VERIFY_ITERATION_CAP[depth]
+
+    Pure function: no file I/O, no state mutations, no side effects.
+    Mirrors recommend_stakes() (acs_lib.py: "Pure function — never writes
+    stakes to ticket.json or any state file").
+    """
+    candidate_lane = derive_lane(size, stakes, needs_design, ticket_type)
+    if lane_rank(candidate_lane) > lane_rank(current_lane):
+        result_lane = candidate_lane
+    else:
+        # Hold at current; for None/unknown current_lane fall back to the STANDARD
+        # floor (the conservative default, not the candidate — AC-7 invariant (c)).
+        result_lane = current_lane if current_lane in LANE_ORDER else "STANDARD"
+    depth = verify_depth(result_lane, stakes)
+    ceiling = VERIFY_ITERATION_CAP[depth]
+    return result_lane, depth, ceiling
+
+
+# Axis ordering for guard_axes (MAR-57 Spec 03 / design.md:29 invariant (e)).
+_SIZE_ORDER: list = ["trivial", "small", "standard", "large"]
+_STAKES_ORDER: list = ["low", "normal", "high"]
+
+
+def guard_axes(current_size, current_stakes, proposed_size, proposed_stakes):
+    """Return (effective_size, effective_stakes) taking the higher of each axis.
+
+    Axis orderings (from lowest to highest rigor):
+      size:   trivial < small < standard < large
+      stakes: low < normal < high
+
+    Rules (axis-level realization of design.md:29 invariant (e)):
+      - None current  -> treated as the lowest known rank; any explicit proposed wins.
+      - None proposed -> effective = current (absent signal leaves current unchanged).
+      - Unrecognized string -> treated as the lowest known rank for that axis
+        (conservative: never block an upward proposal due to an unknown value).
+      - effective rank >= current rank for both axes (upward-only, never lower).
+
+    This function is the axis-guard step in the in-loop escalation sequence:
+    it must be called BEFORE escalate_lane so the axis values passed in are
+    already monotone-clamped.  No automatic/unattended code path may write a
+    size or stakes value that is strictly lower than the current confirmed value
+    without first passing through guard_axes.
+
+    Pure function: no I/O, no side effects; stdlib only.
+    """
+    def _rank(value, order):
+        try:
+            return order.index(value)
+        except (ValueError, TypeError):
+            return -1  # None / unrecognized -> below the lowest recognized value
+
+    def _pick_higher(current, proposed, order):
+        if proposed is None:
+            # No new signal: leave current unchanged (or fall back to lowest if
+            # current is also unknown, since there is nothing to preserve).
+            return current if current is not None else order[0]
+        c_rank = _rank(current, order)
+        p_rank = _rank(proposed, order)
+        if p_rank > c_rank:
+            return proposed
+        # current rank >= proposed rank (or current is None/-1): return whichever
+        # is a recognized value; prefer current when both are known.
+        if current is None or c_rank < 0:
+            # current unknown: proposed is known and >= current rank (both -1), take it
+            return proposed
+        return current
+
+    eff_size = _pick_higher(current_size, proposed_size, _SIZE_ORDER)
+    eff_stakes = _pick_higher(current_stakes, proposed_stakes, _STAKES_ORDER)
+    return eff_size, eff_stakes
+
 
 def recommend_stakes(paths, settings):
     """Match a collection of file paths against high_stakes_paths globs from settings.

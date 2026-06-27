@@ -182,6 +182,13 @@ findings recorded in the result document.
 **Clarification ledger first.** Before asking the user anything, run
 `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/clarify.py" list --ticket <ticket-id>`
 and reuse any recorded answer — re-asking an answered question is a defect.
+When ≥2 clarifications are open, present them to the user in ONE grouped
+interaction (e.g. a single AskUserQuestion containing all open questions as a
+numbered list), not serial round-trips — one interaction per question wastes
+user time. Record each answer as its own `clarify.py add` entry (one `C-<n>`
+per question, `--source` preserved). Never skip a question, merge two questions
+into one entry, or auto-answer a question outside the existing
+`--source assumption --rationale "..."` rule.
 Record every Q&A — obtained interactively or relayed in a /ship brief — with
 `clarify.py add --skill create-spec --question "..." --answer "..." --ticket <ticket-id>`
 BEFORE acting on it, and pass the relevant `C-n` entries to subagents in
@@ -213,6 +220,48 @@ final message a handoff like:
 ```
 
 Validate it with validate_xml.py like every other message.
+
+## Escalation pickup (mid-`/code` invocation for fast-lane escalation)
+
+**When invoked mid-`/code` after a lane escalation:** When the `/code`
+coordinator detects that a ticket has escalated from a fast lane (TRIVIAL or
+SMALL — where `create-spec` is normally folded into `/code`'s plan phase per
+ADR 0030 / MAR-59) into a full lane (STANDARD or COMPLEX), it pauses
+implementation and invokes `create-spec` for the escalated ticket. This
+invocation follows the full `create-spec/SKILL.md` protocol (plan → execute →
+verify, at most 3 iterations) and produces the spec artifacts (`<partition>/specs/NN-<slug>.md`)
+that the fast lane skipped.
+
+**What changes on escalation pickup:**
+
+1. The `create-spec` coordinator reads the ticket's **existing (partial)
+   implementation state** from the partition. Any committed/green implementation
+   work that was completed under the fast lane before escalation is treated as
+   **ground truth**: it must be reflected in the spec artifacts as already
+   implemented, not re-specified as unimplemented. Specs must faithfully describe
+   what remains to be done, not replay what is already green.
+2. The full `create-spec` rigor is invoked — all five required spec sections
+   (`## Scope`, `## Approach`, `## API/data changes`, `## Test plan`,
+   `## Out of scope`) must be produced and verified. The rigor is **not skipped**
+   because the ticket arrived via a prior fast-lane stage.
+3. The higher verify ceiling adopted on escalation applies: the ticket now has a
+   `"full"` verify depth (ceiling = 3 iterations) regardless of its origin lane.
+   The `create-spec` verifier applies the full dimension set.
+4. Once `create-spec` has produced its spec set and the verifier has passed at
+   zero findings, `/code` resumes implementation from the current point —
+   **no restart**, completed work preserved (AC-1).
+
+**Fast-lane fold for non-escalating tickets is unchanged:** For TRIVIAL and
+SMALL tickets that do NOT escalate, the `create-spec` stage remains folded into
+`/code`'s plan phase per ADR 0030 / MAR-59. The escalation pickup is a new
+branch triggered **only** when the `/code` coordinator confirms a fold-boundary
+crossing (origin lane was fast, new lane is full). Non-escalating fast-lane
+tickets are unaffected; the fold behavior is intact and unmodified for them.
+
+**This section does not introduce an automatic de-escalation or downgrade path.**
+The escalation pickup is strictly additive: it adds rigor, never reduces it. The
+lane and axes can only be raised at the pickup point, consistent with the
+upward-only escalation contract (design.md:29 invariant (e)).
 
 ## Oversized ticket escalation (PR-size guardrail)
 
