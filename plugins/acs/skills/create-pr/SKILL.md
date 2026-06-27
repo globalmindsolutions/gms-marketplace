@@ -228,6 +228,13 @@ with final status `"failed"`, findings recorded in the result document.
 **Clarification ledger first.** Before asking the user anything, run
 `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/clarify.py" list --ticket <ticket-id>`
 and reuse any recorded answer — re-asking an answered question is a defect.
+When ≥2 clarifications are open, present them to the user in ONE grouped
+interaction (e.g. a single AskUserQuestion containing all open questions as a
+numbered list), not serial round-trips — one interaction per question wastes
+user time. Record each answer as its own `clarify.py add` entry (one `C-<n>`
+per question, `--source` preserved). Never skip a question, merge two questions
+into one entry, or auto-answer a question outside the existing
+`--source assumption --rationale "..."` rule.
 Record every Q&A — obtained interactively or relayed in a /ship brief — with
 `clarify.py add --skill create-pr --question "..." --answer "..." --ticket <ticket-id>`
 BEFORE acting on it, and pass the relevant `C-n` entries to subagents in

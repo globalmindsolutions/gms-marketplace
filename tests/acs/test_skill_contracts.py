@@ -363,5 +363,69 @@ class TestMergePrBehindAutoUpdate(unittest.TestCase):
             "of its heading (MAR-47 C-10)")
 
 
+class TestClarifyBatchingContract(unittest.TestCase):
+    """MAR-61 (spec 03): pin the grouped-ask clarify-batching contract across
+    all 9 hooked coordinator skill bodies and the cross-cutting requirements.
+    Additive existence/co-occurrence assertions only — they enforce AC-7
+    so a future edit that drops the grouped-ask prose fails CI."""
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def test_grouped_ask_present_in_all_hooked_skills(self):
+        for name in HOOKED_SKILLS:
+            body = read(self.skill_path(name))
+            # Co-occurrence: "ONE grouped" near "interaction" (may span a line
+            # break). re.DOTALL so "." crosses newlines — same discipline as
+            # the MAR-47 co-occurrence tests (test_skill_contracts.py:289-292).
+            self.assertIsNotNone(
+                re.search(
+                    r"(?i)(ONE grouped[\s\S]{0,50}interaction"
+                    r"|grouped[\s\S]{0,50}interaction"
+                    r"|single[\s\S]{0,80}interaction[\s\S]{0,80}question)",
+                    body),
+                "%s: SKILL.md must document presenting >=2 open clarifications in "
+                "ONE grouped interaction (MAR-61 AC-7)" % name)
+
+    def test_per_question_ledger_entry_documented_in_all_hooked_skills(self):
+        for name in HOOKED_SKILLS:
+            body = read(self.skill_path(name))
+            # Co-occurrence: "each answer" near "clarify.py" or "per question"
+            # near "clarify.py", or "one C-<n>" phrasing.
+            self.assertIsNotNone(
+                re.search(
+                    r"(?i)(each answer.*clarify\.py|per question.*clarify\.py"
+                    r"|clarify\.py.*per question|one `C-"
+                    r"|each.*own.*clarify\.py|clarify\.py add.*per question"
+                    r"|Record each answer)",
+                    body, re.DOTALL),
+                "%s: SKILL.md must document recording each answer as its own "
+                "clarify.py ledger entry (MAR-61 AC-7)" % name)
+
+    def test_no_auto_answer_documented_in_all_hooked_skills(self):
+        for name in HOOKED_SKILLS:
+            body = read(self.skill_path(name))
+            # The prose must mention that questions are not skipped/merged/
+            # auto-answered outside the assumption rule.
+            self.assertIsNotNone(
+                re.search(
+                    r"(?i)(never skip|never.*merge|never.*auto.?answer"
+                    r"|not.*skip.*question|outside.*assumption)",
+                    body),
+                "%s: SKILL.md must document not skipping/merging/auto-answering "
+                "questions outside the assumption rule (MAR-61 AC-7)" % name)
+
+    def test_skills_requirements_doc_carries_grouped_ask_rule(self):
+        path = os.path.join(REPO_ROOT, "docs", "requirements", "skills.md")
+        body = read(path)
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)(grouped interaction|ONE grouped|one.*interaction.*question"
+                r"|grouped.*clarif)",
+                body),
+            "docs/requirements/skills.md must document the grouped-ask rule "
+            "(MAR-61 AC-7)")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ git repo + workspace, asserting on exit codes and the JSON state files
 Run:  python3 -m unittest discover -s tests -v
 """
 
+import io
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPTS = os.path.join(REPO_ROOT, "plugins", "acs", "hooks", "scripts")
@@ -306,6 +308,735 @@ class TestValidators(AcsWorkspaceCase):
         good = ('<handoff skill="create-spec" ticket-id="SHOP-1" status="needs_input">'
                 '<summary>s</summary><questions><question>q</question></questions></handoff>')
         self.assertEqual(self.run_script("validate_xml.py", "-", stdin=good).returncode, 0)
+
+    # -----------------------------------------------------------------------
+    # AC-2 Parity corpus (T1, keystone) — written FIRST per TDD discipline.
+    # Every XSD violation class is represented; assertions are unconditional
+    # (no xmllint on PATH required).  The xmllint parity leg is conditional.
+    # -----------------------------------------------------------------------
+
+    # Corpus fixture strings — valid messages (one per root element)
+    VALID_TASK = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<objective>Implement feature X</objective>'
+        '<inputs><file>/src/foo.py</file></inputs>'
+        '<constraints><constraint name="c1">no breaking changes</constraint></constraints>'
+        '<context>background info</context>'
+        '</task>'
+    )
+    VALID_RESULT = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<outputs><file>/src/foo.py</file></outputs>'
+        '<findings><finding severity="info">all clear</finding></findings>'
+        '<metrics tokens-input="1000" tokens-output="200" cost-usd="0.05"/>'
+        '<stop-reason>done</stop-reason>'
+        '</result>'
+    )
+    VALID_HANDOFF = (
+        '<handoff skill="create-spec" ticket-id="SHOP-1" status="needs_input">'
+        '<summary>Summarised progress</summary>'
+        '<questions><question>What priority?</question></questions>'
+        '<next-step>resume after user answers</next-step>'
+        '</handoff>'
+    )
+
+    # Corpus fixture strings — malformed messages (one per XSD violation class)
+    # (i) bad root element — root not in {task, result, handoff}
+    MALFORMED_BAD_ROOT = '<foo skill="code" phase="execute" ticket-id="SHOP-1"/>'
+
+    # (ii) missing required attribute — missing 'skill'
+    MALFORMED_MISSING_SKILL = (
+        '<task phase="execute" ticket-id="SHOP-1">'
+        '<objective>obj</objective>'
+        '</task>'
+    )
+
+    # (ii) invalid attribute value — skill not in enum
+    MALFORMED_INVALID_SKILL = (
+        '<task skill="nope" phase="execute" ticket-id="SHOP-1">'
+        '<objective>obj</objective>'
+        '</task>'
+    )
+
+    # (ii) bad ticket-id pattern — must match [A-Z][A-Z0-9]*-[0-9]+
+    MALFORMED_BAD_TICKET_ID = (
+        '<task skill="code" phase="execute" ticket-id="123">'
+        '<objective>obj</objective>'
+        '</task>'
+    )
+
+    # (iii) out-of-order children — constraints before objective in task
+    MALFORMED_OUT_OF_ORDER = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<constraints><constraint name="c1">x</constraint></constraints>'
+        '<objective>obj</objective>'
+        '</task>'
+    )
+
+    # (iv) wrong list item — <bar/> inside <inputs> instead of <file>
+    MALFORMED_WRONG_LIST_ITEM = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<objective>obj</objective>'
+        '<inputs><bar/></inputs>'
+        '</task>'
+    )
+
+    # (v) bad enum — status not in {completed, failed, needs_input}
+    MALFORMED_BAD_STATUS_ENUM = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="bad_status"/>'
+    )
+
+    # (v) bad enum — severity not in {blocking, info}
+    MALFORMED_BAD_SEVERITY_ENUM = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<findings><finding severity="critical">something bad</finding></findings>'
+        '</result>'
+    )
+
+    # (vi) CARDINALITY: duplicate maxOccurs=1 sequence children
+    # xs:sequence in acs-messages.xsd has maxOccurs=1 (default) for every element;
+    # duplicate children must be rejected (XSD rejects them via xs:sequence constraint).
+
+    # duplicate <objective> in <task> (required, maxOccurs=1)
+    MALFORMED_DUP_OBJECTIVE = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<objective>first</objective>'
+        '<objective>second</objective>'
+        '</task>'
+    )
+
+    # duplicate <summary> in <handoff> (required, maxOccurs=1)
+    MALFORMED_DUP_SUMMARY = (
+        '<handoff skill="create-spec" ticket-id="SHOP-1" status="completed">'
+        '<summary>first</summary>'
+        '<summary>second</summary>'
+        '</handoff>'
+    )
+
+    # duplicate <metrics> in <result> (optional, maxOccurs=1)
+    MALFORMED_DUP_METRICS = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<metrics tokens-input="100" tokens-output="50" cost-usd="0.01"/>'
+        '<metrics tokens-input="200" tokens-output="100" cost-usd="0.02"/>'
+        '</result>'
+    )
+
+    # duplicate <inputs> container in <task> (optional, maxOccurs=1)
+    MALFORMED_DUP_INPUTS = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<objective>obj</objective>'
+        '<inputs><file>/a.py</file></inputs>'
+        '<inputs><file>/b.py</file></inputs>'
+        '</task>'
+    )
+
+    # duplicate <next-step> in <handoff> (optional, maxOccurs=1)
+    MALFORMED_DUP_NEXT_STEP = (
+        '<handoff skill="create-spec" ticket-id="SHOP-1" status="completed">'
+        '<summary>s</summary>'
+        '<next-step>step one</next-step>'
+        '<next-step>step two</next-step>'
+        '</handoff>'
+    )
+
+    # (vii) xs:decimal grammar: cost-usd must match optional-sign + digits +
+    # optional single decimal point — NO exponent, NO inf/nan, NO underscores.
+    # Each of these is accepted by Python float() but rejected by xs:decimal.
+    MALFORMED_COST_USD_INF = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<metrics tokens-input="100" tokens-output="50" cost-usd="inf"/>'
+        '</result>'
+    )
+    MALFORMED_COST_USD_NAN = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<metrics tokens-input="100" tokens-output="50" cost-usd="nan"/>'
+        '</result>'
+    )
+    MALFORMED_COST_USD_EXPONENT = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<metrics tokens-input="100" tokens-output="50" cost-usd="1e5"/>'
+        '</result>'
+    )
+    MALFORMED_COST_USD_UNDERSCORE = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<metrics tokens-input="100" tokens-output="50" cost-usd="1_000"/>'
+        '</result>'
+    )
+    MALFORMED_COST_USD_EMPTY = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<metrics tokens-input="100" tokens-output="50" cost-usd=""/>'
+        '</result>'
+    )
+
+    # (viii) closed content model — the XSD declares no anyAttribute / wildcard,
+    # so an undeclared attribute on any element is invalid (xmllint rejects it;
+    # the in-process validator must too).
+    MALFORMED_UNDECLARED_ATTR_ROOT = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1" bogus="y">'
+        '<objective>x</objective></task>'
+    )
+    MALFORMED_UNDECLARED_ATTR_METRICS = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<metrics cost-usd="0.1" bogus="1"/></result>'
+    )
+    MALFORMED_UNDECLARED_ATTR_FINDING = (
+        '<result skill="code" phase="execute" ticket-id="SHOP-1" status="completed">'
+        '<findings><finding severity="info" bogus="z">m</finding></findings></result>'
+    )
+    MALFORMED_UNDECLARED_ATTR_CONSTRAINT = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1"><objective>x</objective>'
+        '<constraints><constraint name="n" extra="z">c</constraint></constraints></task>'
+    )
+    # (ix) text-only (xs:string) leaves admit no element children.
+    MALFORMED_CHILD_IN_FILE = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1"><objective>x</objective>'
+        '<inputs><file>a<sub/></file></inputs></task>'
+    )
+    MALFORMED_CHILD_IN_OBJECTIVE = (
+        '<task skill="code" phase="execute" ticket-id="SHOP-1">'
+        '<objective>x<nested/></objective></task>'
+    )
+
+    VALID_CORPUS = [
+        ("valid_task", VALID_TASK),
+        ("valid_result", VALID_RESULT),
+        ("valid_handoff", VALID_HANDOFF),
+    ]
+    MALFORMED_CORPUS = [
+        ("bad_root", MALFORMED_BAD_ROOT),
+        ("missing_skill", MALFORMED_MISSING_SKILL),
+        ("invalid_skill", MALFORMED_INVALID_SKILL),
+        ("bad_ticket_id", MALFORMED_BAD_TICKET_ID),
+        ("out_of_order", MALFORMED_OUT_OF_ORDER),
+        ("wrong_list_item", MALFORMED_WRONG_LIST_ITEM),
+        ("bad_status_enum", MALFORMED_BAD_STATUS_ENUM),
+        ("bad_severity_enum", MALFORMED_BAD_SEVERITY_ENUM),
+        # (vi) cardinality — duplicate maxOccurs=1 sequence elements
+        ("dup_objective", MALFORMED_DUP_OBJECTIVE),
+        ("dup_summary", MALFORMED_DUP_SUMMARY),
+        ("dup_metrics", MALFORMED_DUP_METRICS),
+        ("dup_inputs", MALFORMED_DUP_INPUTS),
+        ("dup_next_step", MALFORMED_DUP_NEXT_STEP),
+        # (vii) xs:decimal grammar — cost-usd values Python float() accepts but xs:decimal rejects
+        ("cost_usd_inf", MALFORMED_COST_USD_INF),
+        ("cost_usd_nan", MALFORMED_COST_USD_NAN),
+        ("cost_usd_exponent", MALFORMED_COST_USD_EXPONENT),
+        ("cost_usd_underscore", MALFORMED_COST_USD_UNDERSCORE),
+        ("cost_usd_empty", MALFORMED_COST_USD_EMPTY),
+        # (viii) closed content model — undeclared attributes
+        ("undeclared_attr_root", MALFORMED_UNDECLARED_ATTR_ROOT),
+        ("undeclared_attr_metrics", MALFORMED_UNDECLARED_ATTR_METRICS),
+        ("undeclared_attr_finding", MALFORMED_UNDECLARED_ATTR_FINDING),
+        ("undeclared_attr_constraint", MALFORMED_UNDECLARED_ATTR_CONSTRAINT),
+        # (ix) text-only leaves admit no element children
+        ("child_in_file", MALFORMED_CHILD_IN_FILE),
+        ("child_in_objective", MALFORMED_CHILD_IN_OBJECTIVE),
+    ]
+
+    def _load_validate_xml(self):
+        """Import validate_xml in-process (SCRIPTS is already on sys.path)."""
+        import importlib
+        import importlib.util
+        _target = os.path.join(SCRIPTS, "validate_xml.py")
+        spec = importlib.util.spec_from_file_location("validate_xml", _target)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_ac2_parity_valid_corpus_in_process(self):
+        """Valid corpus messages return [] from validate_structurally (AC-2)."""
+        mod = self._load_validate_xml()
+        for name, xml in self.VALID_CORPUS:
+            errors = mod.validate_structurally(xml)
+            self.assertEqual(errors, [],
+                             "Expected no errors for %s but got: %s" % (name, errors))
+
+    def test_ac2_parity_malformed_corpus_in_process(self):
+        """Malformed corpus messages return non-empty errors from validate_structurally (AC-2)."""
+        mod = self._load_validate_xml()
+        for name, xml in self.MALFORMED_CORPUS:
+            errors = mod.validate_structurally(xml)
+            self.assertTrue(errors,
+                            "Expected errors for %s but got empty list" % name)
+
+    @unittest.skipUnless(shutil.which("xmllint"), "xmllint not on PATH")
+    def test_ac2_parity_corpus_xmllint_matches_in_process(self):
+        """xmllint and in-process paths agree on every corpus message (AC-2 parity)."""
+        mod = self._load_validate_xml()
+        all_cases = list(self.VALID_CORPUS) + list(self.MALFORMED_CORPUS)
+        for name, xml in all_cases:
+            in_process_errors = mod.validate_structurally(xml)
+            in_process_ok = (in_process_errors == [])
+
+            with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                fh.write(xml)
+                tmp_path = fh.name
+            try:
+                xmllint_ok, xmllint_detail = mod.validate_with_xmllint(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+
+            self.assertEqual(
+                in_process_ok, xmllint_ok,
+                "PARITY GAP on %r: in-process=%s xmllint=%s detail=%r errors=%r"
+                % (name, in_process_ok, xmllint_ok, xmllint_detail, in_process_errors)
+            )
+
+    # -----------------------------------------------------------------------
+    # AC-2 parity: cardinality (maxOccurs=1 on sequence members)
+    # -----------------------------------------------------------------------
+
+    def test_ac2_cardinality_duplicate_children_rejected_in_process(self):
+        """Duplicate maxOccurs=1 sequence children must be rejected by validate_structurally.
+
+        xs:sequence in acs-messages.xsd has maxOccurs=1 (default) for every element.
+        Two <objective>, two <summary>, two <metrics>, two <inputs>, two <next-step>
+        must each produce at least one error (AC-2 cardinality gap closure).
+        """
+        mod = self._load_validate_xml()
+        cardinality_cases = [
+            ("dup_objective", self.MALFORMED_DUP_OBJECTIVE),
+            ("dup_summary", self.MALFORMED_DUP_SUMMARY),
+            ("dup_metrics", self.MALFORMED_DUP_METRICS),
+            ("dup_inputs", self.MALFORMED_DUP_INPUTS),
+            ("dup_next_step", self.MALFORMED_DUP_NEXT_STEP),
+        ]
+        for name, xml in cardinality_cases:
+            errors = mod.validate_structurally(xml)
+            self.assertTrue(
+                errors,
+                "Expected cardinality error for %s but validate_structurally returned []. "
+                "Duplicate maxOccurs=1 child must be rejected." % name,
+            )
+
+    @unittest.skipUnless(shutil.which("xmllint"), "xmllint not on PATH")
+    def test_ac2_cardinality_parity_with_xmllint(self):
+        """Cardinality violations: in-process and xmllint must both return INVALID."""
+        mod = self._load_validate_xml()
+        cardinality_cases = [
+            ("dup_objective", self.MALFORMED_DUP_OBJECTIVE),
+            ("dup_summary", self.MALFORMED_DUP_SUMMARY),
+            ("dup_metrics", self.MALFORMED_DUP_METRICS),
+            ("dup_inputs", self.MALFORMED_DUP_INPUTS),
+            ("dup_next_step", self.MALFORMED_DUP_NEXT_STEP),
+        ]
+        for name, xml in cardinality_cases:
+            in_process_ok = (mod.validate_structurally(xml) == [])
+            with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                fh.write(xml)
+                tmp_path = fh.name
+            try:
+                xmllint_ok, xmllint_detail = mod.validate_with_xmllint(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+            self.assertEqual(
+                in_process_ok, xmllint_ok,
+                "PARITY GAP on cardinality case %r: in-process=%s xmllint=%s detail=%r"
+                % (name, in_process_ok, xmllint_ok, xmllint_detail),
+            )
+            self.assertFalse(
+                xmllint_ok,
+                "xmllint should reject duplicate child %r (maxOccurs=1 violation)" % name,
+            )
+
+    # -----------------------------------------------------------------------
+    # AC-2 parity: xs:decimal grammar for cost-usd
+    # -----------------------------------------------------------------------
+
+    def test_ac2_cost_usd_decimal_grammar_rejected_in_process(self):
+        """cost-usd values valid for Python float() but invalid for xs:decimal must be rejected.
+
+        xs:decimal lexical space: optional sign, digits, optional single decimal point.
+        No exponent (1e5), no inf, no nan, no underscores (1_000), no empty string.
+        """
+        mod = self._load_validate_xml()
+        decimal_cases = [
+            ("cost_usd_inf", self.MALFORMED_COST_USD_INF),
+            ("cost_usd_nan", self.MALFORMED_COST_USD_NAN),
+            ("cost_usd_exponent", self.MALFORMED_COST_USD_EXPONENT),
+            ("cost_usd_underscore", self.MALFORMED_COST_USD_UNDERSCORE),
+            ("cost_usd_empty", self.MALFORMED_COST_USD_EMPTY),
+        ]
+        for name, xml in decimal_cases:
+            errors = mod.validate_structurally(xml)
+            self.assertTrue(
+                errors,
+                "Expected xs:decimal error for %s but validate_structurally returned []. "
+                "Python float()-parseable but xs:decimal-invalid values must be rejected." % name,
+            )
+
+    @unittest.skipUnless(shutil.which("xmllint"), "xmllint not on PATH")
+    def test_ac2_cost_usd_decimal_parity_with_xmllint(self):
+        """cost-usd xs:decimal violations: in-process and xmllint must both return INVALID."""
+        mod = self._load_validate_xml()
+        decimal_cases = [
+            ("cost_usd_inf", self.MALFORMED_COST_USD_INF),
+            ("cost_usd_nan", self.MALFORMED_COST_USD_NAN),
+            ("cost_usd_exponent", self.MALFORMED_COST_USD_EXPONENT),
+            ("cost_usd_underscore", self.MALFORMED_COST_USD_UNDERSCORE),
+            ("cost_usd_empty", self.MALFORMED_COST_USD_EMPTY),
+        ]
+        for name, xml in decimal_cases:
+            in_process_ok = (mod.validate_structurally(xml) == [])
+            with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                fh.write(xml)
+                tmp_path = fh.name
+            try:
+                xmllint_ok, xmllint_detail = mod.validate_with_xmllint(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+            self.assertEqual(
+                in_process_ok, xmllint_ok,
+                "PARITY GAP on xs:decimal case %r: in-process=%s xmllint=%s detail=%r"
+                % (name, in_process_ok, xmllint_ok, xmllint_detail),
+            )
+            self.assertFalse(
+                xmllint_ok,
+                "xmllint should reject cost-usd=%r (xs:decimal violation)" % name,
+            )
+
+    # -----------------------------------------------------------------------
+    # AC-1: No per-message subprocess on the default path
+    # -----------------------------------------------------------------------
+
+    def test_ac1_no_subprocess_on_default_path(self):
+        """Default path (ACS_XML_AUTHORITATIVE unset) spawns zero subprocesses (AC-1)."""
+        mod = self._load_validate_xml()
+        messages = [self.VALID_TASK, self.MALFORMED_BAD_ROOT, self.VALID_RESULT]
+        env_without = {k: v for k, v in os.environ.items()
+                       if k != "ACS_XML_AUTHORITATIVE"}
+        with mock.patch.dict(os.environ, env_without, clear=True):
+            with mock.patch("subprocess.run") as mock_run:
+                for xml in messages:
+                    mod.validate_structurally(xml)
+                self.assertEqual(mock_run.call_count, 0,
+                                 "subprocess.run was called on the default (in-process) path")
+
+    def test_ac1_cli_default_path_is_in_process_not_xmllint(self):
+        """Default CLI path (ACS_XML_AUTHORITATIVE unset) uses in-process engine, not xmllint.
+        The stdout output for a valid message must NOT say 'xmllint' on the default fast path
+        (AC-1: no per-message subprocess spawn on the default path)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0. stderr=%r" % result.stderr)
+        # The in-process fast path should say "in-process" in stdout, NOT "xmllint"
+        self.assertIn("in-process", result.stdout,
+                      "Expected 'in-process' marker in stdout on default path. stdout=%r" % result.stdout)
+        self.assertNotIn("xmllint", result.stdout,
+                         "Default fast path must NOT invoke xmllint. stdout=%r" % result.stdout)
+
+    # -----------------------------------------------------------------------
+    # AC-1/AC-5: Opt-in xmllint via ACS_XML_AUTHORITATIVE
+    # -----------------------------------------------------------------------
+
+    @unittest.skipUnless(shutil.which("xmllint"), "xmllint not on PATH")
+    def test_ac1_optin_xmllint_with_xmllint_present(self):
+        """ACS_XML_AUTHORITATIVE=1 + xmllint on PATH: valid message exits 0 with xmllint marker
+        in stdout (AC-1 opt-in path)."""
+        env = dict(os.environ, ACS_XML_AUTHORITATIVE="1")
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK, env=env)
+        self.assertEqual(result.returncode, 0, "Expected exit 0 for valid message with xmllint. "
+                         "stderr=%r stdout=%r" % (result.stderr, result.stdout))
+        # The xmllint opt-in path prints "valid (xmllint, ...)"
+        self.assertIn("xmllint", result.stdout,
+                      "Expected 'xmllint' in stdout when ACS_XML_AUTHORITATIVE=1 and xmllint present")
+
+    def test_ac5_optin_without_xmllint_still_validates(self):
+        """ACS_XML_AUTHORITATIVE=1 with xmllint absent from PATH: valid message still exits 0
+        (env var has no effect when xmllint absent — AC-5)."""
+        # Strip xmllint from PATH by providing a minimal PATH
+        minimal_path = "/usr/bin:/bin"
+        env = dict(os.environ, ACS_XML_AUTHORITATIVE="1", PATH=minimal_path)
+        # Ensure xmllint is genuinely absent from the minimal PATH
+        import shutil as _shutil
+        orig_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = minimal_path
+        try:
+            xmllint_in_minimal = _shutil.which("xmllint")
+        finally:
+            os.environ["PATH"] = orig_path
+        if xmllint_in_minimal:
+            self.skipTest("xmllint found in minimal PATH %r; can't test absent case" % minimal_path)
+
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0 even when ACS_XML_AUTHORITATIVE=1 and xmllint absent. "
+                         "stderr=%r" % result.stderr)
+        self.assertNotIn("Traceback", result.stderr,
+                         "Unexpected traceback when xmllint absent")
+
+    # -----------------------------------------------------------------------
+    # AC-3: CLI fail-fast on in-process path (no xmllint required)
+    # -----------------------------------------------------------------------
+
+    def _env_no_authoritative(self):
+        """Return env dict without ACS_XML_AUTHORITATIVE (default fast path)."""
+        return {k: v for k, v in os.environ.items() if k != "ACS_XML_AUTHORITATIVE"}
+
+    def test_ac3_bad_xml_exits_1_with_invalid_marker(self):
+        """<bad/> piped to stdin exits 1 with INVALID in stderr on the in-process path (AC-3)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin="<bad/>", env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("INVALID", result.stderr)
+
+    def test_ac3_valid_task_exits_0(self):
+        """Valid <task> piped to stdin exits 0 on the in-process path (AC-3)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0 for valid task. stderr=%r" % result.stderr)
+
+    def test_ac3_valid_result_exits_0(self):
+        """Valid <result> piped to stdin exits 0 on the in-process path (AC-3)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_RESULT, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0 for valid result. stderr=%r" % result.stderr)
+
+    def test_ac3_valid_handoff_exits_0(self):
+        """Valid <handoff> piped to stdin exits 0 on the in-process path (AC-3)."""
+        env = self._env_no_authoritative()
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_HANDOFF, env=env)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0 for valid handoff. stderr=%r" % result.stderr)
+
+    # -----------------------------------------------------------------------
+    # AC-6: Back-compat CLI signature
+    # -----------------------------------------------------------------------
+
+    def test_ac6_positional_file_arg(self):
+        """validate_xml.py <file> exits 0 for a valid XML file (AC-6)."""
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+            fh.write(self.VALID_TASK)
+            tmp = fh.name
+        try:
+            result = self.run_script("validate_xml.py", tmp)
+            self.assertEqual(result.returncode, 0,
+                             "Expected exit 0. stderr=%r" % result.stderr)
+        finally:
+            os.unlink(tmp)
+
+    def test_ac6_multiple_file_args_all_valid(self):
+        """validate_xml.py <file1> <file2> exits 0 when both are valid (AC-6)."""
+        files = []
+        try:
+            for xml in (self.VALID_TASK, self.VALID_RESULT):
+                with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                    fh.write(xml)
+                    files.append(fh.name)
+            result = self.run_script("validate_xml.py", *files)
+            self.assertEqual(result.returncode, 0,
+                             "Expected exit 0. stderr=%r" % result.stderr)
+        finally:
+            for p in files:
+                os.unlink(p)
+
+    def test_ac6_mixed_file_args_exits_1_with_invalid(self):
+        """validate_xml.py <valid> <invalid> exits 1 with INVALID in stderr (AC-6)."""
+        files = []
+        try:
+            for xml in (self.VALID_TASK, self.MALFORMED_BAD_ROOT):
+                with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                    fh.write(xml)
+                    files.append(fh.name)
+            result = self.run_script("validate_xml.py", *files)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("INVALID", result.stderr)
+        finally:
+            for p in files:
+                os.unlink(p)
+
+    def test_ac6_stdin_form(self):
+        """validate_xml.py - with valid task exits 0 (AC-6 back-compat pin for stdin form)."""
+        result = self.run_script("validate_xml.py", "-", stdin=self.VALID_TASK)
+        self.assertEqual(result.returncode, 0,
+                         "Expected exit 0. stderr=%r" % result.stderr)
+
+    def test_ac6_no_args_exits_1_with_usage(self):
+        """validate_xml.py with no arguments exits 1 and prints usage (AC-6)."""
+        result = self.run_script("validate_xml.py")
+        self.assertEqual(result.returncode, 1)
+        # Usage text goes to stderr (the __doc__ string)
+        self.assertIn("validate_xml.py", result.stderr)
+
+    # -----------------------------------------------------------------------
+    # AC-4: Batched validation entry point (T2, Spec 02)
+    # Tests written FIRST (TDD RED step) — validate_batch / batch_overall_ok
+    # do not exist yet when these tests are added.
+    # -----------------------------------------------------------------------
+
+    def test_ac4_mixed_batch_correct_per_message_verdicts(self):
+        """Mixed batch returns correct per-message (ok, errors) tuples (AC-4).
+
+        A 4-message batch [valid_task, bad_root, valid_result, missing_skill]:
+        - index 0: (True, [])
+        - index 1: (False, non-empty errors)
+        - index 2: (True, [])
+        - index 3: (False, non-empty errors)
+        batch_overall_ok must be False when any member is invalid.
+        """
+        mod = self._load_validate_xml()
+        messages = [
+            self.VALID_TASK,
+            self.MALFORMED_BAD_ROOT,
+            self.VALID_RESULT,
+            self.MALFORMED_MISSING_SKILL,
+        ]
+        results = mod.validate_batch(messages)
+
+        # One result per input
+        self.assertEqual(len(results), 4)
+
+        # Index 0: valid task
+        self.assertEqual(results[0], (True, []),
+                         "Expected (True, []) for valid_task, got %r" % (results[0],))
+
+        # Index 1: bad root
+        self.assertFalse(results[1][0],
+                         "Expected ok=False for MALFORMED_BAD_ROOT")
+        self.assertGreater(len(results[1][1]), 0,
+                           "Expected non-empty errors for MALFORMED_BAD_ROOT")
+
+        # Index 2: valid result
+        self.assertEqual(results[2], (True, []),
+                         "Expected (True, []) for valid_result, got %r" % (results[2],))
+
+        # Index 3: missing skill
+        self.assertFalse(results[3][0],
+                         "Expected ok=False for MALFORMED_MISSING_SKILL")
+        self.assertGreater(len(results[3][1]), 0,
+                           "Expected non-empty errors for MALFORMED_MISSING_SKILL")
+
+        # Overall must be False (at least one member invalid)
+        self.assertFalse(mod.batch_overall_ok(results),
+                         "batch_overall_ok should be False when any member is invalid")
+
+    def test_ac4_all_valid_batch_overall_ok_true(self):
+        """All-valid batch: all ok=True tuples and batch_overall_ok returns True (AC-4)."""
+        mod = self._load_validate_xml()
+        all_valid = [self.VALID_TASK, self.VALID_RESULT, self.VALID_HANDOFF]
+        all_results = mod.validate_batch(all_valid)
+
+        self.assertTrue(all(ok for ok, _ in all_results),
+                        "Expected all ok=True in all-valid batch, got: %r" % all_results)
+        self.assertTrue(mod.batch_overall_ok(all_results),
+                        "batch_overall_ok should be True for all-valid batch")
+
+    def test_ac4_per_message_parity_with_validate_structurally(self):
+        """validate_batch([msg])[0] matches (len(vs)==0, vs) from validate_structurally (AC-4)."""
+        mod = self._load_validate_xml()
+        for name, xml in list(self.VALID_CORPUS) + list(self.MALFORMED_CORPUS):
+            vs_errors = mod.validate_structurally(xml)
+            expected = (len(vs_errors) == 0, vs_errors)
+            batch_result = mod.validate_batch([xml])[0]
+            self.assertEqual(batch_result, expected,
+                             "Parity mismatch for %s: batch=%r vs_expected=%r"
+                             % (name, batch_result, expected))
+
+    def test_ac4_no_subprocess_in_batch_path(self):
+        """validate_batch spawns zero subprocesses on the default (in-process) path (AC-1/AC-4)."""
+        mod = self._load_validate_xml()
+        messages = [self.VALID_TASK, self.MALFORMED_BAD_ROOT, self.VALID_RESULT]
+        with mock.patch("validate_xml.subprocess.run") as mock_run:
+            mod.validate_batch(messages)
+        self.assertEqual(mock_run.call_count, 0,
+                         "validate_batch must not call subprocess.run; got %d call(s)"
+                         % mock_run.call_count)
+
+    def test_ac4_single_call_atomicity_n5(self):
+        """validate_batch with N=5 messages returns exactly 5 entries in one call (AC-4)."""
+        mod = self._load_validate_xml()
+        messages = [
+            self.VALID_TASK,
+            self.VALID_RESULT,
+            self.VALID_HANDOFF,
+            self.MALFORMED_BAD_ROOT,
+            self.MALFORMED_MISSING_SKILL,
+        ]
+        # The whole batch is processed in a single expression — no iteration at the call site
+        results = mod.validate_batch(messages)
+        self.assertEqual(len(results), 5,
+                         "Expected exactly 5 results for N=5 batch, got %d" % len(results))
+
+    def test_ac4_empty_input_returns_empty_list(self):
+        """validate_batch([]) returns [] (empty, no error); batch_overall_ok([]) is True (AC-4)."""
+        mod = self._load_validate_xml()
+        results = mod.validate_batch([])
+        self.assertEqual(results, [],
+                         "Expected [] for empty input, got %r" % results)
+        self.assertTrue(mod.batch_overall_ok([]),
+                        "batch_overall_ok([]) should be True (vacuously)")
+
+    def test_ac4_error_detail_is_meaningful(self):
+        """validate_batch returns meaningful error strings for known malformed messages (AC-4)."""
+        mod = self._load_validate_xml()
+        # MALFORMED_MISSING_SKILL is missing required attribute 'skill'
+        results = mod.validate_batch([self.MALFORMED_MISSING_SKILL])
+        ok, errors = results[0]
+        self.assertFalse(ok, "Expected ok=False for MALFORMED_MISSING_SKILL")
+        self.assertGreater(len(errors), 0, "Expected non-empty errors list")
+        # The error should mention 'skill' or 'attribute' or 'missing' or 'INVALID'
+        joined = " ".join(errors).lower()
+        self.assertTrue(
+            any(kw in joined for kw in ("skill", "attribute", "missing", "invalid")),
+            "Error detail should mention a relevant keyword; got: %r" % errors
+        )
+
+    # -----------------------------------------------------------------------
+    # Closed content model — undeclared attributes + intrusive children
+    # (the XSD has no anyAttribute/wildcard; in-process must match xmllint).
+    # -----------------------------------------------------------------------
+
+    CLOSED_CONTENT_CASES = [
+        ("undeclared_attr_root", MALFORMED_UNDECLARED_ATTR_ROOT),
+        ("undeclared_attr_metrics", MALFORMED_UNDECLARED_ATTR_METRICS),
+        ("undeclared_attr_finding", MALFORMED_UNDECLARED_ATTR_FINDING),
+        ("undeclared_attr_constraint", MALFORMED_UNDECLARED_ATTR_CONSTRAINT),
+        ("child_in_file", MALFORMED_CHILD_IN_FILE),
+        ("child_in_objective", MALFORMED_CHILD_IN_OBJECTIVE),
+    ]
+
+    def test_closed_content_model_rejected_in_process(self):
+        """Undeclared attributes and intrusive children must be rejected in-process."""
+        mod = self._load_validate_xml()
+        for name, xml in self.CLOSED_CONTENT_CASES:
+            errors = mod.validate_structurally(xml)
+            self.assertTrue(
+                errors,
+                "Expected a closed-content-model error for %s but got []; the XSD "
+                "declares no anyAttribute/wildcard, so this must be rejected." % name,
+            )
+
+    @unittest.skipUnless(shutil.which("xmllint"), "xmllint not on PATH")
+    def test_closed_content_model_parity_with_xmllint(self):
+        """Closed-content violations: in-process and xmllint must both return INVALID."""
+        mod = self._load_validate_xml()
+        for name, xml in self.CLOSED_CONTENT_CASES:
+            in_process_ok = (mod.validate_structurally(xml) == [])
+            with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as fh:
+                fh.write(xml)
+                tmp_path = fh.name
+            try:
+                xmllint_ok, xmllint_detail = mod.validate_with_xmllint(tmp_path)
+            finally:
+                os.unlink(tmp_path)
+            self.assertEqual(
+                in_process_ok, xmllint_ok,
+                "PARITY GAP on closed-content case %r: in-process=%s xmllint=%s detail=%r"
+                % (name, in_process_ok, xmllint_ok, xmllint_detail),
+            )
+            self.assertFalse(xmllint_ok, "xmllint should reject %r" % name)
+
+    def test_validate_batch_isolates_non_string_element(self):
+        """A non-string (e.g. None) batch element yields a per-message error, not a crash."""
+        mod = self._load_validate_xml()
+        results = mod.validate_batch([self.VALID_TASK, None])
+        self.assertEqual(len(results), 2)
+        self.assertTrue(results[0][0], "valid message should pass")
+        self.assertFalse(results[1][0], "None element should be reported invalid, not crash")
+        self.assertFalse(mod.batch_overall_ok(results))
 
 
 class TestStatusLines(AcsWorkspaceCase):

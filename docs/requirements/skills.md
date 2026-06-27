@@ -28,7 +28,13 @@ Every **workflow** skill MUST:
   (`clarifications.json`): research first, ask once at the cheapest phase
   (re-asking an answered question is a defect), record answers before acting
   on them, and record unanswerable decisions as visible **assumptions** with
-  rationale ([workspace-and-state.md](workspace-and-state.md));
+  rationale ([workspace-and-state.md](workspace-and-state.md)); when ≥2
+  clarifications are open, present all of them to the user in ONE grouped
+  interaction (e.g. a single AskUserQuestion with a numbered list) — not
+  serial round-trips; record each answer as its own `clarify.py add` entry
+  (one `C-<n>` per question, `--source` preserved); never skip, merge, or
+  auto-answer a question outside the `--source assumption --rationale "..."`
+  rule (MAR-61 AC-7);
 - end every direct invocation with the **standard completion report**
   (Ticket / Status / Results / Findings / Artifacts / Metrics / Next), rendered
   only after the post-hook succeeded; under `/ship` the compact XML handoff
