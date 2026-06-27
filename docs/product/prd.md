@@ -94,7 +94,7 @@ that protected characteristics played no role.
 | G13 — Enforceable e2e integrity | When the optional e2e merge gate is enabled on a consumer repo, **0 PRs merge with a red e2e suite** (the required e2e status check is a fail-closed merge brake, symmetric to the G9 convention gate and the G3 coverage hard-fail), AND **100% of specs whose changeset touches a user-facing / cross-component surface declare e2e impact** (the spec's Test plan states e2e impact or an explicit "no e2e impact" reason — the code-verifier blocks any declared-impact spec lacking matching e2e test diffs; no zero-findings verdict without a green e2e run). The opt-in invariant holds: a repo with `settings.e2e` unset has no e2e suite and no e2e gate. Measured per release on the dogfood repo (gate-enabled repos). Traces the Tech-lead persona. |
 | G14 — Complexity-adaptive delivery efficiency | A trivial, human-supervised ticket is delivered for substantially less wall-clock time and token/cost than the full pipeline. **Metric:** median wall-clock time AND median token/cost for a trivial-tier ticket are each reduced **≥ 60%** vs the same ticket run through the full plan-execute-verify ladder, measured on the dogfood repo within **1 release** of the capability shipping. |
 | G15 — Fast-lane adoption | A meaningful share of tickets flow through the trivial/standard fast lanes rather than the full ladder. **Metric:** **≥ 50%** of delivered tickets use the trivial- or standard-tier fast lane (vs the full complex/unattended ladder), measured per release on the dogfood repo once the tiers ship. |
-| G16 — Rigor preserved where it matters (no regression) | Reducing process on simple/supervised work must not lower defect-catch on the work that keeps the verifier. **Metric:** **0 regression** in the code verifier's defect-catch rate — the TDD/coverage gate's hard-fail behavior and the 11-dimension review on standard/complex tiers stay 100% in force; measured by the existing eval harness (E1) showing no drop in verifier-caught findings per release vs the pre-feature baseline. |
+| G16 — Rigor preserved where it matters (no regression) | Reducing process volume on simple work must not lower defect-catch. The verifier gates on every lane (autonomous-first); lighter lanes reduce only the verify-iteration ceiling, never whether the verifier or the TDD/coverage gate runs. **Metric:** **0 regression** in the code verifier's defect-catch rate — the TDD/coverage gate's hard-fail behavior is 100% in force on every lane, and full verify (the 11-dimension review) stays 100% on standard/complex lanes; measured by the existing eval harness (E1) showing no drop in verifier-caught findings per release vs the pre-feature baseline. |
 
 ### tabp feature — success metrics
 
@@ -147,29 +147,41 @@ feature sections here.
 - **Complexity-adaptive delivery** — acs scales the amount of process/structure it
   applies to a ticket based on the ticket's **complexity** AND the level of **human
   supervision**, instead of running the full plan-execute-verify ladder on every
-  ticket. **Framing principle:** adopt the host tool (Claude Code)'s own adaptivity
-  rather than re-implement a heavier always-on version — Claude Code uses Plan mode
-  for complex tasks (skipped for simple) with human approval as the verification gate,
-  plus on-demand verification (`/verify`, `/code-review`, tests in-loop), never a
-  mandatory independent verifier on every task; acs's automated verifier is a
-  **stand-in for the absent human reviewer in unattended runs**, so applying it to
-  every interactive simple ticket double-pays. Three delivery tiers:
-  1. **TRIVIAL** (small change, human supervising interactively) — single agent loop
-     draft → edit → human approves; no standalone create-spec, no separate planner
-     subagent, no automated verifier subagent.
-  2. **STANDARD** (normal story) — create-spec fused into code (collapse the
-     create-spec/code-planner double-planning); exactly **ONE** independent verify
-     pass retained on code (the load-bearing TDD/coverage gate); apply-tier skills
-     (create-pr, merge-pr, create-ticket) run inline (coordinator + single executor),
-     not a full triad.
-  3. **COMPLEX / UNATTENDED** (epic, design-significant, or `/acs:ship` autonomous
-     run) — the full ladder exactly as today; the independent verifier legitimately
-     substitutes for the absent human and the persisted artifacts are the audit trail;
-     preserves the rigor that is the product.
+  ticket. **Framing principle (autonomous-first):** acs is autonomous-first — the
+  in-loop quality gate on every lane is the **verifier subagent**, and the
+  human-in-the-loop checkpoint is the **PR review** before merge, not an inline
+  human-approval gate. What scales with complexity is the *amount of process*
+  (decomposition stages and verify iteration depth), **not whether the verifier
+  runs**: the verifier always runs, and the TDD/coverage gate always runs, in
+  every lane. (This generalizes Claude Code's own adaptivity — Plan mode for
+  complex, skipped for simple — but keeps an automated in-loop gate because acs
+  must stay correct on unattended `/acs:ship` runs where no human is watching.)
+  Routing is **two axes — size × stakes** — assembled into four lanes; lighter
+  lanes reduce process volume but never drop a gate. Four delivery lanes:
+  1. **TRIVIAL** (trivial size, not high stakes) — no standalone create-spec and
+     no separate planner subagent (spec authoring is folded into `/code`'s plan
+     phase); **light verify**: a single verifier pass that may iterate at most
+     **once** on blocking findings (`VERIFY_ITERATION_CAP["light"] = 1`). The
+     verifier still gates; there is no human-approval gate.
+  2. **SMALL** (small size, not high stakes) — same fast-lane fold and **light
+     verify** (1-iteration cap) as TRIVIAL.
+  3. **STANDARD** (standard size, or any ticket with `needs_design`) — full
+     create-spec path; **full verify** (the existing up-to-3-iteration
+     plan→execute→verify loop + 11-dimension review + e2e when configured).
+     Apply-work skills (create-pr, merge-pr, create-ticket) run **inline**
+     (coordinator + at most one executor), never a full triad, in every lane.
+  4. **COMPLEX / UNATTENDED** (large size, epic, or `/acs:ship` autonomous run) —
+     **full verify** exactly as today; the persisted artifacts are the audit
+     trail; preserves the rigor that is the product.
 
-  The tier is set once, user-confirmed, at create-ticket, alongside the existing
-  `needs_design` flag and following that precedent; default is full/standard rigor;
-  lighter tiers are opt-in. Traces **G14, G15, G16**.
+  **High-stakes floor:** `stakes = high` resolves to at least STANDARD (full
+  verify) regardless of size — a defense-in-depth floor a small lane value can
+  never bypass. **Mid-flight escalation** raises a ticket to a higher lane (and
+  re-introduces any skipped stage) on the first higher-stakes signal, upward-only
+  and automatic; de-escalation is never automatic. The lane is set once,
+  user-confirmed, at create-ticket alongside `needs_design`; default is
+  full/standard rigor; lighter lanes are opt-in and rigor is never silently
+  dropped. Traces **G14, G15, G16**.
 
 **Should have** *(shipped in v0.1, maturing)*
 - Two-way tracker sync (GitHub Projects / Jira via `gh` / `acli`), remote import.
@@ -313,12 +325,18 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
   artifact makes only its own trace step N/A — never a hard block**. The pipeline's
   gates (ordering, TDD, coverage, review, audit, merge readiness) **fail closed
   regardless** of how many upstream docs exist.
-- **Conditional verification (stakes + supervision, not universal)**: the code
-  TDD/coverage gate **always** stays regardless of tier; what becomes conditional is
-  the **separate independent verifier subagent role** on deterministic / low-stakes /
-  supervised work. Gates fail closed — the gate is never the thing dropped; the
-  redundant independent reviewer on supervised work is. (Composes with "Graceful
-  degradation of the conformance chain" above: conditional verification scales
+- **Verifier-as-gate with lane-driven depth (autonomous-first)**: the verifier
+  subagent is the **in-loop quality gate on every lane** — it always runs; the
+  human-in-the-loop checkpoint is the PR review, not an inline approval. What
+  scales with the lane is **verify depth**, not whether the verifier runs:
+  `verify_depth(size, stakes)` returns `light` (a single verifier pass, iteration
+  cap 1) for TRIVIAL/SMALL low/normal-stakes tickets and `full` (the up-to-3
+  iteration loop + 11-dimension review + e2e when configured) for
+  STANDARD/COMPLEX and **all** high-stakes tickets. The code TDD/coverage gate
+  **always** runs in full in every lane and is never trimmed by depth selection.
+  Gates fail closed — the gate is never the thing dropped; the lighter lane only
+  reduces *iteration ceiling and decomposition stages*. (Composes with "Graceful
+  degradation of the conformance chain" above: lane-driven depth scales
   *process volume*, the chain's gates still fail closed.)
 - **Deterministic apply-tier executors**: apply-tier skills (create-ticket, create-pr,
   merge-pr) have deterministic executors with judgment front-loaded into
@@ -354,7 +372,7 @@ its own mechanisms (acs via stdlib Python + hooks; tabp via its own plugin patte
   auto-PRD-generation would repeat the abandoned MAR-16..24 over-engineering (see Out
   of scope).
 - **acs feature — org enforcement uses an org-controlled, non-overridable source; layers are additive (C-6).** Org-level *defaults* extend today's most-specific-wins cascade (a new org source resolved below user, fully overridable). Org-level *mandates* are the opposite: because a CI gate sees only the checked-out repo (the convention checker reads the committed project `.acs/settings.json`, not a developer home dir) and the cascade is most-specific-wins (a repo layer would silently override an org layer), an enforceable org mandate MUST come from an org-controlled source the repo cannot edit and/or use inverted **floor** precedence (repo may tighten, never loosen), with exemptions granted only at the org layer (a repo cannot self-exempt from a mandate) and every effective rule carrying provenance (which layer it came from). Introducing org/department layers is **additive and non-breaking**: with no org source configured, resolution is identical to today's user + team(project) behavior. The MECHANISM (cascade extension vs GitHub org rulesets / org-required workflows vs a versioned policy pack) is deferred to a future design epic / ADR (this PRD states the WHAT).
-- **acs feature — complexity tier is a confirmed flag set once at create-ticket; default is full rigor; lighter tiers are opt-in (C-7).** The complexity/supervision tier is set **once, user-confirmed, at create-ticket**, alongside the existing `needs_design` flag and following that exact precedent (a confirmed flag gating downstream skills). The **default stays full/standard rigor**; trivial/standard fast lanes are **opt-in**, so rigor is **never silently dropped**. The code TDD/coverage gate is non-negotiable in every tier; only the redundant independent-verifier role on supervised/low-stakes work is conditional. (Mirrors how `needs_design` is a confirmed flag gating the design step.) Cross-reference: the Out of scope section records that automatic downgrade of a ticket's complexity/supervision tier without explicit user confirmation is out of scope. *(Assumption: this constraint follows the `needs_design` confirmed-flag precedent — verified in `ticket.json` (`"needs_design": false` field present), confirming the precedent exists and no new pattern is invented.)*
+- **acs feature — complexity tier is a confirmed flag set once at create-ticket; default is full rigor; lighter tiers are opt-in (C-7).** The complexity/supervision tier is set **once, user-confirmed, at create-ticket**, alongside the existing `needs_design` flag and following that exact precedent (a confirmed flag gating downstream skills). The **default stays full/standard rigor**; trivial/small fast lanes are **opt-in**, so rigor is **never silently dropped**. The code TDD/coverage gate and the in-loop verifier gate both run in every lane (autonomous-first); what the lighter lanes make conditional is the **verify depth** (light = single pass, iteration cap 1) and the heavyweight decomposition stages (standalone create-spec / separate planner), never whether a gate runs. (Mirrors how `needs_design` is a confirmed flag gating the design step.) Cross-reference: the Out of scope section records that automatic downgrade of a ticket's complexity/supervision tier without explicit user confirmation is out of scope. *(Assumption: this constraint follows the `needs_design` confirmed-flag precedent — verified in `ticket.json` (`"needs_design": false` field present), confirming the precedent exists and no new pattern is invented.)*
 
 ## Out of scope
 

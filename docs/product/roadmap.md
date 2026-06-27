@@ -267,11 +267,15 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
   ([`prd.md`](prd.md#features-moscow)). Parallel to the other M3 epics above; independent
   of the doc-set and standards work (touches pipeline process-volume, not the doc-set
   surface). Child workstreams (sequenced):
-  1. **Trivial fast-lane** — fuse create-spec into code, human-approval gate, skip the
-     verifier subagent for trivial-tier supervised tickets.
-  2. **Conditional verification model** — make the independent-verifier subagent role
-     conditional on stakes + supervision; the code TDD/coverage gate always stays
-     regardless of tier.
+  1. **Trivial/small fast-lane** — fold create-spec (and the separate planner) into
+     `/code`'s plan phase for TRIVIAL/SMALL lanes; the verifier still gates (light
+     verify) and the TDD/coverage gate still runs — no human-approval gate
+     replaces them (autonomous-first).
+  2. **Verifier-as-gate + lane-driven verify depth** — the verifier subagent is the
+     in-loop quality gate on every lane (it always runs); `verify_depth(size,
+     stakes)` scales the iteration ceiling (`light` = 1, `full` = 3), with a
+     high-stakes floor to `full`. The code TDD/coverage gate always stays
+     regardless of lane.
   3. **Apply-tier inlining** — sequence **merge-pr first** (its existing exempt-PR mode,
      E5.5 / MAR-9, already runs the inline coordinator+executor shape as a working
      template), then **create-pr**, then **create-ticket**.
