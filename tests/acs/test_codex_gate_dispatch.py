@@ -189,6 +189,45 @@ class TestCodexFailClosedParity(CodexGateWorkspaceCase):
                                 "got %d, stderr=%r"
                                 % (skill, result.returncode, result.stderr))
 
+    def test_unexpected_exception_in_gate_triggers_fail_closed(self):
+        """Sub-test B (spec 01:242-245): unexpected non-GateError exception exits 2,
+        stderr contains 'blocked — unexpected error in gate' (acs_lib.py:1459-1461).
+
+        Trigger: overwrite .acs/settings.json with a 'tracker' field set to a
+        non-dict, non-falsy string value.  After validate_settings passes (it does
+        not validate the tracker field), tracker_cli_warning(ctx['settings']) calls
+        'bad_value'.get('provider', 'local'), raising AttributeError — a
+        non-GateError that is caught by the catch-all at acs_lib.py:1459.
+
+        Asserts:
+          - returncode == 2  (never 0 — 0 gate escapes)
+          - stderr contains 'blocked — unexpected error in gate'
+        """
+        # Overwrite settings.json with a tracker value that is a non-dict string.
+        # validate_settings does not check tracker, so build_context succeeds; the
+        # AttributeError surfaces in tracker_cli_warning (acs_lib.py:1452, 1366-1372).
+        self.write_settings({
+            "ticket_prefix": "SHOP",
+            "test_coverage_percent": 90,
+            "tracker": "bad_value",  # non-dict, non-falsy -> AttributeError
+        })
+        result = self.pre("create-ticket")
+        self.assertEqual(
+            result.returncode, 2,
+            "unexpected-exception path must exit 2 (never 0); got %d, stderr=%r"
+            % (result.returncode, result.stderr),
+        )
+        self.assertNotEqual(
+            result.returncode, 0,
+            "unexpected gate exception must NEVER exit 0 (0 gate escapes guaranteed)",
+        )
+        self.assertIn(
+            "blocked — unexpected error in gate",
+            result.stderr,
+            "stderr must contain 'blocked — unexpected error in gate' "
+            "(matches acs_lib.py:1460); got %r" % result.stderr,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Test 3 — AC-2: acs_lib reused unchanged (no import-time side effects)
