@@ -9,7 +9,8 @@ C4Component
     title Hook & helper layer — components
 
     Container_Boundary(hooks, "Hook & helper layer") {
-        Component(dispatch, "dispatch.py", "hook entry", "PreToolUse(Skill): route to pre-<skill>.py, exit-2 blocks; SessionEnd: safety net")
+        Component(dispatch, "dispatch.py", "hook entry", "PreToolUse(Skill) / SessionEnd (Claude Code) and acs skill shim / Stop (Codex CLI): route to pre-<skill>.py, exit-2 blocks")
+        Component(codex_adapter, "codex_adapter.py", "runtime glue", "--runtime flag routing; models.<runtime>.<role> resolution; ~/.codex/sessions/ token sourcing")
         Component(pre, "pre-<skill>.py x9", "gates", "predecessor completed, artifacts exist, lock free, settings/formats valid — fail closed")
         Component(post, "post-<skill>.py x9", "persistence", "finalize run entry; update ledger, index, metrics; release lock; merge extras (archive, epic auto-done)")
         Component(start, "skill-start.py", "run registration", "resolve ticket; allocate ids; acquire lock; pointer file; in_progress run; reconcile/handoff detection")

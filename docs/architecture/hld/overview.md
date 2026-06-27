@@ -13,9 +13,9 @@ The GMS Marketplace is a curated plugin catalog that hosts heterogeneous
 plugins distributed from this repository. Plugins differ in shape:
 
 - **acs** (full-shape: `.acs/`, schemas, hooks, agents, skills) — targets
-  **Claude Code**; drives an agentic software-delivery workflow on any
-  **consumer repository**, persisting all pipeline state into a **workspace
-  folder outside that repo**.
+  **Claude Code** (primary) and **Codex CLI** (second supported runtime via a no-bypass shim
+  adapter); drives an agentic software-delivery workflow on any **consumer repository**,
+  persisting all pipeline state into a **workspace folder outside that repo**.
 - **tabp** (fuller shape: `skills/` + `helpers/` + `schemas/` + `agents/` + `.tabp/` state) — targets
   **Cowork**; provides a screen-CVs recruiting workflow where a coordinator
   fans out Sonnet-per-CV subagents and an Opus synthesis subagent, persisting
@@ -45,6 +45,13 @@ plugins distributed from this repository. Plugins differ in shape:
 4. **Fail-safe prose**: a skill that forgets its post-hook leaves
    `runs[-1] = in_progress` — the next gate reads "not completed"; nothing
    unlocks by omission.
+5. **Runtime-coupling-isolated design**: the five runtime-coupled surfaces (hook gating,
+   session termination, reflection-subagent dispatch, per-role model/effort mapping,
+   cost/token sourcing) are inventoried and isolated behind an adapter band
+   (`docs/architecture/lld/runtime-coupling-inventory.md`). The deterministic stdlib layer
+   (`acs_lib.py`, all `*.schema.json`, `acs-messages.xsd`) is byte-for-byte unchanged across
+   runtimes (ADR-0001). The adapter band is thin stdlib glue: `codex_adapter.py` + no-bypass
+   shims at `plugins/acs/runtimes/codex/skills/` (MAR-5, ADR-0035).
 
 ## Document map
 

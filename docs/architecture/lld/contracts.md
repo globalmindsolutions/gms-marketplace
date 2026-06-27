@@ -30,6 +30,30 @@ Exit codes: 0 ok; 2 blocked/invalid with actionable stderr.
 `PreToolUse(Skill)` → `dispatch.py pre` → `pre-<skill>.py` (exit 2 blocks);
 `SessionEnd` → `dispatch.py session-end` (finalize `interrupted`, release lock).
 
+## Hook events (Codex CLI)
+
+Surface #1 — **Hook gating** (`runtime-coupling-inventory.md:38`): the no-bypass shim is
+the first instruction in each of the 9 hooked acs skill definitions
+(`plugins/acs/runtimes/codex/skills/<skill>.md`).  The shim synthesizes a shape-(a) payload
+and pipes it to `dispatch.py pre` via Bash:
+
+```
+echo '{"cwd":"'"$PWD"'","tool_input":{"skill":"acs:<skill>"}}' | \
+    python3 "$ACS_PLUGIN_ROOT/hooks/scripts/dispatch.py" pre
+```
+
+`dispatch.py pre` reuses `skill_name_from_payload` (`dispatch.py:25-38`) and the full
+`HOOKED_SKILLS` gate path (`acs_lib.py:1443-1462`) unchanged (AC-2).  Exit 2 from
+`dispatch.py pre` propagates via `sys.exit(proc.returncode)` (`dispatch.py:75`), halting
+execution before the coordinator body runs (AC-1, 0 gate escapes).  The 7 unhooked skills
+have no shim; `dispatch.py:57-58` exits 0 for non-hooked skills.
+
+Surface #2 — **Session termination** (`runtime-coupling-inventory.md:39`): the Codex `Stop`
+event → same `dispatch.py session-end` path as the Claude Code `SessionEnd` hook.
+`dispatch.py:49-54` finalizes any `in_progress` run as `interrupted`, updates pipeline state
+and metrics, and releases the ticket lock (`acs_lib.session_end` at `acs_lib.py:1621`).
+Zero change to `dispatch.py` or `acs_lib.py` is required.
+
 ## Ticket classification fields (MAR-56)
 
 `ticket.json` carries three new optional fields (additive; legacy tickets without them remain valid):

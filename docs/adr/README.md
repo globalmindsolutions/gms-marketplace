@@ -38,6 +38,12 @@ context and consequences.
 | [0027](0027-tabp-dual-runtime-detection.md) | tabp dual-runtime detection: explicit `--runtime` flag with auto-detect fallback (cwd-as-project-dir on Claude Code) | Accepted |
 | [0028](0028-merge-pr-agent-invocable.md) | merge-pr is agent/model-invocable; readiness gate + m6 require-APPROVED-for-all | Accepted |
 | [0029](0029-merge-pr-auto-update-behind-branch.md) | merge-pr auto-updates a BEHIND branch then merges in the same run | Accepted |
+| [0030](0030-four-lane-hybrid-routing-from-size-stakes-axes.md) | Four-lane hybrid routing from size × stakes axes | Accepted |
+| [0031](0031-axes-authoritative-lane-derived-cache.md) | Axes authoritative, lane a derived cache | Accepted |
+| [0032](0032-lane-field-in-pipeline-state-and-index-writers.md) | Lane field in pipeline-state and index writers | Accepted |
+| [0033](0033-stakes-first-class-with-path-glob-detection.md) | Stakes as first-class axis with path-glob detection | Accepted |
+| [0034](0034-light-verify-one-iteration-cap.md) | Light verify = single verifier pass with one-iteration cap; full verify unchanged; TDD/coverage gate immutable in every lane | Accepted |
+| [0035](0035-codex-gate-enforcement-no-bypass-shim.md) | Codex gate enforcement: no-bypass wrapper shim calling `dispatch.py pre` at the command boundary (D1 Option B, extends ADR-0002) | Accepted |
 
 Format: status, date, context, decision, consequences (MADR-flavored, kept
 short). New ADRs are appended by the pipeline with the next sequence number.

@@ -2,7 +2,8 @@
 
 | Layer | Technology | Why |
 |-------|------------|-----|
-| acs Skills (16) | Markdown SKILL.md, Claude Code plugin skill format | acs coordinator protocols; user-invocable as `/acs:<name>` (16 skills; tabp has 2 skills (screen-cvs, /tabp:usage) via Cowork + Claude Code, counted separately) |
+| acs Skills (16) | Markdown SKILL.md, Claude Code plugin skill format; Codex CLI AGENTS.md / custom skill shim for the second runtime | acs coordinator protocols; user-invocable as `/acs:<name>` (16 skills; tabp has 2 skills (screen-cvs, /tabp:usage) via Cowork + Claude Code, counted separately) |
+| Codex runtime adapter | Python 3.9+ stdlib | codex_adapter.py: runtime flag, model resolution, token sourcing; no-bypass shim files at `plugins/acs/runtimes/codex/skills/` |
 | Subagents (27) | Markdown agent definitions | Separate contexts per reflection phase; tool allowlists in frontmatter |
 | Hooks & helpers | **Python ≥ 3.9, stdlib only** | Deterministic gating/persistence with zero consumer-machine installs |
 | State | JSON (pretty-printed, atomic writes), JSON Schema 2020-12 | Human-auditable, machine-validated |

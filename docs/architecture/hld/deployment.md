@@ -11,8 +11,10 @@ flowchart LR
 
     subgraph machine["Developer machine"]
         CC["Claude Code<br/>(plugin host — acs)"]
+        CX["Codex CLI<br/>(plugin host — acs, second runtime)"]
         CW["Cowork<br/>(plugin host — tabp)"]
         PI_ACS["Installed acs plugin<br/>~/.claude/... (full-shape)"]
+        PI_ACS_CX["acs plugin shim<br/>(plugins/acs/runtimes/codex/skills/ — custom skill)"]
         PI_TABP["Installed tabp plugin<br/>Cowork environment (fuller shape: skills + helper + schemas + subagent charters)"]
         subgraph checkouts["Consumer repo checkouts"]
             CO1["main checkout"]
@@ -23,10 +25,13 @@ flowchart LR
     end
 
     MR -- "claude plugin install acs@gms-marketplace" --> PI_ACS
+    MR -- "acs:init --runtime codex (configures shim)" --> PI_ACS_CX
     MR -- "claude plugin install tabp@gms-marketplace" --> PI_TABP
     MR --- ACT
     CC --> PI_ACS
     PI_ACS -- hooks/skills --> CC
+    CX --> PI_ACS_CX
+    PI_ACS_CX -- "shim -> dispatch.py pre -> gate" --> CX
     CW --> PI_TABP
     PI_TABP -- skills --> CW
     CC --> CO1 & CO2

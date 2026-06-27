@@ -9,6 +9,7 @@ C4Context
     System(mkt, "GMS Marketplace", "Curated plugin catalog hosting heterogeneous plugins: acs (full-shape, agentic delivery workflow via Claude Code) and tabp (fuller shape: skills + helper + schemas + subagent charters + .tabp/ state, screen-CVs recruiting workflow via Cowork)")
 
     System_Ext(cc, "Claude Code", "Runtime: executes skills/agents, fires hook events, spawns subagents (acs targets Claude Code)")
+    System_Ext(codex, "OpenAI Codex CLI", "Runtime: executes acs skills via the no-bypass shim adapter; second supported execution runtime")
     System_Ext(cowork, "Cowork", "Runtime: executes Cowork skills (tabp targets Cowork for screen-cvs)")
     System_Ext(repo, "Consumer repository", "Any git repo: source, tests, docs/product, docs/architecture")
     System_Ext(ws, "Workspace folder", "Outside the repo: per-repo/ticket pipeline state, locks, metrics")
@@ -17,6 +18,7 @@ C4Context
 
     Rel(dev, cc, "types /acs:* commands, answers questions")
     Rel(cc, mkt, "loads skills/agents, fires PreToolUse / SessionEnd hooks")
+    Rel(codex, mkt, "loads acs skill shim, runs adapter gate")
     Rel(mkt, cowork, "tabp screen-cvs skill dispatched via Cowork")
     Rel(mkt, repo, "reads code/docs; /code edits source on ticket branches")
     Rel(mkt, ws, "all pipeline state: tickets, states, ledger, locks, metrics")

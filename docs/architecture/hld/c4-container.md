@@ -15,6 +15,7 @@ C4Container
         Container(tabp_helper, "tabp_helper.py", "Python 3.9+ stdlib only", "stdlib-only Python >= 3.9 helper; atomic .tabp/ writes, spin-lock, schema validation, run-history, usage aggregation (MAR-38); invoked via Bash; no acs import")
     }
     System_Ext(cc, "Claude Code runtime")
+    System_Ext(codex, "Codex CLI runtime")
     System_Ext(cowork, "Cowork runtime")
     ContainerDb_Ext(ws, "Workspace store", "Filesystem", "<workspace>/<repo>/<ticket>/ partitions + repo-level index/counters/metrics/sessions")
     System_Ext(repo, "Consumer repo")
@@ -24,8 +25,10 @@ C4Container
     Container(evals_plugin, "evals/<plugin>/", "Python, run_evals.py", "Per-plugin behavioral evals; run locally only, NOT in CI")
 
     Rel(dev, cc, "/acs:*")
+    Container(codex_adapter, "Codex runtime adapter", "Python 3.9+ stdlib", "codex_adapter.py: --runtime flag, runtime-scoped model resolution, Codex token-actual sourcing; ships inside acs plugin")
     Rel(cc, skills, "expands skill, runs coordinator")
     Rel(cc, hooks, "PreToolUse(Skill) -> dispatch; SessionEnd")
+    Rel(codex, hooks, "acs skill shim -> dispatch.py pre -> gate")
     Rel(skills, agents, "spawns via Agent tool (XML task)")
     Rel(skills, hooks, "skill-start / post-hook / helpers (Bash)")
     Rel(agents, ws, "phase artifacts (plan/execute/verify)")

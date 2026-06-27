@@ -148,3 +148,50 @@ completed" event exists):
   abnormal endings still write state.
 
 See `plugins/acs/docs/INTERNALS.md` for the full implementation contract.
+
+## Codex CLI runtime — gate dispatch (MAR-5)
+
+The hook gating and session-termination contracts extend to the Codex CLI runtime
+via the no-bypass shim adapter (D1 Option B; ADR-0035; `design.md:65-73`).
+
+### Pre-hook gate equivalent (Surface #1)
+
+On Codex CLI, the `PreToolUse(Skill)` kernel event is replaced by a **no-bypass shim**
+that is the mandatory first instruction in each hooked acs skill's Codex entry point
+(`plugins/acs/runtimes/codex/skills/<skill>.md`).
+
+- The shim synthesizes a Claude-Code-shaped stdin payload and pipes it to
+  `dispatch.py pre` (shape a; C-1):
+  ```
+  echo '{"cwd":"'"$PWD"'","tool_input":{"skill":"acs:<skill>"}}' | \
+      python3 "$ACS_PLUGIN_ROOT/hooks/scripts/dispatch.py" pre
+  ```
+- `dispatch.py pre` reuses `skill_name_from_payload` (`dispatch.py:25-38`) and the full
+  `HOOKED_SKILLS` gate path (`acs_lib.py:1443-1462`) **unchanged** (AC-2, C-2).
+- Exit 2 from `dispatch.py pre` propagates via `sys.exit(proc.returncode)` (`dispatch.py:75`),
+  halting execution before any coordinator instruction runs (AC-1, 0 gate escapes).
+- The shim is the **only** non-optional step before the coordinator body; no branch skips it.
+- The 7 unhooked skills (`UNHOOKED_SKILLS`, `acs_lib.py:44`) have no shim. `dispatch.py:57-58`
+  exits 0 for any skill not in `HOOKED_SKILLS`.
+
+### Session termination (Surface #2)
+
+The Codex `Stop` event (session teardown) must be wired to:
+```
+echo '{"cwd":"'"$PWD"'"}' | python3 "$ACS_PLUGIN_ROOT/hooks/scripts/dispatch.py" session-end
+```
+This reuses the same `dispatch.py session-end` path as the Claude Code `SessionEnd` hook
+(`hooks.json:16-26`). `acs_lib.session_end` (`acs_lib.py:1621`) finalizes any `in_progress`
+run as `interrupted`, updates pipeline state and metrics, and releases the ticket lock.
+**Zero change** to `dispatch.py` or `acs_lib.py` is required (AC-2, C-2).
+
+### Scope and isolation
+
+- The deterministic stdlib gate layer (`acs_lib.py`, all `*.schema.json`, `acs-messages.xsd`)
+  is semantically unchanged across runtimes (ADR-0001 invariant).
+- Only the dispatch entry point is runtime-specific (AC-2); the gate logic is reused
+  verbatim.
+- The Claude Code path (`hooks.json`, `dispatch.py`, `acs_lib.py`, all `pre-<skill>.py`)
+  is byte-for-byte unchanged.
+- Surfaces #3-5 (reflection-subagent dispatch, per-role model/effort, cost/token sourcing)
+  are addressed in MAR-6/MAR-7, not here.
