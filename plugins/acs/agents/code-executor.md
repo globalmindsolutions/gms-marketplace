@@ -71,6 +71,19 @@ never quietly do code work under a docs-only ticket.
    deployment) and MERGE the design's new/changed Mermaid sequence diagrams
    into `<architecture_path>/lld/flows/`. When `adr_path` is set and the design
    carries accepted decisions, commit those decision records there.
+
+   **Product-doc factual reconciliation (also part of the change):** when the
+   changeset makes a factual claim in `docs/product/prd.md` or
+   `docs/product/roadmap.md` stale, reconcile it in the same diff. Factual
+   items — sync autonomously: agent/subagent counts; feature/epic
+   shipped-vs-planned status; component topology; version numbers; file path
+   references. Intent items — flag, NEVER rewrite: goals; NFR
+   (non-functional requirement) targets; scope statements; vision; requirements
+   rationale. When the changeset contradicts stated intent, record the
+   divergence in the execute-report `problems` field so it surfaces in the
+   coordinator's result document and PR body. Do NOT edit intent content. When
+   the changeset alters no factual item, this step is a no-op for prd.md and
+   roadmap.md.
 5. **Commit** on the ticket branch, one or a few coherent commits, each message
    rendered from the `commit_message` format (e.g. `SHOP-123 add bulk import
    endpoint`). NEVER push — /acs:create-pr pushes and opens the PR.

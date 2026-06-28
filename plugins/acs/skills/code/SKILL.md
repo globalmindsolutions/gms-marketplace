@@ -292,9 +292,11 @@ block (AC-6) apply unchanged in every lane; see those sections.
   `settings.test_coverage_percent` will be measured.
 - The documentation map: which README/API/usage docs/changelog entries the
   change touches (the specs' API/data-changes sections name them), whether the
-  architecture doc set (`settings.architecture_path`) is affected, and the ADR
-  list when `settings.adr_path` is set and a design carries accepted
-  decisions.
+  architecture doc set (`settings.architecture_path`) is affected, whether any
+  factual claims in `docs/product/prd.md` or `docs/product/roadmap.md` are made
+  stale by the change (factual items: agent/subagent counts, shipped-vs-planned
+  status, topology, version numbers, file path references), and the ADR list
+  when `settings.adr_path` is set and a design carries accepted decisions.
 - On iterations 2-3: how the plan remediates EVERY verifier finding from the
   previous iteration, explicitly, one by one.
 
@@ -340,6 +342,24 @@ or `iter-<n>-execute-<k>.json` when parallel) must, in order:
    the design's new/changed Mermaid sequence diagrams into
    `<architecture_path>/lld/flows/`. When `settings.adr_path` is set and a
    design exists, commit the design's accepted decision records there.
+
+   **Product-doc factual reconciliation (also part of the change):** when the
+   changeset makes a factual claim in `docs/product/prd.md` or
+   `docs/product/roadmap.md` stale, reconcile it in the same diff. The
+   factual-vs-intent boundary:
+
+   - **Factual — sync autonomously:** agent/subagent counts; feature/epic
+     shipped-vs-planned status; component topology; version numbers; file path
+     references.
+   - **Intent — flag in result document and PR body; NEVER rewrite:** goals;
+     NFR (non-functional requirement) targets; scope statements; vision;
+     requirements rationale.
+
+   When the changeset contradicts stated intent, the executor MUST flag the
+   divergence in the execute-report `problems` field so it surfaces in the
+   coordinator's result document and the PR body. The executor must NOT edit
+   intent content. When the changeset alters no factual item in prd.md or
+   roadmap.md, this step is a no-op for those files.
 5. **Commit** the spec's work on the ticket branch per
    `formats.commit_message` (one or a few coherent commits per spec). Never
    push.
@@ -371,7 +391,13 @@ Dimensions, each producing blocking findings on failure:
   input/authz.
 - **Documentation** — every affected doc updated and consistent with the
   code, including the architecture doc set and `lld/flows/` merges and ADRs
-  when applicable.
+  when applicable. **Product-doc-consistency check:** verify whether the
+  changeset leaves factual claims in `docs/product/prd.md` or
+  `docs/product/roadmap.md` stale (see the factual-vs-intent boundary in
+  Execute step 4 above). A stale factual claim is a blocking finding
+  (`severity="blocking" dimension="documentation"`). An intent contradiction
+  is an explicit flagged divergence — NOT a block; it surfaces in the result
+  document and PR body. No factual impact → no-op for this check.
 
 ALL findings block — zero findings = pass (`verifier_passed: true`). On
 findings: persist the verify output, then AUTOMATICALLY re-plan and re-execute

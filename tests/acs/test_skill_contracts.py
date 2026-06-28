@@ -1155,5 +1155,449 @@ class TestClarifyBatchingContract(unittest.TestCase):
 
 
 
+class TestDocSyncAuthoringContract(unittest.TestCase):
+    """MAR-65 Spec 01 (AC-1, AC-2, AC-4, AC-7): pin the doc-sync authoring contract
+    that extends Execute step 4 to reconcile FACTUAL claims in prd.md/roadmap.md
+    and flag (never rewrite) intent divergence. Additive assertions only —
+    no existing assertion modified."""
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def agent_path(self, skill, role):
+        return os.path.join(PLUGIN, "agents", "%s-%s.md" % (skill, role))
+
+    def _code_body(self):
+        return read(self.skill_path("code"))
+
+    def _executor_body(self):
+        return read(self.agent_path("code", "executor"))
+
+    def _planner_body(self):
+        return read(self.agent_path("code", "planner"))
+
+    # --- AC-1: prd.md and roadmap.md named in SKILL.md step 4 ---
+
+    def test_skill_step4_names_prd_md(self):
+        """AC-1: code/SKILL.md must name prd.md within 2000 chars of the step-4 'part of
+        the change' clause (the doc-update step heading)."""
+        body = self._code_body()
+        # Find the step-4 occurrence: 'Update the docs' is the unique step-4 heading.
+        anchor = body.find("**Update the docs")
+        self.assertGreater(anchor, 0,
+                           "code/SKILL.md must contain '**Update the docs' step-4 heading")
+        window = body[anchor:anchor + 2000]
+        self.assertIn("prd.md", window,
+                      "code/SKILL.md must name prd.md within 2000 chars of step-4 heading "
+                      "(MAR-65 AC-1)")
+
+    def test_skill_step4_names_roadmap_md(self):
+        """AC-1: code/SKILL.md must name roadmap.md within 2000 chars of the step-4
+        'Update the docs' heading."""
+        body = self._code_body()
+        anchor = body.find("**Update the docs")
+        self.assertGreater(anchor, 0,
+                           "code/SKILL.md must contain '**Update the docs' step-4 heading")
+        window = body[anchor:anchor + 2000]
+        self.assertIn("roadmap.md", window,
+                      "code/SKILL.md must name roadmap.md within 2000 chars of step-4 heading "
+                      "(MAR-65 AC-1)")
+
+    def test_executor_step4_names_prd_md(self):
+        """AC-1: code-executor.md must name prd.md in the step 4 block."""
+        body = self._executor_body()
+        self.assertIn("prd.md", body,
+                      "code-executor.md must name prd.md in step 4 (MAR-65 AC-1)")
+
+    def test_executor_step4_names_roadmap_md(self):
+        """AC-1: code-executor.md must name roadmap.md in the step 4 block."""
+        body = self._executor_body()
+        self.assertIn("roadmap.md", body,
+                      "code-executor.md must name roadmap.md in step 4 (MAR-65 AC-1)")
+
+    def test_planner_docmap_names_prd_md(self):
+        """AC-1: code-planner.md doc-map section must name prd.md."""
+        body = self._planner_body()
+        self.assertIn("prd.md", body,
+                      "code-planner.md must name prd.md in the doc-map section (MAR-65 AC-1)")
+
+    def test_planner_docmap_names_roadmap_md(self):
+        """AC-1: code-planner.md doc-map section must name roadmap.md."""
+        body = self._planner_body()
+        self.assertIn("roadmap.md", body,
+                      "code-planner.md must name roadmap.md in the doc-map section (MAR-65 AC-1)")
+
+    # --- AC-2: intent-flag-never-rewrite rule ---
+
+    def test_skill_flag_intent_co_occurrence(self):
+        """AC-2: code/SKILL.md must have 'flag'/'FLAGS' co-occurring with 'intent'
+        within 500 chars."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(flag|FLAGS).{0,500}intent|intent.{0,500}(flag|FLAGS)", body, re.DOTALL),
+            "code/SKILL.md must co-locate flag/FLAGS and intent within 500 chars (MAR-65 AC-2)")
+
+    def test_skill_never_rewrite_intent(self):
+        """AC-2: code/SKILL.md must carry 'never'/'NEVER' near 'rewrite' near 'intent'."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(never|NEVER).{0,200}rewrite.{0,200}intent|"
+                      r"intent.{0,200}(never|NEVER).{0,200}rewrite|"
+                      r"(never|NEVER).{0,200}rewrite", body, re.DOTALL),
+            "code/SKILL.md must carry never/NEVER near rewrite (MAR-65 AC-2)")
+
+    def test_skill_intent_flag_names_result_document(self):
+        """AC-2: code/SKILL.md must name 'result document' as the flag destination."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)result.{0,20}document", body),
+            "code/SKILL.md must name 'result document' as intent-flag destination "
+            "(MAR-65 AC-2)")
+
+    def test_skill_intent_flag_names_pr_body(self):
+        """AC-2: code/SKILL.md must name 'PR body' as the flag destination."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)PR.{0,10}body|pull.request.{0,10}body", body),
+            "code/SKILL.md must name 'PR body' as intent-flag destination (MAR-65 AC-2)")
+
+    def test_executor_never_rewrite_intent(self):
+        """AC-2: code-executor.md must carry never/rewrite/intent co-occurrence."""
+        body = self._executor_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(never|NEVER).{0,200}rewrite|rewrite.{0,200}(never|NEVER)",
+                      body, re.DOTALL),
+            "code-executor.md must carry never/NEVER near rewrite (MAR-65 AC-2)")
+
+    # --- AC-4: factual/intent boundary with concrete examples ---
+
+    def test_skill_factual_term_agent_counts(self):
+        """AC-4: code/SKILL.md must name agent/subagent counts as a factual item."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(agent.subagent.counts|agent counts|subagent counts)", body),
+            "code/SKILL.md must name 'agent/subagent counts' as a factual item (MAR-65 AC-4)")
+
+    def test_skill_factual_term_shipped_vs_planned(self):
+        """AC-4: code/SKILL.md must name shipped-vs-planned status as a factual item."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(shipped.vs.planned|shipped vs planned)", body),
+            "code/SKILL.md must name 'shipped-vs-planned' as a factual item (MAR-65 AC-4)")
+
+    def test_skill_factual_term_topology(self):
+        """AC-4: code/SKILL.md must name topology as a factual item."""
+        body = self._code_body()
+        self.assertIn("topology", body,
+                      "code/SKILL.md must name 'topology' as a factual item (MAR-65 AC-4)")
+
+    def test_skill_factual_term_version(self):
+        """AC-4: code/SKILL.md must name version numbers as a factual item."""
+        body = self._code_body()
+        self.assertIn("version", body,
+                      "code/SKILL.md must name 'version' as a factual item (MAR-65 AC-4)")
+
+    def test_skill_intent_term_goals(self):
+        """AC-4: code/SKILL.md must name goals as an intent item."""
+        body = self._code_body()
+        self.assertIn("goals", body,
+                      "code/SKILL.md must name 'goals' as an intent item (MAR-65 AC-4)")
+
+    def test_skill_intent_term_nfr(self):
+        """AC-4: code/SKILL.md must name NFR/non-functional as an intent item."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(NFR|non-functional)", body),
+            "code/SKILL.md must name 'NFR'/'non-functional' as an intent item (MAR-65 AC-4)")
+
+    def test_skill_intent_term_scope(self):
+        """AC-4: code/SKILL.md must name scope as an intent item."""
+        body = self._code_body()
+        self.assertIn("scope", body,
+                      "code/SKILL.md must name 'scope' as an intent item (MAR-65 AC-4)")
+
+    def test_skill_intent_term_vision(self):
+        """AC-4: code/SKILL.md must name vision as an intent item."""
+        body = self._code_body()
+        self.assertIn("vision", body,
+                      "code/SKILL.md must name 'vision' as an intent item (MAR-65 AC-4)")
+
+    def test_executor_factual_term_agent_counts(self):
+        """AC-4: code-executor.md must name agent/subagent counts as a factual item."""
+        body = self._executor_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(agent.subagent.counts|agent counts|subagent counts)", body),
+            "code-executor.md must name 'agent/subagent counts' as a factual item "
+            "(MAR-65 AC-4)")
+
+    def test_executor_factual_term_shipped_vs_planned(self):
+        """AC-4: code-executor.md must name shipped-vs-planned status as a factual item."""
+        body = self._executor_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(shipped.vs.planned|shipped vs planned)", body),
+            "code-executor.md must name 'shipped-vs-planned' as a factual item (MAR-65 AC-4)")
+
+    def test_executor_factual_term_topology(self):
+        """AC-4: code-executor.md must name topology as a factual item."""
+        body = self._executor_body()
+        self.assertIn("topology", body,
+                      "code-executor.md must name 'topology' as a factual item (MAR-65 AC-4)")
+
+    def test_executor_intent_term_goals(self):
+        """AC-4: code-executor.md must name goals as an intent item."""
+        body = self._executor_body()
+        self.assertIn("goals", body,
+                      "code-executor.md must name 'goals' as an intent item (MAR-65 AC-4)")
+
+    def test_executor_intent_term_nfr(self):
+        """AC-4: code-executor.md must name NFR/non-functional as an intent item."""
+        body = self._executor_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(NFR|non-functional)", body),
+            "code-executor.md must name 'NFR'/'non-functional' as an intent item "
+            "(MAR-65 AC-4)")
+
+    def test_executor_intent_term_vision(self):
+        """AC-4: code-executor.md must name vision as an intent item."""
+        body = self._executor_body()
+        self.assertIn("vision", body,
+                      "code-executor.md must name 'vision' as an intent item (MAR-65 AC-4)")
+
+    # --- AC-7: regression guard (existing path tokens still present) ---
+
+    def test_skill_step4_still_has_requirements_path(self):
+        """AC-7: code/SKILL.md step-4 block must still reference requirements_path."""
+        body = self._code_body()
+        self.assertIn("requirements_path", body,
+                      "code/SKILL.md must still reference requirements_path in step 4 "
+                      "(MAR-65 AC-7 regression guard)")
+
+    def test_skill_step4_still_has_architecture_path(self):
+        """AC-7: code/SKILL.md step-4 block must still reference architecture_path."""
+        body = self._code_body()
+        self.assertIn("architecture_path", body,
+                      "code/SKILL.md must still reference architecture_path in step 4 "
+                      "(MAR-65 AC-7 regression guard)")
+
+    def test_skill_step4_still_has_adr_path(self):
+        """AC-7: code/SKILL.md step-4 block must still reference adr_path."""
+        body = self._code_body()
+        self.assertIn("adr_path", body,
+                      "code/SKILL.md must still reference adr_path in step 4 "
+                      "(MAR-65 AC-7 regression guard)")
+
+    def test_executor_still_has_requirements_path(self):
+        """AC-7: code-executor.md must still reference requirements_path."""
+        body = self._executor_body()
+        self.assertIn("requirements_path", body,
+                      "code-executor.md must still reference requirements_path "
+                      "(MAR-65 AC-7 regression guard)")
+
+    def test_executor_still_has_architecture_path(self):
+        """AC-7: code-executor.md must still reference architecture_path."""
+        body = self._executor_body()
+        self.assertIn("architecture_path", body,
+                      "code-executor.md must still reference architecture_path "
+                      "(MAR-65 AC-7 regression guard)")
+
+    def test_executor_still_has_adr_path(self):
+        """AC-7: code-executor.md must still reference adr_path."""
+        body = self._executor_body()
+        self.assertIn("adr_path", body,
+                      "code-executor.md must still reference adr_path "
+                      "(MAR-65 AC-7 regression guard)")
+
+
+class TestVerifierProductDocConsistency(unittest.TestCase):
+    """MAR-65 Spec 02 (AC-3, AC-6): pin the product-doc-consistency check in the
+    Documentation dimension of SKILL.md (Verify section) and code-verifier.md.
+    Additive assertions only — no existing assertion modified."""
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def agent_path(self, skill, role):
+        return os.path.join(PLUGIN, "agents", "%s-%s.md" % (skill, role))
+
+    def _code_body(self):
+        return read(self.skill_path("code"))
+
+    def _verifier_body(self):
+        return read(self.agent_path("code", "verifier"))
+
+    # --- AC-3: product-doc-consistency check in SKILL.md Verify / Documentation dimension ---
+
+    def test_skill_verify_documentation_names_prd_md(self):
+        """AC-3: prd.md must appear in SKILL.md within 2000 chars of the Verify
+        'Documentation' dimension heading."""
+        body = self._code_body()
+        anchor = body.find("**Documentation**")
+        self.assertGreater(anchor, 0,
+                           "code/SKILL.md must contain '**Documentation**' in Verify section")
+        window = body[anchor:anchor + 2000]
+        self.assertIn("prd.md", window,
+                      "code/SKILL.md Verify/Documentation dimension must name prd.md "
+                      "(MAR-65 AC-3)")
+
+    def test_skill_verify_documentation_names_roadmap_md(self):
+        """AC-3: roadmap.md must appear in SKILL.md within 2000 chars of the Verify
+        'Documentation' dimension heading."""
+        body = self._code_body()
+        anchor = body.find("**Documentation**")
+        self.assertGreater(anchor, 0,
+                           "code/SKILL.md must contain '**Documentation**' in Verify section")
+        window = body[anchor:anchor + 2000]
+        self.assertIn("roadmap.md", window,
+                      "code/SKILL.md Verify/Documentation dimension must name roadmap.md "
+                      "(MAR-65 AC-3)")
+
+    def test_skill_blocking_factual_co_occurrence(self):
+        """AC-3: code/SKILL.md must co-locate 'blocking' and 'factual'/'stale'
+        within 500 chars."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)blocking.{0,500}(factual|stale)|(factual|stale).{0,500}blocking",
+                      body, re.DOTALL),
+            "code/SKILL.md must co-locate 'blocking' and 'factual'/'stale' within 500 chars "
+            "(MAR-65 AC-3 — stale factual claim produces blocking finding)")
+
+    def test_skill_flagged_intent_co_occurrence(self):
+        """AC-3: code/SKILL.md must co-locate 'flagged' and 'intent' within 500 chars."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)flagged.{0,500}intent|intent.{0,500}flagged", body, re.DOTALL),
+            "code/SKILL.md must co-locate 'flagged' and 'intent' within 500 chars "
+            "(MAR-65 AC-3 — intent contradiction produces flagged divergence, not a block)")
+
+    def test_verifier_documentation_names_prd_md(self):
+        """AC-3: code-verifier.md must name prd.md in the Documentation dimension."""
+        body = self._verifier_body()
+        self.assertIn("prd.md", body,
+                      "code-verifier.md must name prd.md in Documentation dimension "
+                      "(MAR-65 AC-3)")
+
+    def test_verifier_documentation_names_roadmap_md(self):
+        """AC-3: code-verifier.md must name roadmap.md in the Documentation dimension."""
+        body = self._verifier_body()
+        self.assertIn("roadmap.md", body,
+                      "code-verifier.md must name roadmap.md in Documentation dimension "
+                      "(MAR-65 AC-3)")
+
+    def test_verifier_blocking_factual_co_occurrence(self):
+        """AC-3: code-verifier.md must co-locate 'blocking' and 'factual'/'stale'
+        within 500 chars."""
+        body = self._verifier_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)blocking.{0,500}(factual|stale)|(factual|stale).{0,500}blocking",
+                      body, re.DOTALL),
+            "code-verifier.md must co-locate 'blocking' and 'factual'/'stale' within 500 chars "
+            "(MAR-65 AC-3)")
+
+    def test_verifier_flagged_intent_co_occurrence(self):
+        """AC-3: code-verifier.md must co-locate 'flagged'/'flagging' and 'intent' within 500
+        chars."""
+        body = self._verifier_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)(flagged|flagging).{0,500}intent|intent.{0,500}(flagged|flagging)",
+                      body, re.DOTALL),
+            "code-verifier.md must co-locate 'flagged'/'flagging' and 'intent' within 500 chars "
+            "(MAR-65 AC-3 — intent contradiction is flagged, not blocking)")
+
+    # --- AC-6: docs_only relaxation prose intact (regression guard) ---
+
+    def test_skill_docs_only_present(self):
+        """AC-6: 'docs_only' must appear in code/SKILL.md (the relaxation block)."""
+        body = self._code_body()
+        self.assertIn("docs_only", body,
+                      "code/SKILL.md must contain 'docs_only' (docs_only relaxation block) "
+                      "(MAR-65 AC-6 regression guard)")
+
+    def test_skill_every_other_dimension_documentation_consistency(self):
+        """AC-6: 'every other dimension' must co-occur with 'Documentation consistency'
+        within 300 chars in code/SKILL.md."""
+        body = self._code_body()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)every other dimension.{0,300}Documentation consistency|"
+                r"Documentation consistency.{0,300}every other dimension",
+                body, re.DOTALL),
+            "code/SKILL.md must co-locate 'every other dimension' and "
+            "'Documentation consistency' within 300 chars (MAR-65 AC-6 regression guard)")
+
+
+class TestAdr0007Amendment(unittest.TestCase):
+    """MAR-65 Spec 03 (AC-5): pin the ADR-0007 amendment that extends the
+    induction loop to factual prd/roadmap content. Additive assertions only."""
+
+    def _adr_path(self):
+        return os.path.join(REPO_ROOT, "docs", "adr", "0007-living-docs-by-induction.md")
+
+    def _adr_index_path(self):
+        return os.path.join(REPO_ROOT, "docs", "adr", "README.md")
+
+    def _adr_body(self):
+        return read(self._adr_path())
+
+    def _index_body(self):
+        return read(self._adr_index_path())
+
+    # --- AC-5: ADR-0007 names factual prd/roadmap content ---
+
+    def test_adr_names_prd_md(self):
+        """AC-5: docs/adr/0007 must contain 'prd.md'."""
+        body = self._adr_body()
+        self.assertIn("prd.md", body,
+                      "docs/adr/0007-living-docs-by-induction.md must contain 'prd.md' "
+                      "(MAR-65 AC-5 — extended scope)")
+
+    def test_adr_names_roadmap_md(self):
+        """AC-5: docs/adr/0007 must contain 'roadmap.md'."""
+        body = self._adr_body()
+        self.assertIn("roadmap.md", body,
+                      "docs/adr/0007-living-docs-by-induction.md must contain 'roadmap.md' "
+                      "(MAR-65 AC-5 — extended scope)")
+
+    def test_adr_factual_prd_co_occurrence(self):
+        """AC-5: 'factual' must co-occur with 'prd' within 500 chars in ADR-0007."""
+        body = self._adr_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)factual.{0,500}prd|prd.{0,500}factual", body, re.DOTALL),
+            "docs/adr/0007 must co-locate 'factual' and 'prd' within 500 chars "
+            "(MAR-65 AC-5 — factual scope extension recorded)")
+
+    def test_adr_intent_flag_co_occurrence(self):
+        """AC-5: 'intent' must co-occur with 'flag'/'FLAGS' within 500 chars in ADR-0007."""
+        body = self._adr_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)intent.{0,500}(flag|FLAGS)|(flag|FLAGS).{0,500}intent",
+                      body, re.DOTALL),
+            "docs/adr/0007 must co-locate 'intent' and 'flag'/'FLAGS' within 500 chars "
+            "(MAR-65 AC-5 — intent-flag rule recorded)")
+
+    def test_adr_status_still_accepted(self):
+        """AC-5: ADR-0007 status must remain 'Accepted'."""
+        body = self._adr_body()
+        self.assertIn("Accepted", body,
+                      "docs/adr/0007 status must remain 'Accepted' (MAR-65 AC-5)")
+
+    # --- AC-5: ADR index consistent ---
+
+    def test_adr_index_has_0007_entry(self):
+        """AC-5: docs/adr/README.md must contain '0007'."""
+        body = self._index_body()
+        self.assertIn("0007", body,
+                      "docs/adr/README.md must contain '0007' entry (MAR-65 AC-5)")
+
+    def test_adr_index_0007_mentions_product_or_prd(self):
+        """AC-5: 'prd' or 'product' must appear within 200 chars of '0007' in
+        docs/adr/README.md."""
+        body = self._index_body()
+        self.assertIsNotNone(
+            re.search(r"(?i)0007.{0,200}(prd|product)|(prd|product).{0,200}0007",
+                      body, re.DOTALL),
+            "docs/adr/README.md must mention 'prd'/'product' within 200 chars of '0007' "
+            "(MAR-65 AC-5 — index summary updated)")
+
+
 if __name__ == "__main__":
     unittest.main()
