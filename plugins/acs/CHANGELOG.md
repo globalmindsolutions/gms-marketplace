@@ -15,7 +15,68 @@ the notes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-28
+
+### Added
+
+- **Complexity-adaptive delivery — four-lane routing from size × stakes
+  (MAR-56).** `/acs:create-ticket` now classifies each ticket on two
+  user-confirmed axes (`size`, `stakes`) and derives a deterministic `lane`
+  (`TRIVIAL` / `SMALL` / `STANDARD` / `COMPLEX`) via `derive_lane()`, persisted
+  to `ticket.json`, `pipeline-state.json`, and `tickets-index.json`. The lane
+  drives how much process the pipeline applies; the default is full/standard
+  rigor and lighter lanes are opt-in (rigor is never silently dropped).
+
+- **Verifier-as-gate with lane-driven verify depth (MAR-58).** acs is
+  autonomous-first: the verifier subagent is the in-loop quality gate on
+  *every* lane (it always runs). `verify_depth(size, stakes)` scales only the
+  iteration ceiling — `light` (single pass, `VERIFY_ITERATION_CAP["light"]=1`)
+  for TRIVIAL/SMALL low/normal-stakes tickets, `full` (up to 3 iterations + the
+  11-dimension review + e2e when configured) for STANDARD/COMPLEX and all
+  high-stakes tickets — with a high-stakes floor to `full`. The TDD/coverage
+  gate runs in full in every lane and is never trimmed by depth selection.
+
+- **Trivial/small fast-lane: spec authoring folded into `/code` (MAR-59).** On
+  the TRIVIAL/SMALL lanes, `gate_code` no longer requires a standalone
+  `/acs:create-spec` run or a populated `specs/` directory; spec authoring
+  (with acceptance criteria mapped to tests) is folded into `/acs:code`'s plan
+  phase by the code-planner, and `/acs:ship` skips the standalone create-spec
+  step for those lanes. STANDARD/COMPLEX/absent/unknown lanes stay fail-closed
+  on the full create-spec path. The TDD/coverage hard-fail and verifier-as-gate
+  (light cap 1, no inline human gate) are preserved on the fast lane.
+
+- **Apply-tier inlining: create-pr / merge-pr / create-ticket run inline
+  (MAR-60).** The three apply-work skills run deterministic-inline (coordinator
+  + at most one executor), never a planner/executor/verifier triad, in every
+  lane — generalizing the proven merge-pr exempt-PR inline shape. Every
+  load-bearing apply step, post-hook, and canonical `states` key is preserved;
+  the six triad-keeping skills (create-spec, code, create-prd, create-design,
+  create-architecture, create-project) are unchanged. ~$0.10 inline vs ~$0.70
+  triad per apply step (G14/G15).
+
+- **Mid-flight lane escalation, upward-only (MAR-57).** A ticket whose true
+  size/stakes turn out higher than its classification is automatically
+  escalated to a higher-rigor lane mid-run (on the first higher-stakes signal:
+  a verifier finding, a touched `high_stakes_paths` glob, or an explicit
+  request) — recomputing lane + verify depth via `escalate_lane()` and
+  re-persisting, without restarting, and re-introducing any skipped stage.
+  De-escalation is guaranteed never automatic or silent: no unattended path
+  lowers a ticket's lane or authoritative size/stakes below a user-confirmed
+  value (an interactive downgrade command is deferred to a later ticket).
+
+- **`/acs:init` prompts for per-role models on a fresh init.** Model selection
+  is now a first-class setup step: a Recommended preset
+  (planner/verifier/coordinator = opus, executor = sonnet), Inherit-session-
+  model, or Custom per role. Re-runs only ask whether to change current values.
+
 ### Changed
+
+- **PRD/roadmap reconciled to the shipped verifier-as-gate model.** The
+  complexity-adaptive PRD/roadmap previously described a three-tier model that
+  dropped the verifier on trivial tickets behind a human-approval gate; the
+  docs now describe the autonomous-first model that actually shipped (verifier
+  gates on every lane; lane-driven verify depth; no inline human-approval gate;
+  PR review is the human checkpoint).
 
 - **In-process stdlib XML validation is now the default fast path (MAR-61).**
   `validate_xml.py` now validates every message via the in-process
@@ -363,7 +424,8 @@ Initial release.
   release from the matching changelog section when the plugin manifest
   version changes on `main`.
 
-[Unreleased]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.3...v0.1.5
