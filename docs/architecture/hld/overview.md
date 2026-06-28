@@ -27,7 +27,7 @@ plugins distributed from this repository. Plugins differ in shape:
 |-----------|----------------------|
 | Enforceable ordering | Deterministic gate scripts on the `PreToolUse(Skill)` event; exit 2 blocks; gates fail closed. |
 | Resumability | File-based state only: append-only run history, phase artifacts, pipeline ledger; no conversation memory between steps. |
-| Verification independence | Separate planner/executor/verifier contexts; verifiers anchor on gated upstream contracts, re-run all cheap checks. |
+| Verification independence | Separate planner/executor/verifier contexts on the six triad-keeping skills (create-prd, create-architecture, create-project, create-design, create-spec, code); verifiers anchor on gated upstream contracts, re-run all cheap checks. Apply-work skills (create-ticket, create-pr, merge-pr) run inline and are verifier-gated upstream by /code's verifier. |
 | Parallelism | Workspace partitioned by repo → ticket; per-checkout pointers; re-entrant per-checkout locks; worktree-per-ticket. |
 | Portability | stdlib-only Python ≥ 3.9 hooks; markdown skills/agents; no pip installs on consumer machines. |
 | Auditability | Pretty-printed JSON everywhere; archives never deleted; clarification ledger; per-run metrics. |
@@ -45,6 +45,14 @@ plugins distributed from this repository. Plugins differ in shape:
 4. **Fail-safe prose**: a skill that forgets its post-hook leaves
    `runs[-1] = in_progress` — the next gate reads "not completed"; nothing
    unlocks by omission.
+5. **Complexity-adaptive delivery, verifier-as-gate**: each ticket is routed
+   into one of four lanes (TRIVIAL, SMALL, STANDARD, COMPLEX) on size × stakes
+   axes by `derive_lane()`. The `/code` verifier subagent is the in-loop quality
+   gate in *every* lane; the lane only scales the iteration ceiling
+   (light = 1, full = 3) via `verify_depth()`, never whether the verifier runs.
+   On TRIVIAL/SMALL lanes `/acs:create-spec` is folded into `/code`'s plan phase
+   rather than run as a separate step; lanes escalate upward mid-flight (never
+   downward) on the first higher-stakes signal.
 
 ## Document map
 

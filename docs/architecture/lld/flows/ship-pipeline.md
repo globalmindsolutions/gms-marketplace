@@ -14,7 +14,7 @@ sequenceDiagram
 
     Dev->>SH: /acs:ship "Add wishlist support"  (or SHOP-123 to resume)
     SH->>WS: read ledger -> first incomplete step
-    loop create-ticket -> [create-design] -> create-spec -> code -> create-pr
+    loop create-ticket -> [create-design] -> [create-spec] -> code -> create-pr
         SH->>SK: invoke Skill acs:<step> <ticket-id> directly<br/>(PreToolUse gate fires on the coordinator's call)
         SK-->>SH: full run (reflection, hooks, state) then <handoff status="..."><br/>(~1 KB: summary, artifacts, next-step)
         alt status = needs_input
@@ -41,5 +41,12 @@ runs each child's pipeline independently (parallel worktrees supported).
 > always derived from the ticket's authoritative axes (`size` × `stakes`) via
 > `derive_lane(size, stakes, needs_design, type)`. This field is available in
 > `pipeline-state.json` (alongside `flow`) and in `tickets-index.json` (alongside
-> `needs_design`) for observability and metrics (G14/G15). The `[create-spec]` bracketing
-> of TRIVIAL/SMALL lanes in the Mermaid diagram above is a D6 change owned by MAR-59.
+> `needs_design`) for observability and metrics (G14/G15).
+>
+> **NOTE (MAR-59 / fast-lane fold):** The `[create-spec]` bracketing in the Mermaid
+> diagram above is conditional on lane. For `TRIVIAL` / `SMALL` lanes the coordinator
+> **skips** the standalone create-spec step — spec authoring is folded into `/code`'s
+> plan phase. For `STANDARD` / `COMPLEX` lanes (and any high-stakes ticket, which
+> `derive_lane` floors to `STANDARD`, plus absent/unrecognized lanes treated as
+> `STANDARD` fail-closed) the full create-spec step runs. See `ship/SKILL.md`
+> "Pipeline order" and "Picking the next step".

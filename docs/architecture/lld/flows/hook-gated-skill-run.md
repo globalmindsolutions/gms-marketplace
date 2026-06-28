@@ -3,6 +3,16 @@
 The core runtime flow: every hooked skill, direct invocation. (Under `/ship`
 the coordinator invokes the same flow directly — see `ship-pipeline.md`.)
 
+The diagram below shows the **full reflection triad** (planner → executor →
+verifier), which is how the six triad-keeping skills run (`create-prd`,
+`create-architecture`, `create-project`, `create-design`, `create-spec`,
+`code` — `/acs:code` is the example traced here). The three **apply-work
+skills** (`create-ticket`, `create-pr`, `merge-pr`) run **inline** instead
+(MAR-60): the coordinator performs the steps directly or delegates to **at most
+one executor**, with **no planner and no verifier subagent** in any lane —
+their correctness is gated upstream by `/code`'s verifier (`create-pr`,
+`merge-pr`) or by the schema plus the user-confirmation gate (`create-ticket`).
+
 ```mermaid
 sequenceDiagram
     actor Dev as Developer
@@ -71,6 +81,17 @@ The iteration ceiling for the reflection loop is **lane-driven**:
 The ceiling is determined by `verify_depth(ticket.lane, ticket.stakes)` in
 `acs_lib.py` (see `VERIFY_ITERATION_CAP`). High-stakes tickets ALWAYS use full
 verify regardless of size (stakes floor; AC-2).
+
+This initial ceiling is the **starting** value only. At the start of each
+iteration `/code` runs the in-loop **upward escalation check** (MAR-57): on a
+verifier finding signaling higher stakes/size, a `recommend_stakes` glob match
+firing `"high"`, or an explicit user/agent request, `guard_axes` clamps each
+axis upward and `escalate_lane` recomputes the lane via `derive_lane`; the
+ceiling is then raised to `max(current, new)` — **monotone, never lowered**.
+Completed iterations are preserved (no restart). De-escalation is never
+automatic. If escalation crosses the fast→full fold boundary (TRIVIAL/SMALL →
+STANDARD/COMPLEX) the `create-spec` stage is re-introduced — `/code` spawns the
+full `create-spec` triad per its "Escalation pickup" protocol before resuming.
 
 **The verifier subagent runs in every lane as the in-loop gate (C-5).** Light
 verify reduces the iteration ceiling only — the verifier always runs; there is

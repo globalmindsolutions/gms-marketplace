@@ -42,6 +42,24 @@ C4Component
 
 Every coordinator follows the same protocol components (defined once in
 `plugins/acs/docs/INTERNALS.md`): Start (skill-start) → Resume/reconcile →
-Reflection loop (XML tasks → phase artifacts → validation → persistence) →
+work loop (XML tasks → phase artifacts → validation → persistence) →
 User interaction (clarification ledger) → Context pressure (handoff) →
 Finish (result document → post-hook → completion report).
+
+The work loop has two shapes. The **six triad-keeping skills** (create-prd,
+create-architecture, create-project, create-design, create-spec, code) run the
+full plan→execute→verify reflection loop, spawning a separate planner, executor,
+and verifier subagent per phase — so **6 active triads (18 agents)**. The
+**three apply-work skills** (create-ticket, create-pr, merge-pr) run **inline**
+(MAR-60): the coordinator performs the work directly or delegates to **at most
+one** executor subagent, and **never spawns a planner or verifier** in any lane.
+Their correctness is gated otherwise — create-ticket by its schema plus the
+Step-2 user-confirmation gate, create-pr/merge-pr verifier-gated upstream by
+`/code`'s verifier (`code-state.json` `states.verifier_passed == true`). With the
+3 reachable apply-work executors that is **21 reachable agents**; the 6 plan/verify
+files of the apply-work skills remain on disk but are orphaned.
+
+`/code`'s loop also adapts to the ticket's lane: the verifier runs in **every**
+lane (`verify_depth()` scales only the iteration ceiling, light = 1 / full = 3),
+TRIVIAL/SMALL lanes fold spec authoring into the plan phase (MAR-59), and a lane
+may escalate upward mid-flight (MAR-57).
