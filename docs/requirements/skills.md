@@ -79,11 +79,20 @@ configuration.
 
 Purpose: drive the whole pipeline from one command.
 
-- `/ship <prompt>` MUST run the workflow skills in order —
-  `/create-ticket` → `/create-design` (when the ticket needs design) →
-  `/create-spec` → `/code` → `/create-pr` — and stop before `/merge-pr`,
-  which a reviewer lands as a separate step
-  ([workflow.md](workflow.md#umbrella-command-ship)).
+- `/ship <prompt>` MUST run the workflow skills in lane-conditional order
+  and stop before `/merge-pr`, which a reviewer lands as a separate step
+  ([workflow.md](workflow.md#umbrella-command-ship)):
+  - **TRIVIAL or SMALL lane:** `/create-ticket` → `/create-design` (when
+    the ticket needs design) → `/code` → `/create-pr` — create-spec is
+    skipped; spec authoring is folded into `/code`'s plan phase.
+  - **STANDARD, COMPLEX, high-stakes, absent, or unrecognized lane:**
+    `/create-ticket` → `/create-design` (when the ticket needs design) →
+    `/create-spec` → `/code` → `/create-pr` — the full path, unchanged.
+  Note: `stakes == "high"` resolves to STANDARD via `derive_lane`
+  (rule 3: high-stakes floor), so high-stakes tickets never reach the
+  TRIVIAL/SMALL branch and always keep the full create-spec path. An
+  absent or unrecognized lane is treated as STANDARD (fail-closed;
+  consistent with `derive_lane`'s conservative default).
 - MUST NOT bypass any pre/post hook; it adds orchestration only.
 - SHOULD be resumable: re-running it for a ticket continues from the first
   incomplete step recorded in workspace state.
@@ -523,7 +532,14 @@ Purpose: implement the specs in the consumer repo using TDD.
   resume from the first unfinished spec/phase
   ([workflow.md](workflow.md#resuming-a-ticket)).
 - Pre-hook (`pre-code.py`) MUST verify specs exist and `/create-spec`
-  completed; otherwise exit 2 to stop the skill.
+  completed for STANDARD, COMPLEX, absent, and unrecognized lanes; otherwise
+  exit 2 to stop the skill. For TRIVIAL and SMALL lanes the gate does NOT
+  require create-spec completion or a populated `specs/` directory — on those
+  lanes, when no specs are present, spec authoring (scope, approach,
+  API/data changes, and a test plan with every acceptance criterion mapped to a
+  test) is folded into `/code`'s plan phase by the code-planner. The
+  TDD/coverage hard-fail and verifier-as-gate (light cap 1, no inline human
+  gate) are preserved unchanged in every lane.
 - Subagents: `code-planner`, `code-executor`, `code-verifier`.
 - When the coverage target cannot be reached, `/code` MUST **hard fail**:
   stop, record the achieved coverage and reason in `code-state.json`, and

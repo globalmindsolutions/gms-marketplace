@@ -22,8 +22,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/skill-start.py" --skill code --args
 ```
 
 If it exits non-zero: STOP and surface its stderr verbatim to the user. Do not
-improvise a workaround (pre-code.py already verified specs exist and
-/acs:create-spec completed; skill-start gates the rest).
+improvise a workaround (pre-code.py has verified the gate preconditions: for
+STANDARD/COMPLEX/absent/unknown lanes, specs exist and /acs:create-spec
+completed; for TRIVIAL/SMALL lanes, the gate passes without requiring specs —
+spec authoring is folded into the plan phase below).
 
 Parse the printed context JSON. Fields you will use:
 
@@ -240,6 +242,44 @@ Task the planner with `<inputs>` of all `<partition>/specs/*.md`,
 `<partition>/ticket.json`, `<design.dir>/design.md` when `design.required`,
 and the relevant consumer-repo source/docs. The planner returns (artifact:
 `<partition>/phases/code/iter-<n>-plan.md`):
+
+**Fast-lane spec authoring (TRIVIAL/SMALL lanes with no specs present)**
+
+Before producing the standard plan content, check whether this run is on a
+fast lane: read `context.ticket.lane` (prefer the persisted `ticket.lane`;
+fall back to recomputing via
+`derive_lane(ticket.size, ticket.stakes, ticket.needs_design, ticket.type)`
+when absent; treat absent/unrecognized as STANDARD).
+
+When the lane is `TRIVIAL` or `SMALL` AND `<partition>/specs/` is empty or
+absent, the code-planner ADDITIONALLY produces, as part of its plan artifact
+(`<partition>/phases/code/iter-<n>-plan.md`), the spec content the standalone
+create-spec planner would have produced. This content covers, in order:
+
+- **Scope** — what the ticket delivers; acceptance criteria quoted verbatim.
+- **Approach** — solution shape at contract level (components, interfaces,
+  algorithms, error handling); indicative paths only.
+- **API/data changes** — endpoints, schemas, contracts, migrations, config;
+  documentation impact (which consumer-repo docs the change touches).
+- **Test plan** — every `ticket.acceptance_criteria` entry MUST map to at
+  least one test the plan will write; the coverage target
+  (`settings.test_coverage_percent`) stated explicitly; e2e impact stated.
+- **Out of scope** — adjacent work excluded.
+
+**Mandatory clauses** (both MUST appear verbatim in the plan artifact):
+
+- "no separate /acs:create-spec invocation and no separate create-spec planner
+  subagent" (AC-3)
+- "every ticket.acceptance_criteria entry maps to at least one test the folded
+  plan will write" (AC-4)
+
+If specs already exist for a fast-lane ticket, the fold does NOT activate —
+the planner reads the existing specs normally. The fold only activates when no
+specs are present.
+
+This fold does NOT alter the execute or verify phases. The existing
+`### Coverage hard fail` block (AC-5) and the existing `### Verify-depth`
+block (AC-6) apply unchanged in every lane; see those sections.
 
 - Analysis of every spec: implementation order (follow the spec numbering),
   ambiguities and explicit clarifying questions (surface these — see User

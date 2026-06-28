@@ -79,7 +79,7 @@ never silently fall back.
 |---|------|-----------|
 | 1 | create-ticket | new request, or resume with the step not completed |
 | 2 | create-design | conditional — see below |
-| 3 | create-spec | always |
+| 3 | create-spec | STANDARD, COMPLEX, high-stakes, absent, or unrecognized lanes only. Fast lanes (TRIVIAL/SMALL) skip this step — spec authoring is folded into /code's plan phase. Note: `stakes == "high"` resolves to STANDARD via `derive_lane` (rule 3), so high-stakes tickets never reach the TRIVIAL/SMALL branch and always keep the full create-spec path. |
 | 4 | code | always |
 | 5 | create-pr | always |
 | — | merge-pr | **NEVER by you** — ship stops at create-pr; the PR is landed separately after review |
@@ -113,12 +113,24 @@ not your memory, decides what comes next.
    a product-level delivery ticket — /acs:ship does not drive those; tell
    the user to re-run the matching product skill (/acs:create-prd,
    /acs:create-architecture, /acs:create-project) and stop.
-3. A step is complete iff `steps.<skill>.status == "completed"`. Walk the
-   order create-ticket → create-design (when required per the rules above)
-   → create-spec → code → create-pr and pick the FIRST step that is not
-   complete. A step recorded `in_progress`, `failed`, `interrupted`, or
-   `handed_off` is simply re-run — the step's own skill-start reconciles
-   recorded state against reality; you never reconcile yourself.
+3. A step is complete iff `steps.<skill>.status == "completed"`. Before
+   walking, read `ticket.lane` from `<partition>/ticket.json` (already
+   loaded in step 2):
+   - If `ticket.lane` is `"TRIVIAL"` or `"SMALL"`: walk the order
+     create-ticket → create-design (when required per the rules above) →
+     code → create-pr, **skipping create-spec**. Spec authoring is folded
+     into /code's plan phase (no separate /acs:create-spec invocation).
+   - For any other value — `"STANDARD"`, `"COMPLEX"`, absent, or
+     unrecognized — walk the full order: create-ticket → create-design
+     (when required per the rules above) → create-spec → code → create-pr.
+     An absent or unrecognized lane is treated as STANDARD (fail-closed;
+     consistent with `derive_lane`'s conservative default). Note: a
+     high-stakes ticket (`stakes == "high"`) resolves to STANDARD via
+     `derive_lane` and always keeps the full create-spec path.
+   Pick the FIRST step in the applicable order that is not complete. A step
+   recorded `in_progress`, `failed`, `interrupted`, or `handed_off` is
+   simply re-run — the step's own skill-start reconciles recorded state
+   against reality; you never reconcile yourself.
 4. If create-pr is complete → go to Finish.
 
 ## Running a step

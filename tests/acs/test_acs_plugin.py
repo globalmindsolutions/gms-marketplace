@@ -137,6 +137,55 @@ class TestGates(AcsWorkspaceCase):
                              "e2e": {"command": "make e2e", "per_iteration": False}})
         self.assertEqual(self.pre("create-ticket").returncode, 0)
 
+    def test_gate_code_trivial_lane_skips_create_spec(self):
+        # AC-1: TRIVIAL lane does NOT require create-spec or specs/ dir.
+        # derive_lane("trivial", "low", ...) -> "TRIVIAL" (acs_lib.py:98-99)
+        t = self.new_ticket("X", "task", "--size", "trivial", "--stakes", "low")
+        # No create-spec start/post, no specs/ directory created.
+        result = self.pre("code", t)
+        self.assertEqual(result.returncode, 0)
+
+    def test_gate_code_small_lane_skips_create_spec(self):
+        # AC-1: SMALL lane does NOT require create-spec or specs/ dir.
+        # derive_lane("small", "normal", ...) -> "SMALL" (acs_lib.py:96-97)
+        t = self.new_ticket("Y", "task", "--size", "small", "--stakes", "normal")
+        # No create-spec start/post, no specs/ directory created.
+        result = self.pre("code", t)
+        self.assertEqual(result.returncode, 0)
+
+    def test_gate_code_standard_lane_blocks_without_create_spec(self):
+        # AC-2: STANDARD lane blocks when create-spec not completed and no specs dir.
+        # derive_lane("standard", "normal", ...) -> "STANDARD" (acs_lib.py:94-95)
+        t = self.new_ticket("Z", "task")
+        # No create-spec, no specs dir.
+        result = self.pre("code", t)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("create-spec", result.stderr)
+
+    def test_gate_code_complex_lane_blocks_without_create_spec(self):
+        # AC-2: COMPLEX lane blocks when create-spec not completed and no specs dir.
+        # derive_lane("large", ...) -> "COMPLEX" (acs_lib.py:88-89)
+        t = self.new_ticket("W", "task", "--size", "large")
+        # No create-spec, no specs dir.
+        result = self.pre("code", t)
+        self.assertEqual(result.returncode, 2)
+
+    def test_gate_code_absent_lane_recomputes_via_derive_lane(self):
+        # AC-2: When the "lane" key is absent from ticket.json (legacy ticket),
+        # gate_code recomputes via derive_lane and fails-closed for STANDARD axes.
+        t = self.new_ticket("V", "task")  # default size=standard -> STANDARD
+        # Remove the "lane" key from ticket.json to simulate a legacy ticket.
+        tdir = self.tdir(t)
+        ticket_path = os.path.join(tdir, "ticket.json")
+        with open(ticket_path) as fh:
+            doc = json.load(fh)
+        doc.pop("lane", None)
+        with open(ticket_path, "w") as fh:
+            json.dump(doc, fh)
+        # derive_lane fallback: absent size -> STANDARD -> full-lane block.
+        result = self.pre("code", t)
+        self.assertEqual(result.returncode, 2)
+
 
 class TestPipelineSequence(AcsWorkspaceCase):
     """The full gate chain: epic -> child -> design -> spec -> code -> pr -> merge."""
