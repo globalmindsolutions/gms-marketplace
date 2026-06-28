@@ -15,6 +15,25 @@ the notes.
 
 ## [Unreleased]
 
+### Changed
+
+- **`/acs:code` doc-sync now reconciles factual prd.md/roadmap.md claims and
+  flags intent divergence (MAR-65).** Execute step 4 is extended so the
+  executor reconciles FACTUAL claims in `docs/product/prd.md` and
+  `docs/product/roadmap.md` as part of the same changeset diff (agent/subagent
+  counts, feature/epic shipped-vs-planned status, component topology, version
+  numbers, file path references). Intent content (goals, NFR targets, scope,
+  vision, requirements rationale) remains `/acs:create-prd`-owned: when a
+  changeset contradicts stated intent, the executor flags the divergence in its
+  execute-report `problems` field (surfaced in the coordinator result document
+  and PR body) and NEVER rewrites intent content. The code-planner's
+  documentation map now assesses prd/roadmap factual impact; the
+  code-verifier's Documentation-consistency dimension (dimension 11) makes a
+  stale factual claim a blocking finding and an intent contradiction an explicit
+  flagged divergence (not a block). ADR-0007 is amended inline to record the
+  extended scope, the factual-vs-intent boundary, the divergence rationale, and
+  the enforcement note (status remains Accepted).
+
 ## [0.3.0] - 2026-06-28
 
 ### Added
