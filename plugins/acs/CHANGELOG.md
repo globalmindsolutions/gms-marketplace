@@ -69,6 +69,15 @@ the notes.
   (planner/verifier/coordinator = opus, executor = sonnet), Inherit-session-
   model, or Custom per role. Re-runs only ask whether to change current values.
 
+- **Behavioral-eval coverage for all 16 skills.** The `skill_triggers` routing
+  eval now covers every skill: the 14 model-invocable ones by description, and
+  the 2 user-only ones (`install-hooks`, `update`) by an explicit-invocation
+  probe plus a negative-routing probe that asserts `disable-model-invocation`
+  is honored. A new free, deterministic `update_migration` scenario certifies
+  `/acs:update`'s local logic offline — numeric semver comparison
+  (installed vs latest) and the Step-6 migration checks (settings validate
+  against the schema; workspace requirement enforced).
+
 ### Changed
 
 - **PRD/roadmap reconciled to the shipped verifier-as-gate model.** The

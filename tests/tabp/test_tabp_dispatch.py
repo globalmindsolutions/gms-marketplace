@@ -83,8 +83,8 @@ class TabpDispatchTest(unittest.TestCase):
     # AC7 — acs unaffected regression
     # ------------------------------------------------------------------
 
-    def test_plugin_acs_unaffected_five_scenarios(self):
-        """--plugin acs --list must still exit 0 and list exactly 5 scenarios."""
+    def test_plugin_acs_unaffected_six_scenarios(self):
+        """--plugin acs --list must still exit 0 and list exactly 6 scenarios."""
         result = _run(sys.executable, RUN_EVALS, "--plugin", "acs", "--list")
         self.assertEqual(
             result.returncode, 0,
@@ -93,8 +93,8 @@ class TabpDispatchTest(unittest.TestCase):
         )
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
         self.assertEqual(
-            len(lines), 5,
-            "Expected 5 acs scenario lines, got %d:\n%s" % (len(lines), result.stdout),
+            len(lines), 6,
+            "Expected 6 acs scenario lines, got %d:\n%s" % (len(lines), result.stdout),
         )
 
     # ------------------------------------------------------------------
