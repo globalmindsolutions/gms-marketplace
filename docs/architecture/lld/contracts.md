@@ -12,6 +12,12 @@ Canonical detail: `plugins/acs/docs/INTERNALS.md`.
 | `<handoff … status>` | step coordinator → /ship | ≤ ~1 KB summary, artifact refs, `<next-step>`, `<questions>` on `needs_input` |
 
 Validation: `validate_xml.py` on every send/receive; one re-request, then fail.
+By default validation runs **in-process** via `validate_structurally()` (pure
+stdlib `xml.etree`, raised to XSD-equivalent coverage) — no subprocess is
+spawned per message. `xmllint` is invoked only opt-in when
+`ACS_XML_AUTHORITATIVE=1` AND `xmllint` is on `PATH` AND the XSD is present; its
+absence never blocks a verdict. A `validate_batch()` Python API validates a list
+of messages in one in-process loop (MAR-61).
 
 ## Coordinator ↔ deterministic layer (CLI)
 

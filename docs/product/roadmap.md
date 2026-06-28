@@ -4,7 +4,8 @@
 > ship through the pipeline. Maintained alongside the PRD via `/acs:create-prd`.
 
 Each plugin has its own milestone track. M1/M2/M3 below are the **acs plugin**
-track (v0.2.0 shipped; v0.3.0 in progress). The **tabp plugin** track follows
+track (v0.2.0 shipped; v0.3.0 in progress, with the M3 complexity-adaptive
+delivery epic already shipped to main — see below). The **tabp plugin** track follows
 with T-M1 as the urgent next milestone. Future plugins add their own track here
 without restructuring the existing tracks.
 
@@ -16,7 +17,10 @@ Epic-level scope (retrofit; built before dogfooding began):
 
 - Marketplace + plugin skeleton (manifests, CI, release automation).
 - Deterministic layer: hooks, gates, workspace/state, locks, metrics, helper CLIs.
-- 14 skills + 27 agents with the reflection protocol, XML/XSD messaging, phase artifacts.
+- 14 skills + 27 agent files on disk; the reflection (plan→execute→verify) protocol is
+  active on the six triad-keeping skills, while the three apply-work skills
+  (`/acs:create-ticket`, `/acs:create-pr`, `/acs:merge-pr`) run inline (coordinator +
+  at most one executor) after the M3 apply-tier inlining. XML/XSD messaging, phase artifacts.
 - Quality systems: grounding rules, clarification ledger, completion reports,
   size control, `docs_only`, e2e layer, living-architecture enforcement.
 - Test suites: deterministic-layer integration tests + prose contract tests; CI green.
@@ -261,29 +265,42 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
   Could-have feature. The MECHANISM is settled in this epic's **design phase / an ADR**,
   consistent with how the tabp-upgrade and standards epics defer mechanism. Traces **G12**
   (+ the Org/Platform-admin persona).
-- **Epic: complexity-adaptive delivery** — acs scales process to ticket complexity ×
-  human supervision (three tiers: trivial / standard / complex-unattended). Maps to PRD
-  **G14, G15, G16** and the acs Must-have **Complexity-adaptive delivery** feature
-  ([`prd.md`](prd.md#features-moscow)). Parallel to the other M3 epics above; independent
-  of the doc-set and standards work (touches pipeline process-volume, not the doc-set
-  surface). Child workstreams (sequenced):
-  1. **Trivial/small fast-lane** — fold create-spec (and the separate planner) into
-     `/code`'s plan phase for TRIVIAL/SMALL lanes; the verifier still gates (light
-     verify) and the TDD/coverage gate still runs — no human-approval gate
-     replaces them (autonomous-first).
-  2. **Verifier-as-gate + lane-driven verify depth** — the verifier subagent is the
-     in-loop quality gate on every lane (it always runs); `verify_depth(size,
+- **Epic: complexity-adaptive delivery** *(shipped — MAR-56/57/58/59/60/61 merged to main)*
+  — acs scales process to ticket complexity × human supervision across **four lanes**
+  (TRIVIAL / SMALL / STANDARD / COMPLEX) assembled from two axes — **size × stakes** —
+  via the single authoritative `derive_lane(size, stakes, needs_design, ticket_type)`
+  producer. Maps to PRD **G14, G15, G16** and the acs Must-have **Complexity-adaptive
+  delivery** feature ([`prd.md`](prd.md#features-moscow)). Ran parallel to the other M3
+  epics above; independent of the doc-set and standards work (touches pipeline
+  process-volume, not the doc-set surface). Child workstreams (all shipped):
+  1. **Trivial/small fast-lane** *(MAR-59)* — for TRIVIAL/SMALL lanes, create-spec (and
+     its separate planner) is folded into `/code`'s plan phase; the create-spec gate
+     passes without requiring specs, so pipeline ordering create-spec → code is now
+     CONDITIONAL on lane. The verifier still gates (light verify) and the TDD/coverage
+     gate still runs — no human-approval gate replaces them (autonomous-first).
+  2. **Verifier-as-gate + lane-driven verify depth** *(MAR-58)* — the verifier subagent
+     is the in-loop quality gate on every lane (it always runs); `verify_depth(lane,
      stakes)` scales the iteration ceiling (`light` = 1, `full` = 3), with a
      high-stakes floor to `full`. The code TDD/coverage gate always stays
      regardless of lane.
-  3. **Apply-tier inlining** — sequence **merge-pr first** (its existing exempt-PR mode,
-     E5.5 / MAR-9, already runs the inline coordinator+executor shape as a working
-     template), then **create-pr**, then **create-ticket**.
-  4. **In-process / batched XML validation + clarify batching** — replace per-send/receive
-     `validate_xml.py` subprocess spawns with in-process/batched validation; batch
-     `clarify.py` record-before-act calls.
-  5. **create-ticket complexity-tier flag** — set the user-confirmed tier at ticket
-     creation, alongside `needs_design` (C-7 precedent).
+  3. **Apply-tier inlining** *(MAR-60)* — **create-pr**, **merge-pr**, and **create-ticket**
+     now run INLINE (coordinator + at most one executor, NO planner/verifier triad) in
+     every lane; their triad agent files are retained on disk but orphaned (MAR-62 tracks
+     cleanup). create-pr/merge-pr are gated upstream by `/code`'s verifier; create-ticket
+     by the schema + Step-2 user-confirmation gate.
+  4. **In-process / batched XML validation + clarify batching** *(MAR-61)* — `validate_xml.py`
+     now validates IN-PROCESS via stdlib `xml.etree` on the default fast path (no
+     per-message subprocess); `xmllint` is opt-in only under `ACS_XML_AUTHORITATIVE=1`.
+     A `validate_batch()` API validates a list in one in-process call; clarify questions
+     are batched at the coordinator level (group ≥ 2 open clarifications into one
+     `AskUserQuestion`).
+  5. **create-ticket classification + lane assembly** *(MAR-56)* — set the user-confirmed
+     **size** and **stakes** at ticket creation alongside `needs_design` (C-7 precedent);
+     `derive_lane()` computes the lane (written to `ticket.json`, mirrored to
+     `pipeline-state.json`). **Mid-flight escalation** *(MAR-57)* — `/code` escalates the
+     lane upward (automatic on the first higher-stakes signal); de-escalation is never
+     automatic, and crossing the fast→full fold boundary re-introduces the create-spec
+     stage/triad, preserving completed work.
 - Semver stability promise for state-file schemas (migration notes per minor).
 
 ## tabp plugin track

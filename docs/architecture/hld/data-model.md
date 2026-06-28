@@ -35,6 +35,9 @@ erDiagram
         bool needs_design
         bool docs_only
         string due_date "ISO-8601 date or null (NEW, MAR-8 Child 3)"
+        enum size "trivial|small|standard|large (axis for derive_lane; MAR-56)"
+        enum stakes "low|normal|high (axis for derive_lane; MAR-56)"
+        enum lane "TRIVIAL|SMALL|STANDARD|COMPLEX (derived cache from size x stakes via derive_lane; MAR-56)"
     }
     SKILL_STATE {
         string skill PK
@@ -57,6 +60,7 @@ erDiagram
         enum flow "ticket|product"
         json steps "per-skill status/timestamps/summary"
         json totals "runs, seconds, tokens, cost"
+        string lane "TRIVIAL|SMALL|STANDARD|COMPLEX (mirror of ticket.lane; written by update_pipeline; not declared in schema, allowed via additionalProperties)"
     }
     CLARIFICATIONS {
         string ticket_id PK
