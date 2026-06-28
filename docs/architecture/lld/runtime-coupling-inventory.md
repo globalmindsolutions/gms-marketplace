@@ -4,6 +4,20 @@
 **Committed path (stable citation target):** `docs/architecture/lld/runtime-coupling-inventory.md`
 **Superseded by:** N/A — this is the canonical seam definition for the MAR-3 epic family.
 
+> **Correction (2026-06-28).** The original Codex-CLI-equivalent entries for Surfaces
+> #1–#3 below were authored from *unverified assumptions* about Codex's hook/skill/subagent
+> surfaces. Those assumptions are **refuted by the official OpenAI Codex documentation**
+> (Build plugins, Hooks, Agent Skills, Subagents); the affected cells and the seam-boundary
+> statement are corrected in place. The corresponding MAR-5 implementation (PR #134) was
+> **rejected** and the multi-runtime epic must be re-scoped against these constraints. Key
+> facts: Codex exposes **no `Skill` hook matcher** and **no `SessionEnd` event**;
+> `PreToolUse` is *"a guardrail rather than a complete enforcement boundary"* and fires only
+> for `Bash`/`apply_patch`/MCP tools; plugin hooks run only once user-trusted, so
+> **non-bypassable gating requires org-managed `requirements.toml` hooks**; Codex injects
+> `${CLAUDE_PLUGIN_ROOT}` (not `$ACS_PLUGIN_ROOT`); and Codex spawns subagents **only on
+> explicit request** via a distinct custom-agent format (`.codex/agents/*.toml`,
+> not plugin-bundled), so the coordinator-driven reflection cycle does not port 1:1.
+
 ---
 
 ## Purpose
@@ -26,18 +40,19 @@ surface list below is governed by this invariant.
 
 ## 1. Runtime-coupled surfaces
 
-These five mechanisms are specific to Claude Code and require a Codex CLI adapter or no-bypass
-shim. Each entry states the surface name, the Claude Code mechanism, the verified file:line entry
-points, and the Codex CLI equivalent owned by the named child.
+These five mechanisms are specific to Claude Code and require a Codex CLI adapter. Each entry
+states the surface name, the Claude Code mechanism, the verified file:line entry points, and the
+**corrected** Codex CLI equivalent owned by the named child (see Correction note above — the
+original "no-bypass shim" framing is refuted by the official Codex docs).
 
 Source: `MAR-3/design.md:234-243` (reproduced exactly; anchors re-verified against the live repo
 immediately before commit).
 
 | # | Surface | Claude Code mechanism | Verified entry points | Codex CLI equivalent | Owning child |
 |---|---------|----------------------|-----------------------|---------------------|--------------|
-| 1 | Hook gating | `PreToolUse(Skill)` → `dispatch.py pre` → exit-2 blocks before coordinator runs | `hooks.json:3-14` (PreToolUse matcher `Skill`, command `dispatch.py pre`, timeout 30); `dispatch.py:25-38` (`def skill_name_from_payload`); `dispatch.py:41-75` (`def main()` — routes by skill, exit 2 on missing/blocked); `acs_lib.py:43` (`HOOKED_SKILLS` allowlist) | No-bypass shim: first instruction in each acs skill Codex definition calls `dispatch.py pre`; exits non-zero before skill body | MAR-5 |
-| 2 | Session termination | `SessionEnd` → `dispatch.py session-end` → `interrupted` + lock release | `hooks.json:16-26` (SessionEnd hook, command `dispatch.py session-end`, timeout 30); `dispatch.py:49-54` (session-end branch → `acs_lib.session_end`); `acs_lib.py:1621` (`def session_end`) | Codex `Stop` event → same `dispatch.py session-end` path | MAR-5 |
-| 3 | Reflection-subagent dispatch | `Agent` tool spawns planner/executor/verifier in separate contexts; XML `<task>`/`<result>` validated against `acs-messages.xsd` | `acs-messages.xsd` (`contracts.md:6-14`); validated by `validate_xml.py`; coordinator/agent invocation is prompt-layer; file-anchored via partition (`overview.md:30,41`) | Serial Codex sessions (`--ephemeral`), one per phase; reads only workspace artifact paths from the partition; same XML `<task>`/`<result>` contract (`acs-messages.xsd` unchanged) | MAR-6 |
+| 1 | Hook gating | `PreToolUse(Skill)` → `dispatch.py pre` → exit-2 blocks before coordinator runs | `hooks.json:3-14` (PreToolUse matcher `Skill`, command `dispatch.py pre`, timeout 30); `dispatch.py:25-38` (`def skill_name_from_payload`); `dispatch.py:41-75` (`def main()` — routes by skill, exit 2 on missing/blocked); `acs_lib.py:43` (`HOOKED_SKILLS` allowlist) | **Corrected:** Codex has **no `Skill` matcher** and `PreToolUse` is a guardrail, not an enforcement boundary. Gate via `PreToolUse` on `Bash`/`apply_patch` returning `permissionDecision:deny` (or exit 2), reusing `dispatch.py` via `${CLAUDE_PLUGIN_ROOT}`. **Best-effort by default; non-bypassable only via org-managed `requirements.toml` hooks.** (Original "no-bypass shim" is unachievable — refuted; PR #134 rejected.) | MAR-5 |
+| 2 | Session termination | `SessionEnd` → `dispatch.py session-end` → `interrupted` + lock release | `hooks.json:16-26` (SessionEnd hook, command `dispatch.py session-end`, timeout 30); `dispatch.py:49-54` (session-end branch → `acs_lib.session_end`); `acs_lib.py:1621` (`def session_end`) | **Corrected:** Codex has **no `SessionEnd` event**. `Stop` is per-turn (fires at every turn end, requires JSON on stdout, `decision:block` means *continue*) — so it must **not** be mapped to `dispatch.py session-end` (that would release the lock mid-session). Session finalization / lock release on Codex is **lease / next-run-reconcile** based. | MAR-5 |
+| 3 | Reflection-subagent dispatch | `Agent` tool spawns planner/executor/verifier in separate contexts; XML `<task>`/`<result>` validated against `acs-messages.xsd` | `acs-messages.xsd` (`contracts.md:6-14`); validated by `validate_xml.py`; coordinator/agent invocation is prompt-layer; file-anchored via partition (`overview.md:30,41`) | **Corrected:** Codex spawns subagents **only on explicit request** and manages orchestration itself; custom agents are `.codex/agents/*.toml` (fields `name`/`description`/`developer_instructions`) — a different format/location, **not plugin-bundled** — with `max_depth` default 1. The coordinator-driven planner/executor/verifier fan-out does **not** port 1:1. Native Codex custom-agents vs a single-agent fallback is an **open epic design decision**; the XML `<task>`/`<result>` artifact contract (`acs-messages.xsd`) stays unchanged whichever is chosen. | MAR-6 |
 | 4 | Per-role model/effort | `settings.models.<role>` + `overrides` → `acs_lib.resolve_role_model` | `acs_lib.py:485-500` (`def resolve_role_model(settings, skill, role)`); config surface `settings.schema.json` `models` block (`contracts.md:51-58`) | `settings.models.codex.<role>` → `resolve_role_model` with `runtime=codex` parameter (MAR-6 adds `runtime` param); FAIL on rejected model/effort unchanged | MAR-6 |
 | 5 | Cost/token sourcing | Coordinator fills `tokens`/`cost_usd` in result doc; ADR-0026 hybrid precedent | `data-model.md:46-54` (RUN_ENTRY `tokens`/`cost_usd` fields); `contracts.md:21` (result doc contract); `docs/adr/0026-tabp-hybrid-cost-sourcing.md` | `~/.codex/sessions/` token actuals if available; OpenAI pricing snapshot added; `cost_basis` label preserves auditability; `cost_basis=estimate` fallback when session token source unavailable | MAR-6/MAR-7 |
 
@@ -110,8 +125,12 @@ All four exist in `plugins/acs/hooks/scripts/` (confirmed by `ls plugins/acs/hoo
 The seam is the line between surfaces 1–5 (runtime-coupled) and the agnostic list above.
 
 **Runtime-coupled side (surfaces 1–5):** mechanisms that depend on a Claude Code primitive
-(`PreToolUse`, `SessionEnd`, `Agent` tool, `settings.models.<role>` resolution path,
-coordinator-sourced token/cost data). These require a Codex CLI adapter or shim.
+(`PreToolUse(Skill)`, `SessionEnd`, `Agent` tool, `settings.models.<role>` resolution path,
+coordinator-sourced token/cost data). These require a Codex CLI adapter — and, per the
+Correction note, **not all have a Codex equivalent**: Codex has no `Skill` matcher and no
+`SessionEnd`, its `PreToolUse` gates only `Bash`/`apply_patch`/MCP as a best-effort guardrail
+(non-bypassable only via managed `requirements.toml`), and its subagent model diverges from the
+`Agent`-tool reflection cycle.
 
 **Runtime-agnostic side:** the entire deterministic stdlib layer — all components invoked via
 Bash and reading/writing workspace JSON — is identical on both runtimes. No adapter is needed

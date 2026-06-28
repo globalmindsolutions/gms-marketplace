@@ -391,6 +391,15 @@ Maps to PRD extended G6 (runtime portability) and the acs Could-have **Multi-run
 support — OpenAI Codex CLI** feature ([`prd.md`](prd.md#features-moscow)). Reverses the
 prior acs "non-Claude-Code runtimes" Won't-have (Reversal note MAR-2).
 
+**Priority & sequencing — explicitly behind v0.3.0.** This is a low-priority
+**Could-have**, scheduled **after v0.3.0 (M3 GA) ships**. Nothing in v0.3.0 depends on
+it, and it does not compete with the M3 epics (Verify & Operate, Standards & Principles,
+Org enforcement) for v0.3.0 capacity — it is not started, designed, or ticketed until
+v0.3.0 is out. A first prior attempt (PR #134, MAR-5) was rejected for not matching the
+official Codex platform; the eventual epic must be re-scoped from scratch against the
+documented Codex primitives (see the Correction note in
+[`runtime-coupling-inventory.md`](../architecture/lld/runtime-coupling-inventory.md)).
+
 Make the acs gated pipeline runnable on **OpenAI Codex CLI** in addition to Claude Code:
 
 - **Runtime abstraction.** Identify which pipeline mechanisms are Claude-Code-specific
@@ -399,11 +408,17 @@ Make the acs gated pipeline runnable on **OpenAI Codex CLI** in addition to Clau
   cost/tokens) vs runtime-agnostic (the stdlib-only deterministic layer: gating, state,
   ids, metrics, convention checks).
 - **Codex CLI runtime adapter.** Map each Claude-Code-specific mechanism onto Codex
-  CLI's equivalents (or a portable shim), preserving the **same gates** — 0 gate
-  escapes, full audit trail — on the second runtime.
+  CLI's primitives where they exist, and account for the gaps where they do not — Codex
+  exposes **no skill-invocation hook matcher and no `SessionEnd` event**, its
+  `PreToolUse` is a **guardrail rather than a complete enforcement boundary**, and its
+  subagent model (explicit-spawn, custom-agent TOML format) differs from the
+  coordinator-driven reflection cycle. Preserve the **full audit trail** on the second
+  runtime; gate integrity is **best-effort by default, non-bypassable only via
+  org-managed (`requirements.toml`) hooks**.
 - **Validation (extended G6).** Publish an end-to-end run of the acs pipeline on Codex
-  CLI with 0 gate escapes and 0 lost audit-trail artifacts, within 1 release of the
-  capability shipping (the G6 runtime-portability metric).
+  CLI with **0 lost audit-trail artifacts**, and **0 gate escapes under managed-hook
+  enforcement**, within 1 release of the capability shipping (the G6 runtime-portability
+  metric).
 
 **Deferral:** the MECHANISM (the hook-gating / subagent-protocol / dispatch mapping and
 which gates are native vs shimmed on Codex CLI) is deferred to this epic's dedicated

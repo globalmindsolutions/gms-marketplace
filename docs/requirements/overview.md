@@ -104,4 +104,8 @@ diagrams as code).
 
 ## Out of scope (for now)
 
-- Non–Claude Code runtimes.
+- Non–Claude Code runtimes for the *implemented* contract. *(OpenAI Codex CLI is a
+  planned **second** runtime — see [prd.md](../product/prd.md) "Multi-runtime support"
+  and the roadmap. It is not yet implemented; when it ships, gate integrity on Codex is
+  best-effort by default and non-bypassable only via org-managed `requirements.toml`
+  hooks, since Codex exposes no skill-invocation hook matcher and no `SessionEnd` event.)*
