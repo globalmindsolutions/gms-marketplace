@@ -74,6 +74,13 @@ CASES = [
 
 def run():
     check = Check(META["name"])
+
+    def _norm(skill):
+        # The Skill tool_use may report the skill name bare ("init") or
+        # namespaced ("acs:init") depending on the runtime; compare on the
+        # bare name so the assertion is independent of that.
+        return skill.split(":", 1)[-1] if isinstance(skill, str) else skill
+
     for label, init, request, expected in CASES:
         want = "acs:" + expected
         with Sandbox(prefix="EVAL", slug="trig", init=init) as sb:
@@ -82,8 +89,8 @@ def run():
             # case — no whole-suite retry needed.
             got = sb.trigger(request)
             for _ in range(2):
-                if got == want:
+                if _norm(got) == expected:
                     break
                 got = sb.trigger(request)
-        check.ok("%-20s -> %s" % (label, want), got == want, "got=%r" % got)
+        check.ok("%-20s -> %s" % (label, want), _norm(got) == expected, "got=%r" % got)
     return check
