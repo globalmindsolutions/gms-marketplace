@@ -1,10 +1,24 @@
-"""s04 — description-trigger evals for all 16 skills (paid, E1.2).
+"""s04 — routing evals for all 16 skills (paid, E1.2).
 
-For each skill, a natural-language request that describes the intent *without
-naming the skill* must route to that skill. Asserts on the first `Skill`
-tool_use the model makes (captured and then killed, so the skill body never
-runs). A miss is a real finding: the skill's `description` frontmatter isn't
-discriminating that request from its neighbors.
+Three kinds of probe, covering every skill:
+
+1. Description-trigger (14 model-invocable skills): a natural-language request
+   that describes the intent *without naming the skill* must route to that
+   skill. A miss is a real finding — the skill's `description` frontmatter
+   isn't discriminating that request from its neighbors.
+
+2. Explicit-invocation (the 2 user-only skills `install-hooks` and `update`,
+   which set `disable-model-invocation: true`): the explicit `/acs:<skill>`
+   command must still route to the skill. The model is forbidden from
+   auto-routing to these, so a description probe can't reach them — but the
+   explicit path the user types must work.
+
+3. Negative-routing (same 2 user-only skills): a bare description of their
+   intent must NOT auto-route to them, proving `disable-model-invocation` is
+   honored — the model should pick a different skill or no skill at all.
+
+All probes assert on the first `Skill` tool_use the model makes (captured and
+then killed, so the skill body never runs).
 """
 
 from harness import Sandbox, Check
@@ -13,10 +27,17 @@ META = {
     "name": "skill_triggers",
     "tier": "paid",
     "goal": "route",
-    "summary": "the right skill fires for a natural-language request (all 16)",
+    "summary": "right skill routes for all 16 (14 by description, 2 user-only by explicit cmd + no-auto-route)",
 }
 
-# (label, init?, request, expected skill) — requests avoid naming the skill.
+# Description-trigger + explicit-invocation cases.
+# (label, init?, request, expected skill).
+#   - The 14 model-invocable skills use a request that avoids naming the skill.
+#   - The 2 user-only skills (install-hooks, update) set
+#     disable-model-invocation, so they can only be reached by the explicit
+#     `/acs:<skill>` command — a description would never route to them. Their
+#     positive case is therefore the literal explicit invocation; their
+#     no-auto-route guarantee is covered by NEGATIVE below.
 CASES = [
     ("init", False,
      "Set up and initialize the acs configuration for this repository.",
@@ -69,6 +90,30 @@ CASES = [
      "time per ticket for this repo — not delivery throughput, just the tool "
      "usage and cost side.",
      "usage"),
+    # User-only skills: positive case = the explicit command the user types.
+    # (A description can't reach them — see NEGATIVE for that guarantee.)
+    ("install-hooks", True,
+     "/acs:install-hooks",
+     "install-hooks"),
+    ("update", True,
+     "/acs:update",
+     "update"),
+]
+
+# Negative-routing cases for the two user-only skills: a bare description of
+# their intent must NOT auto-route to them (disable-model-invocation is
+# honored). PASS when the model picks anything other than the forbidden skill
+# — a different skill, or no skill at all (None).
+# (label, init?, request, forbidden skill)
+NEGATIVE = [
+    ("install-hooks", True,
+     "Set up the local git hooks for this clone so our configured commit-message "
+     "and branch-name conventions are enforced before anything gets pushed.",
+     "install-hooks"),
+    ("update", True,
+     "Check whether there's a newer version of the acs plugin available and "
+     "summarize what changed since the version I have installed.",
+     "update"),
 ]
 
 
@@ -93,4 +138,13 @@ def run():
                     break
                 got = sb.trigger(request)
         check.ok("%-20s -> %s" % (label, want), _norm(got) == expected, "got=%r" % got)
+
+    # Negative routing: a bare description must NOT auto-invoke a user-only
+    # skill. One probe is enough — a single auto-route is already a failure;
+    # re-probing could only mask a real disable-model-invocation regression.
+    for label, init, request, forbidden in NEGATIVE:
+        with Sandbox(prefix="EVAL", slug="trig", init=init) as sb:
+            got = sb.trigger(request)
+        check.ok("%-20s -/> %s (no auto-route)" % (label, "acs:" + forbidden),
+                 _norm(got) != forbidden, "got=%r" % got)
     return check
