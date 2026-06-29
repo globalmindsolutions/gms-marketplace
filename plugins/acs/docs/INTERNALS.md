@@ -13,7 +13,7 @@ component follows.
 | Marketplace manifest | `.claude-plugin/marketplace.json` (repo root) | 1 |
 | Plugin manifest | `plugins/acs/.claude-plugin/plugin.json` | 1 |
 | Skills | `plugins/acs/skills/<name>/SKILL.md` | 13 |
-| Subagents | `plugins/acs/agents/<skill>-<role>.md` | 27 (9 skills x planner/executor/verifier) |
+| Subagents | `plugins/acs/agents/<skill>-<role>.md` | 27 files (9 × 3 roles); 21 reachable (6 triad-keeping skills × 3 + 3 apply-work executors), 6 apply-work planner/verifier files orphaned (MAR-60 inlining) |
 | Hooks | `plugins/acs/hooks/hooks.json` + `hooks/scripts/` | dispatcher + 9 pre + 9 post |
 | Helper CLIs | `hooks/scripts/{skill-start,new-ticket,handoff,validate_xml}.py` | 4 |
 | Status lines (opt-in) | `hooks/scripts/statusline.py` (prompt line: ticket + pipeline glyphs + cost) and `hooks/scripts/subagent-statusline.py` (agent-panel rows for reflection subagents) — offered by /init Step 7b; `statusLine`/`subagentStatusLine` stay user-owned settings, never forced. A plugin-root `settings.json` default was deliberately NOT shipped: `${CLAUDE_PLUGIN_ROOT}` expansion there is unverified, and a silently broken default is worse than an explicit opt-in. | 2 |
@@ -214,7 +214,13 @@ All coordinator <-> subagent communication uses the three message shapes in
 
 ## Subagents
 
-27 agents named `<skill>-<role>` in `plugins/acs/agents/`. Conventions:
+27 agent files named `<skill>-<role>` in `plugins/acs/agents/` (9 skills × 3
+roles), of which 21 are reachable: the six **triad-keeping skills**
+(`create-spec`, `code`, `create-prd`, `create-design`, `create-architecture`,
+`create-project`) spawn all three roles, while the three **apply-work skills**
+(`create-ticket`, `create-pr`, `merge-pr`) run inline and use only their
+executor — so their six planner/verifier files are orphaned (MAR-60 inlining).
+Conventions:
 
 - Frontmatter: `name`, `description` (when the coordinator spawns it), and
   `model: inherit` — the *actual* model/effort comes from `settings.json`
