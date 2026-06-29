@@ -15,7 +15,7 @@ context and consequences.
 | [0004](0004-reflection-with-independent-verifier.md) | Reflection trio; verifier anchors on gated contracts | Accepted |
 | [0005](0005-xml-messaging-with-xsd.md) | XML subagent messaging validated by XSD | Accepted |
 | [0006](0006-spec-plan-altitude-split.md) | Standing spec/plan altitude split (keep /create-spec) | Accepted |
-| [0007](0007-living-docs-by-induction.md) | Living architecture & requirements by induction | Accepted |
+| [0007](0007-living-docs-by-induction.md) | Living architecture, requirements & factual product docs by induction | Accepted |
 | [0008](0008-conditional-steps-as-ticket-data.md) | Conditional steps are ticket data, never invocation options | Accepted |
 | [0009](0009-clarification-ledger-and-grounding.md) | Clarification ledger + grounding rules | Accepted |
 | [0010](0010-explicit-semver-distribution.md) | Explicit-semver distribution with an update assistant | Accepted |

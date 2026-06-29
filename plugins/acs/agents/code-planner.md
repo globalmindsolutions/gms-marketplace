@@ -62,8 +62,13 @@ iteration="n">` element (schema: `schemas/acs-messages.xsd`) with:
    README, API/usage docs, the changelog where the repo keeps one. Always
    include the **living-requirements file** for each touched feature area
    (`<requirements_path>/<area>.md` — pick the area from the PRD feature the
-   ticket traces to; name the file even when it does not exist yet). When the
-   change adds/removes components or alters the data model, integrations, or
+   ticket traces to; name the file even when it does not exist yet). Always
+   assess whether the change makes any factual claim in
+   `docs/product/prd.md` or `docs/product/roadmap.md` stale (factual items:
+   agent/subagent counts, feature/epic shipped-vs-planned status, component
+   topology, version numbers, file path references); if so, include prd.md
+   and/or roadmap.md in the documentation map for the executor to reconcile.
+   When the change adds/removes components or alters the data model, integrations, or
    deployment: name the HLD files under `architecture_path` to update (C4
    views, data model, deployment) and the design sequence diagrams to merge
    into `<architecture_path>/lld/flows/`. When `adr_path` is set and the design

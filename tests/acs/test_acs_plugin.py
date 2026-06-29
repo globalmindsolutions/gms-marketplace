@@ -265,6 +265,20 @@ class TestPipelineSequence(AcsWorkspaceCase):
         default = self.new_ticket("Real change", "task")
         self.assertFalse(lib.load_ticket(self.tdir(default))["docs_only"])
 
+    def test_docs_only_relaxation_section_present_in_code_skill(self):
+        """MAR-65 AC-6: 'docs_only' must appear in code/SKILL.md to anchor the
+        docs_only relaxation section so it cannot be silently dropped."""
+        import os
+        plugin = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "plugins", "acs")
+        skill_path = os.path.join(plugin, "skills", "code", "SKILL.md")
+        with open(skill_path, encoding="utf-8") as fh:
+            body = fh.read()
+        self.assertIn("docs_only", body,
+                      "code/SKILL.md must contain 'docs_only' (docs_only relaxation section "
+                      "must not be silently dropped) (MAR-65 AC-6)")
+
 
 class TestConcurrencyAndRecovery(AcsWorkspaceCase):
     def setUp(self):

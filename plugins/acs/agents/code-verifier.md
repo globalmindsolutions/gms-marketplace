@@ -83,6 +83,18 @@ ALL of the following — every dimension that fails produces blocking findings:
     that changes user-observable behavior without a matching update to the
     touched area's file under `requirements_path` is a blocking finding (the
     standing contract must describe current behavior). A doc that contradicts the diff is a finding.
+    **Product-doc-consistency check:** make a positive, evidenced determination
+    of whether the changeset leaves any factual claim in `docs/product/prd.md`
+    or `docs/product/roadmap.md` stale (factual items: agent/subagent counts,
+    feature/epic shipped-vs-planned status, component topology, version numbers,
+    file path references; per the boundary defined in code-executor step 4).
+    Stale factual claim + no matching update in the SAME diff = a blocking
+    finding (`severity="blocking" dimension="documentation"`, with `file` set
+    to the stale prd.md or roadmap.md). An intent contradiction (goals, NFR
+    targets, scope, vision, requirements rationale) found by the changeset is
+    an explicit flagged divergence — emit a flagged divergence note, NOT a
+    blocking finding; intent content stays `/acs:create-prd`-owned and must
+    NOT be rewritten. No factual impact → no-op for this check.
     Make the architectural-impact call YOURSELF, from the diff: list in your
     report, with evidence, whether the changeset adds/removes components,
     touches schemas/migrations, adds external integrations, or changes
