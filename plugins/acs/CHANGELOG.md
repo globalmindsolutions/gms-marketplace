@@ -17,6 +17,17 @@ the notes.
 
 ### Changed
 
+- **CLAUDE.md managed block now steers ticket work to `/acs:code` / `/acs:ship`
+  and explains why hand-made PRs fail the gate.** The `/acs:init`-installed
+  guidance (`CLAUDE.acs.md`) tells the assistant to implement/code a ticket via
+  `/acs:code <ticket-id>` (or `/acs:ship`) and let `/acs:create-pr` open the PR,
+  never a raw `gh pr create`. It makes the mechanism explicit: the pipeline
+  renders the branch/title/body/label from **the project's own**
+  `.acs/settings.json` formats, and the CI convention gate validates against the
+  same file — so a pipeline-produced PR passes by construction while a hand-made
+  one bypasses the rendering and fails. Re-run `/acs:init` to refresh the block
+  in an existing repo.
+
 - **`/acs:code` doc-sync now reconciles factual prd.md/roadmap.md claims and
   flags intent divergence (MAR-65).** Execute step 4 is extended so the
   executor reconciles FACTUAL claims in `docs/product/prd.md` and
