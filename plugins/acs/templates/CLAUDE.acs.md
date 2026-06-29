@@ -11,10 +11,17 @@ This repository uses **acs** (the agentic coding system). The pipeline is the
 default path for changes — do not hand-roll branches, commits, or PRs that
 bypass it.
 
-- **Ship everyday changes through `/acs:ship`.** It runs the full pipeline
+- **When asked to implement or code a ticket, use `/acs:code <ticket-id>`** (or
+  `/acs:ship` to drive the whole pipeline). Let the skill open the PR via
+  `/acs:create-pr` — never open it yourself with `gh pr create`. The pipeline
+  reads **this project's** naming rules from `.acs/settings.json`
+  (`formats.branch_name`, `formats.pr_title`, `formats.commit_message`, required
+  PR sections, the `ACS` label) and renders the branch, title, body, and label
+  to match. The CI convention gate validates against the same settings, so a
+  pipeline-produced PR passes by construction; a hand-made PR bypasses the
+  rendering and fails the gate.
+- **Ship a brand-new change through `/acs:ship`.** It runs the full pipeline
   (create-ticket → create-spec → code → create-pr) and ends by opening the PR.
-  Do **not** run a raw `gh pr create` for ordinary work — the convention gate
-  expects pipeline-rendered branches, titles, labels, and descriptions.
 - **Ticketed work uses the `{ticket_prefix}-N` prefix.** Reference the ticket id
   in branch names and commits so the gate and tracker can trace the change.
 - **For a legitimate one-off NON-ticket PR** (a hotfix, a chore, a doc tweak
