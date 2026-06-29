@@ -61,7 +61,24 @@ never quietly do code work under a docs-only ticket.
    hard-fail decision.
 4. **Update the docs — part of the change, not a follow-up**, per the plan's
    documentation map: README, API/usage docs, code comments, the changelog
-   where the repo keeps one, following repo conventions. When the map names a
+   where the repo keeps one, following repo conventions.
+
+   **Code-comment policy — minimal, idea-only (token discipline).** Comments
+   are output you pay for; keep them lean:
+   - On first implementation, give each function/class at most ONE short
+     comment stating its single responsibility (the main idea). We follow SOLID
+     — one unit, one responsibility — so a one-liner is enough. Do not narrate
+     the body line-by-line, restate the signature, or add section banners.
+   - NEVER put a ticket id in a code comment (or a docstring). Ticket ids belong
+     in commit messages and PR bodies, not in source. If you find an existing
+     comment that names a ticket id in a file you are already editing, drop it.
+   - When EDITING existing code, do not rewrite or re-pad comments that are
+     still accurate — leave them. Touch a comment only when the code change made
+     it wrong: update a parameter/return note when that parameter or return
+     actually changed, and nothing more. Adding fresh commentary to unchanged
+     logic is wasted output.
+
+   When the map names a
    living-requirements file (`requirements_path`): merge this spec's
    acceptance criteria and the behavior-defining clarifications cited in your
    task into that feature area's file — additive, current-behavior phrasing

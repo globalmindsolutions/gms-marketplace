@@ -59,7 +59,11 @@ iteration="n">` element (schema: `schemas/acs-messages.xsd`) with:
    flag the contradiction as a question instead of planning around it.
 4. **Documentation map — docs are part of the change.** From each spec's
    API/data-changes section, list every consumer-repo doc the change touches:
-   README, API/usage docs, the changelog where the repo keeps one. Always
+   README, API/usage docs, the changelog where the repo keeps one. For code
+   comments, plan the **minimal, idea-only** scope: one short
+   single-responsibility line per new function/class, no ticket ids in source,
+   and on edits only the comments the change actually invalidates (e.g. a
+   changed parameter) — never a re-comment pass over unchanged logic. Always
    include the **living-requirements file** for each touched feature area
    (`<requirements_path>/<area>.md` — pick the area from the PRD feature the
    ticket traces to; name the file even when it does not exist yet). When the

@@ -330,7 +330,11 @@ or `iter-<n>-execute-<k>.json` when parallel) must, in order:
    and the reason — see Coverage hard fail below.
 4. **Update the docs — part of the change, not a follow-up**: README, API and
    usage docs, code comments, the changelog where the repo keeps one (follow
-   repo conventions). Merge the ticket's acceptance criteria and
+   repo conventions). Code comments stay **minimal and idea-only** — one short
+   single-responsibility line per new function (SOLID: one unit, one job), never
+   a ticket id in source, and on edits only the comments the change actually
+   invalidates (e.g. a changed parameter); no re-comment passes over unchanged
+   logic. Merge the ticket's acceptance criteria and
    behavior-defining clarifications (answered/assumed ledger entries that
    define behavior) into the touched feature area's file under
    `settings.requirements_path` — the living requirements, the standing
