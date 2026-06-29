@@ -15,6 +15,8 @@ the notes.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-29
+
 ### Changed
 
 - **CLAUDE.md managed block now steers ticket work to `/acs:code` / `/acs:ship`
@@ -27,6 +29,21 @@ the notes.
   same file — so a pipeline-produced PR passes by construction while a hand-made
   one bypasses the rendering and fails. Re-run `/acs:init` to refresh the block
   in an existing repo.
+
+- **`/acs:code` writes minimal, idea-only code comments (token discipline).**
+  The code-executor now writes at most one short single-responsibility line per
+  new function/class (SOLID — one unit, one job), never puts a ticket id in
+  source comments or docstrings, and on edits only touches a comment the change
+  actually invalidates (e.g. a changed parameter) — no re-comment passes over
+  unchanged logic. Mirrored in the code-planner's documentation map and the
+  `/acs:code` SKILL doc step. The `commit_message` format (which carries the
+  ticket id) is unchanged.
+
+- **Corrected stale agent-topology references to the post-MAR-60 shape.**
+  `docs/requirements/overview.md` and `plugins/acs/docs/INTERNALS.md` no longer
+  describe the old "27 subagents / 9 planner-executor-verifier triples" topology
+  that predates apply-tier inlining (MAR-60); the counts now reflect the current
+  triad-vs-inline split.
 
 - **`/acs:code` doc-sync now reconciles factual prd.md/roadmap.md claims and
   flags intent divergence (MAR-65).** Execute step 4 is extended so the
@@ -463,7 +480,8 @@ Initial release.
   release from the matching changelog section when the plugin manifest
   version changes on `main`.
 
-[Unreleased]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/globalmindsolution/gms-marketplace/compare/v0.1.5...v0.1.6
