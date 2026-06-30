@@ -1739,5 +1739,229 @@ class TestAdr0007Amendment(unittest.TestCase):
             "(MAR-65 AC-5 — index summary updated)")
 
 
+class TestSimplicityScopeRestraintLayer(unittest.TestCase):
+    """Pin the Simplicity First + Surgical Changes restraint layer across all
+    three code agents, SKILL.md, the shared docs, and the CHANGELOG (MAR-2)."""
+
+    def agent_path(self, skill, role):
+        return os.path.join(PLUGIN, "agents", "%s-%s.md" % (skill, role))
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def _executor(self):
+        return read(self.agent_path("code", "executor"))
+
+    def _planner(self):
+        return read(self.agent_path("code", "planner"))
+
+    def _verifier(self):
+        return read(self.agent_path("code", "verifier"))
+
+    def _skill(self):
+        return read(self.skill_path("code"))
+
+    def _skills_req(self):
+        return read(os.path.join(REPO_ROOT, "docs", "requirements", "skills.md"))
+
+    def _reflection_req(self):
+        return read(os.path.join(REPO_ROOT, "docs", "requirements", "reflection.md"))
+
+    def _changelog(self):
+        return read(os.path.join(PLUGIN, "CHANGELOG.md"))
+
+    # --- AC-1: executor carries Simplicity First ---
+
+    def test_executor_simplicity_first_present(self):
+        """AC-1: code-executor.md must contain 'Simplicity First'."""
+        self.assertIn("Simplicity First", self._executor(),
+                      "code-executor.md must contain 'Simplicity First' (MAR-2 AC-1)")
+
+    def test_executor_simplicity_first_200_50(self):
+        """AC-1: '200' and '50' must co-occur within 200 chars (the 200->50 rewrite heuristic)."""
+        body = self._executor()
+        self.assertIsNotNone(
+            re.search(r"200.{0,200}50|50.{0,200}200", body, re.DOTALL),
+            "code-executor.md must co-locate '200' and '50' within 200 chars (MAR-2 AC-1)")
+
+    def test_executor_simplicity_first_senior_check(self):
+        """AC-1: 'senior' or 'overcomplicated' must appear within 300 chars of
+        'Simplicity First' (the senior-engineer check)."""
+        body = self._executor()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)Simplicity First.{0,300}(senior|overcomplicated)|"
+                r"(senior|overcomplicated).{0,300}Simplicity First",
+                body, re.DOTALL),
+            "code-executor.md must co-locate 'senior'/'overcomplicated' within 300 chars "
+            "of 'Simplicity First' (MAR-2 AC-1)")
+
+    # --- AC-2: executor carries Surgical Changes ---
+
+    def test_executor_surgical_changes_present(self):
+        """AC-2: code-executor.md must contain 'Surgical Changes'."""
+        self.assertIn("Surgical Changes", self._executor(),
+                      "code-executor.md must contain 'Surgical Changes' (MAR-2 AC-2)")
+
+    def test_executor_surgical_traces_to_spec(self):
+        """AC-2: 'traces' or 'trace' must appear within 300 chars of 'Surgical'."""
+        body = self._executor()
+        self.assertIsNotNone(
+            re.search(r"(?i)Surgical.{0,300}trac(e|es)|trac(e|es).{0,300}Surgical",
+                      body, re.DOTALL),
+            "code-executor.md must co-locate 'trace'/'traces' within 300 chars "
+            "of 'Surgical' (MAR-2 AC-2)")
+
+    def test_executor_surgical_no_adjacent_refactor(self):
+        """AC-2: 'refactor' or 'reformat' must appear within 500 chars of
+        'Surgical Changes'."""
+        body = self._executor()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)Surgical Changes.{0,500}(refactor|reformat)|"
+                r"(refactor|reformat).{0,500}Surgical Changes",
+                body, re.DOTALL),
+            "code-executor.md must co-locate 'refactor'/'reformat' within 500 chars "
+            "of 'Surgical Changes' (MAR-2 AC-2)")
+
+    def test_executor_surgical_own_orphan(self):
+        """AC-2: 'orphan' must appear within 500 chars of 'Surgical Changes'."""
+        body = self._executor()
+        self.assertIsNotNone(
+            re.search(r"(?i)Surgical Changes.{0,500}orphan|orphan.{0,500}Surgical Changes",
+                      body, re.DOTALL),
+            "code-executor.md must co-locate 'orphan' within 500 chars "
+            "of 'Surgical Changes' (MAR-2 AC-2)")
+
+    # --- AC-3: planner carries minimal-surface / no-speculative-scope ---
+
+    def test_planner_minimal_surface_present(self):
+        """AC-3: code-planner.md must co-locate 'minimal' with 'surface' or a
+        change-surface pattern."""
+        body = self._planner()
+        self.assertIsNotNone(
+            re.search(r"(?i)minimal.{0,80}(surface|change surface)|"
+                      r"(surface|change surface).{0,80}minimal",
+                      body, re.DOTALL),
+            "code-planner.md must co-locate 'minimal' and 'surface'/'change surface' "
+            "(MAR-2 AC-3)")
+
+    def test_planner_no_speculative_scope(self):
+        """AC-3: 'speculative' must appear within 400 chars of 'minimal' in
+        code-planner.md."""
+        body = self._planner()
+        self.assertIsNotNone(
+            re.search(r"(?i)minimal.{0,400}speculative|speculative.{0,400}minimal",
+                      body, re.DOTALL),
+            "code-planner.md must co-locate 'speculative' within 400 chars "
+            "of 'minimal' (MAR-2 AC-3)")
+
+    # --- AC-4: verifier carries Simplicity & scope dimension, blocking ---
+
+    def test_verifier_simplicity_scope_dimension_present(self):
+        """AC-4: 'Simplicity' and 'scope' must co-occur within 50 chars in
+        code-verifier.md (the dimension name)."""
+        body = self._verifier()
+        self.assertIsNotNone(
+            re.search(r"(?i)Simplicity.{0,50}scope|scope.{0,50}Simplicity",
+                      body, re.DOTALL),
+            "code-verifier.md must co-locate 'Simplicity' and 'scope' within 50 chars "
+            "(MAR-2 AC-4 — dimension name)")
+
+    def test_verifier_simplicity_scope_overcomplication(self):
+        """AC-4: 'overcompl' must appear within 500 chars of 'Simplicity' in
+        code-verifier.md."""
+        body = self._verifier()
+        self.assertIsNotNone(
+            re.search(r"(?i)Simplicity.{0,500}overcompl|overcompl.{0,500}Simplicity",
+                      body, re.DOTALL),
+            "code-verifier.md must co-locate 'overcompl' within 500 chars "
+            "of 'Simplicity' (MAR-2 AC-4)")
+
+    def test_verifier_simplicity_scope_out_of_scope(self):
+        """AC-4: 'out-of-scope' or 'out of scope' must appear within 500 chars
+        of 'Simplicity' in code-verifier.md."""
+        body = self._verifier()
+        self.assertIsNotNone(
+            re.search(r"(?i)Simplicity.{0,500}out.of.scope|out.of.scope.{0,500}Simplicity",
+                      body, re.DOTALL),
+            "code-verifier.md must co-locate 'out-of-scope'/'out of scope' within 500 chars "
+            "of 'Simplicity' (MAR-2 AC-4)")
+
+    def test_verifier_simplicity_scope_blocking(self):
+        """AC-4: 'blocking' must appear within 500 chars of 'Simplicity' in
+        code-verifier.md."""
+        body = self._verifier()
+        self.assertIsNotNone(
+            re.search(r"(?i)Simplicity.{0,500}blocking|blocking.{0,500}Simplicity",
+                      body, re.DOTALL),
+            "code-verifier.md must co-locate 'blocking' within 500 chars "
+            "of 'Simplicity' (MAR-2 AC-4)")
+
+    # --- AC-5: shared docs carry restraint-layer token ---
+
+    def test_skills_md_simplicity_scope_present(self):
+        """AC-5: docs/requirements/skills.md must co-locate 'Simplicity' and
+        'scope' within 100 chars."""
+        body = self._skills_req()
+        self.assertIsNotNone(
+            re.search(r"(?i)Simplicity.{0,100}scope|scope.{0,100}Simplicity",
+                      body, re.DOTALL),
+            "docs/requirements/skills.md must co-locate 'Simplicity' and 'scope' "
+            "within 100 chars (MAR-2 AC-5)")
+
+    def test_reflection_md_simplicity_scope_present(self):
+        """AC-5: docs/requirements/reflection.md must co-locate 'Simplicity'
+        and 'scope' within 100 chars."""
+        body = self._reflection_req()
+        self.assertIsNotNone(
+            re.search(r"(?i)Simplicity.{0,100}scope|scope.{0,100}Simplicity",
+                      body, re.DOTALL),
+            "docs/requirements/reflection.md must co-locate 'Simplicity' and 'scope' "
+            "within 100 chars (MAR-2 AC-5)")
+
+    # --- AC-6: cross-agent — all three agents carry both rule names ---
+
+    def test_all_three_agents_carry_simplicity_first(self):
+        """AC-6: each of code-executor, code-planner, code-verifier must contain
+        'Simplicity First'."""
+        for role in ("executor", "planner", "verifier"):
+            body = read(self.agent_path("code", role))
+            self.assertIn("Simplicity First", body,
+                          "code-%s.md must contain 'Simplicity First' (MAR-2 AC-6)" % role)
+
+    def test_all_three_agents_carry_surgical_changes(self):
+        """AC-6: each of code-executor, code-planner, code-verifier must contain
+        'Surgical Changes'."""
+        for role in ("executor", "planner", "verifier"):
+            body = read(self.agent_path("code", role))
+            self.assertIn("Surgical Changes", body,
+                          "code-%s.md must contain 'Surgical Changes' (MAR-2 AC-6)" % role)
+
+    # --- AC-7: CHANGELOG [Unreleased] entry ---
+
+    def test_changelog_unreleased_mar2_entry(self):
+        """AC-7: '(MAR-2)' must appear within 500 chars of '[Unreleased]' in
+        CHANGELOG.md."""
+        body = self._changelog()
+        self.assertIsNotNone(
+            re.search(r"(?i)\[Unreleased\].{0,500}\(MAR-2\)|\(MAR-2\).{0,500}\[Unreleased\]",
+                      body, re.DOTALL),
+            "CHANGELOG.md must contain '(MAR-2)' within 500 chars of '[Unreleased]' "
+            "(MAR-2 AC-7)")
+
+    def test_changelog_unreleased_restraint_layer_token(self):
+        """AC-7: 'restraint' or 'Simplicity' must appear within 500 chars of
+        '[Unreleased]' in CHANGELOG.md."""
+        body = self._changelog()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)\[Unreleased\].{0,500}(restraint|Simplicity)|"
+                r"(restraint|Simplicity).{0,500}\[Unreleased\]",
+                body, re.DOTALL),
+            "CHANGELOG.md must contain 'restraint'/'Simplicity' within 500 chars "
+            "of '[Unreleased]' (MAR-2 AC-7)")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -336,7 +336,8 @@ or `iter-<n>-execute-<k>.json` when parallel) must, in order:
    single-responsibility line per new function (SOLID: one unit, one job), never
    a ticket id in source, and on edits only the comments the change actually
    invalidates (e.g. a changed parameter); no re-comment passes over unchanged
-   logic. Merge the ticket's acceptance criteria and
+   logic. The executor also applies the **Simplicity First** and **Surgical
+   Changes** authoring rules (see code-executor.md Charter) throughout. Merge the ticket's acceptance criteria and
    behavior-defining clarifications (answered/assumed ledger entries that
    define behavior) into the touched feature area's file under
    `settings.requirements_path` — the living requirements, the standing
@@ -402,6 +403,8 @@ Dimensions, each producing blocking findings on failure:
   (`severity="blocking" dimension="documentation"`). An intent contradiction
   is an explicit flagged divergence — NOT a block; it surfaces in the result
   document and PR body. No factual impact → no-op for this check.
+- **Simplicity & scope** — overcomplication and out-of-scope edits are
+  blocking findings (executor **Simplicity First** + **Surgical Changes** rules).
 
 ALL findings block — zero findings = pass (`verifier_passed: true`). On
 findings: persist the verify output, then AUTOMATICALLY re-plan and re-execute

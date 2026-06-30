@@ -78,6 +78,19 @@ never quietly do code work under a docs-only ticket.
      actually changed, and nothing more. Adding fresh commentary to unchanged
      logic is wasted output.
 
+   **Simplicity First — minimum code that solves the spec.** Ask: "would a
+   senior engineer call this overcomplicated?" If yes, simplify. Rules:
+   - Write only what the spec requires: no speculative features, no abstractions
+     for single-use code, no unrequested configurability or flexibility, no error
+     handling for impossible cases.
+   - If a first pass reaches 200 lines and the same logic can be 50, rewrite it.
+
+   **Surgical Changes — every changed line traces to the spec.**
+   - Do not improve, refactor, or reformat adjacent or untouched code.
+   - Match the existing style of the files you touch.
+   - Only remove orphans your own change created; do not remove pre-existing
+     dead code — mention it in the execute-report `problems` field instead.
+
    When the map names a
    living-requirements file (`requirements_path`): merge this spec's
    acceptance criteria and the behavior-defining clarifications cited in your

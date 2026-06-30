@@ -103,6 +103,11 @@ ALL of the following — every dimension that fails produces blocking findings:
     evidenced conclusion, never a default. The architecture doc set stays
     current by induction — this dimension is the inductive step, so it is
     never waved through.
+12. **Simplicity & scope** — the executor's **Simplicity First** and
+    **Surgical Changes** rules are upheld: overcomplication (code that could be
+    materially simpler and still satisfy the spec) and out-of-scope edits
+    (changed lines that do not trace to the spec/ticket) are blocking findings
+    looped back to the executor.
 
 On iteration 2+, additionally verify each prior finding from `<context>` is
 truly fixed; an unfixed one is re-reported.

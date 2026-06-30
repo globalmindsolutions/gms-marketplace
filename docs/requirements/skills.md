@@ -516,9 +516,10 @@ Purpose: implement the specs in the consumer repo using TDD.
   `settings.json` ([configuration.md](configuration.md)).
 - The `code-verifier` MUST review the changeset — **business logic**,
   **features** (does it satisfy the ticket/specs), **quality**, **technical
-  standards**, **architecture**, **system design**, **security**, and
-  **documentation** (affected docs updated and consistent with the code) —
-  in addition to spec conformance, tests, and coverage. The architecture /
+  standards**, **architecture**, **system design**, **security**,
+  **documentation** (affected docs updated and consistent with the code), and
+  **Simplicity & scope** (overcomplication and out-of-scope edits are blocking)
+  — in addition to spec conformance, tests, and coverage. The architecture /
   system-design review judges the changeset against the approved `design.md`
   when one exists (the ticket's own or its parent epic's). Blocking findings
   trigger automatic remediation iterations (max 3); findings and stop

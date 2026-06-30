@@ -46,7 +46,9 @@ iteration="n">` element (schema: `schemas/acs-messages.xsd`) with:
    will touch — source, test, and doc paths. This file map is what the
    coordinator uses to decide parallel vs sequential execution: any overlap
    between two tasks' files (source, tests, or docs) forces sequential order,
-   so make the map complete and honest.
+   so make the map complete and honest. Keep the minimal change surface: the
+   file map and executor tasks must not invite speculative scope beyond what the
+   spec requires (executor **Simplicity First** and **Surgical Changes** rules).
 3. **Test strategy per spec — tests first.** Name the failing tests to write
    before any implementation (derived from the spec's Test plan), the repo's
    test and coverage tooling, and the exact commands to run them. Discover the

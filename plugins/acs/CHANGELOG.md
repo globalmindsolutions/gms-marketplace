@@ -15,6 +15,25 @@ the notes.
 
 ## [Unreleased]
 
+### Changed
+
+- **`/acs:code` enforces Simplicity First + Surgical Changes restraint layer
+  (MAR-2).** The code-executor's Charter gains two named authoring rules:
+  **Simplicity First** (minimum code that solves the spec — no speculative
+  features, no single-use abstractions, no unrequested configurability, no
+  impossible-case error handling; if 200 lines can be 50, rewrite; apply the
+  "would a senior engineer call this overcomplicated?" check) and **Surgical
+  Changes** (every changed line traces to the spec; do not refactor or reformat
+  adjacent code; only remove orphans your own change created; mention but never
+  delete pre-existing dead code). The code-planner's file-map step now directs
+  the minimal change surface and prohibits speculative scope. The
+  code-verifier gains a new blocking **Simplicity & scope** dimension (dimension
+  12) that flags overcomplication and out-of-scope edits as blocking findings
+  looped back to the executor. Mirrored in the `/acs:code` SKILL doc and the
+  shared requirements docs (skills.md, reflection.md). Generalizes the v0.3.1
+  minimal-comment policy from comments-only to a full authoring-discipline
+  contract.
+
 ## [0.3.3] - 2026-07-01
 
 ### Fixed
@@ -36,6 +55,8 @@ the notes.
   `CLAUDE.md` is correctly reported as a normal write, not a repair. The heal
   preserves the user-owned content before and after the block byte-for-byte and is
   itself idempotent. Re-run `/acs:init` once to collapse any lingering corruption.
+
+## [0.3.2] - 2026-07-01
 
 ### Fixed
 
