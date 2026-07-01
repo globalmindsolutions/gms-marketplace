@@ -583,6 +583,76 @@ class TestApplyTierInline(unittest.TestCase):
             "AC-7: reflection.md must either drop the all-skills triad claim or "
             "carry an apply-work carve-out")
 
+
+class TestCreatePrConventionWiring(unittest.TestCase):
+    """MAR-72 spec 02: pin the deterministic-render + pre-open self-check
+    wiring in plugins/acs/skills/create-pr/SKILL.md. Additive only — no
+    existing assertion in this file is modified. Written TDD-first (RED
+    before Spec 02's SKILL.md edit lands)."""
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def test_helper_referenced_by_name(self):
+        """AC-1/AC-2: create-pr/SKILL.md references pr-conventions.py by name."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIn("pr-conventions.py", body,
+                      "create-pr/SKILL.md must reference pr-conventions.py")
+
+    def test_title_rendered_via_helper_not_prose(self):
+        """AC-1: render-title co-occurs with pr_title within a bounded window,
+        and the result is passed verbatim to gh pr create/edit --title."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIsNotNone(
+            re.search(r"(?s)render-title.{0,400}pr_title|pr_title.{0,400}render-title", body),
+            "AC-1 [create-pr]: render-title must co-occur with pr_title within a bounded window")
+        self.assertIn("verbatim", body,
+                      "AC-1 [create-pr]: rendered title must be stated as passed verbatim to gh pr")
+
+    def test_pre_open_self_check_present_and_blocks_or_retries(self):
+        """AC-2: the check subcommand is present, and a mismatch blocks/retries."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIsNotNone(
+            re.search(r'pr-conventions\.py"?\s+check\b', body),
+            "AC-2 [create-pr]: pre-open self-check (check subcommand) must be present")
+        self.assertIsNotNone(
+            re.search(r"(?s)check\b.{0,600}(blocks|retries)|(blocks|retries).{0,600}check\b", body,
+                      re.IGNORECASE),
+            "AC-2 [create-pr]: a check mismatch must block or retry, within a bounded window")
+
+    def test_self_check_is_deterministic_cli_not_subagent(self):
+        """No-regression belt-and-suspenders: the new self-check step introduces
+        no subagent-spawn phrasing (duplicates, locally, the invariant
+        test_create_pr_no_planner_verifier_spawn already pins file-wide)."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIsNone(re.search(r"acs:create-pr-planner", body))
+        self.assertIsNone(re.search(r"acs:create-pr-verifier", body))
+        self.assertIsNone(re.search(r"\bcreate-pr-planner\b", body))
+        self.assertIsNone(re.search(r"\bcreate-pr-verifier\b", body))
+
+    def test_no_regression_guards(self):
+        """AC-5: ACS label, base-branch detection, states.pr record,
+        post-create-pr.py, and tracker-sync invocations all survive."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIn("gh label create ACS", body,
+                      "AC-5 [create-pr]: ACS label creation must survive")
+        self.assertIn("defaultBranchRef", body,
+                      "AC-5 [create-pr]: base-branch detection must survive")
+        self.assertIsNotNone(
+            re.search(r'"states"\s*:\s*\{\s*"pr"\s*:', body),
+            "AC-5 [create-pr]: states.pr object must survive")
+        self.assertIn('"number"', body)
+        self.assertIn('"url"', body)
+        self.assertIn('"branch"', body)
+        self.assertIn('"base"', body)
+        self.assertIn("post-create-pr.py", body,
+                      "AC-5 [create-pr]: post-create-pr.py reference must survive")
+        self.assertIn("gh issue comment", body,
+                      "AC-5 [create-pr]: github tracker-sync invocation must survive")
+        self.assertIn("acli jira workitem comment", body,
+                      "AC-5 [create-pr]: jira tracker-sync invocation must survive")
+
+
 class TestCodeSkillEscalation(unittest.TestCase):
     """MAR-57 Spec 02 (AC-1, AC-2, AC-6): pin the in-loop escalation contract in
     plugins/acs/skills/code/SKILL.md. Doc-assertion tests that read the prose

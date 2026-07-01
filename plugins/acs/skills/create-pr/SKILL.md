@@ -125,35 +125,82 @@ exact error — no silent fallback.
    `code-state.json`, `specs/*.md`, `design.md` when required). The base
    branch is the repo's default, detected via
    `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`.
-   Render the PR title per `settings.formats.pr_title` — `{summary}` is a
-   one-line summary derived from specs + code-state, `{external_key}` is
-   `ticket.external.key` or empty. Body: Summary (from specs scope + design
-   decision), Ticket (id, title, type, external key), Changes (from
-   `specs_implemented`, `docs_updated`, and `git diff <base>...<branch> --stat`),
-   Test plan (from `tests.passed/failed/coverage_percent/coverage_target` and
-   the specs' test plans), Checklist (tick exactly what code-state evidences —
-   e.g. `[x]` only when `review.findings_open == 0`).
+   Render the PR title via the helper — NOT LLM prose composition — capturing
+   its stdout as `<rendered title>`:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pr-conventions.py" render-title \
+     --template "<settings.formats.pr_title>" --ticket-id <ticket_id> --type <ticket.type> \
+     --title "<title-value>" --summary "<summary>" --external-key "<ticket.external.key or empty>"
+   ```
+
+   `<title-value>` and `<summary>` are derived exactly as before (from
+   `ticket.json` / `code-state.json` / specs), only the render mechanism
+   changes. This is the exact value passed **verbatim** to `gh pr create
+   --title` / `gh pr edit --title` in step 5 — no further transformation.
+   Body: Summary (from specs scope + design decision), Ticket (id, title,
+   type, external key), Changes (from `specs_implemented`, `docs_updated`,
+   and `git diff <base>...<branch> --stat`), Test plan (from
+   `tests.passed/failed/coverage_percent/coverage_target` and the specs' test
+   plans), Checklist (tick exactly what code-state evidences — e.g. `[x]`
+   only when `review.findings_open == 0`).
 
 3. **Label.** `gh label create ACS --description "Created by the acs pipeline" 2>/dev/null || true`
 
-4. **Create or update PR.** Detect existing open PR:
+4. **Pre-open self-check.** Before either branch of step 5 runs `gh pr
+   create`/`gh pr edit`, self-check the rendered title and filled body
+   against the configured conventions with the helper's `check` subcommand —
+   a deterministic CLI call, never a spawned subagent and never a
+   plan/execute/verify triad — no new subagent role is introduced by this
+   step:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pr-conventions.py" check \
+     --title "<rendered title>" --body-file <partition>/phases/create-pr/pr-body.md \
+     --require-label ACS --pr-title-format "<settings.formats.pr_title>" \
+     --sections "<settings.enforcement.pr_description_sections, comma-joined>" \
+     --ticket-prefix <settings.ticket_prefix>
+   ```
+
+   - **On pass** (exit 0 / `passed: true`): proceed to step 5 unchanged.
+   - **On failure** (exit 1 / `passed: false`): this reports structured
+     findings from a deterministic call. Perform a bounded local retry: if
+     the failing heading is `pr_title`, re-run `render-title`; if it is
+     `pr_description`, `unrendered_placeholder`, or
+     `leftover_template_comment`, re-fill the specific missing section or
+     delete the surviving placeholder/HTML comment in `pr-body.md`, then
+     re-run `check`. Cap the retry at a small bounded number of attempts
+     (up to 2 re-renders) — this is a tight fix-and-recheck loop around one
+     deterministic call, NOT a new plan/execute/verify iteration. If `check`
+     still fails after the bounded retries, STOP: do NOT call `gh pr
+     create`/`gh pr edit`; surface a blocking problem naming the exact
+     failing heading(s)/detail(s) from the helper's `errors`, write it into
+     the phase artifact, and follow the Finish failure path — `states.pr` is
+     omitted if no PR exists yet, or kept as the last-known-good object if
+     updating an existing PR that could not be re-validated. Never open or
+     leave in place a PR known to be non-conforming as a result of this run.
+   - Apply this identical self-check on BOTH the create path and the edit
+     path below — one `check` call before whichever `gh pr` command ends up
+     running.
+
+5. **Create or update PR.** Detect existing open PR:
    `gh pr list --head <branch> --state open --json number,url,baseRefName,isDraft`.
    If no open PR exists for the branch:
 
    ```bash
-   gh pr create --base <default-branch> --head <branch> --title "<rendered pr_title>" --body-file <partition>/phases/create-pr/pr-body.md --label ACS
+   gh pr create --base <default-branch> --head <branch> --title "<rendered title>" --body-file <partition>/phases/create-pr/pr-body.md --label ACS
    ```
 
    No `--draft` — PRs are created ready-for-review. If an open PR already
    exists for the branch: update it instead —
-   `gh pr edit <number> --title "<rendered pr_title>" --body-file <body> --add-label ACS`,
+   `gh pr edit <number> --title "<rendered title>" --body-file <body> --add-label ACS`,
    plus `gh pr edit <number> --base <default-branch>` when its base is wrong
    and `gh pr ready <number>` when it is a draft.
 
-5. **Record.** `gh pr view <branch> --json number,url,baseRefName,headRefName,isDraft,labels`
+6. **Record.** `gh pr view <branch> --json number,url,baseRefName,headRefName,isDraft,labels`
    → capture `{number, url, branch, base}` for `states.pr`.
 
-6. **Tracker sync.** When `settings.tracker.provider` is `github` or `jira`
+7. **Tracker sync.** When `settings.tracker.provider` is `github` or `jira`
    AND `ticket.external.key` is set, comment on the remote issue with the PR
    URL:
    - `github`: `gh issue comment <external.key> --body "ACS: PR #<number> opened for <ticket-id> — <url>"`
@@ -163,7 +210,9 @@ exact error — no silent fallback.
 
 Write a phase artifact `<partition>/phases/create-pr/iter-1-execute.json`
 (commands run with outcomes, pushed SHA, PR number/url/base, sync result,
-problems hit). Validate any `<task>`/`<result>` XML with validate_xml.py.
+problems hit, the pre-open self-check's pass/fail result and, on retry, how
+many attempts were used). Validate any `<task>`/`<result>` XML with
+validate_xml.py.
 
 ## User interaction
 
