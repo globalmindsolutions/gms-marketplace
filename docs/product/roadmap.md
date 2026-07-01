@@ -4,9 +4,10 @@
 > ship through the pipeline. Maintained alongside the PRD via `/acs:create-prd`.
 
 Each plugin has its own milestone track. M1/M2/M3 below are the **acs plugin**
-track (v0.2.0 shipped; v0.3.0 releasing, with the complexity-adaptive delivery epic already shipped to main; v0.4.0 is the next milestone after it). The **tabp plugin** track follows
-with T-M1 as the urgent next milestone. Future plugins add their own track here
-without restructuring the existing tracks.
+track (v0.2.0 shipped; v0.3.0 releasing, with the complexity-adaptive delivery epic already shipped to main; v0.4.0 is the next milestone after it), followed by a **tentative pre-GA
+sequence v0.5.0 → v0.6.0 → v0.7.0 toward GA v1.0**, defined once v0.4.0 ships. The
+**tabp plugin** track follows with T-M1 as the urgent next milestone. Future plugins
+add their own track here without restructuring the existing tracks.
 
 ## acs plugin track
 
@@ -271,9 +272,106 @@ Epics: full-SDLC verify & operate (G8); principles & standards + brownfield stan
 - Semver stability promise for state-file schemas (migration notes per minor).
 - **Epic: per-role model + effort configuration polish (init examples + up-front validation + docs)** — matures the already-shipped per-role model/effort capability (all four roles — `planner`, `executor`, `verifier`, `coordinator` — plus `models.overrides.<skill>.<role>` in `.acs/settings.json`). (i) Ship documented defaults + version-pinning examples in the existing `/acs:init` model prompt (`init/SKILL.md`) — pin `claude-sonnet-5` / `claude-opus-4-8`, set effort per role, including the coordinator-scope caveat — strengthening the existing prompt, not introducing a new one. (ii) Add up-front, fail-closed validation of supported model ids + effort values with a helpful error, replacing today's late spawn-time failure (the supported-effort enum currently lives only in the advisory `settings.schema.json`, unenforced by the runtime gate, with no model-id validation at all). (iii) Documentation: the settings reference + init walkthrough cover per-role model+effort and version pinning. Maps to PRD acs Should-have (per-role model + effort configuration bullet). Traces **G7** (config surface / observability). The MECHANISM (the supported-model/effort source-of-truth and the exact init UX) is settled in the implementing ticket's design/spec phase, mirroring this milestone's other epics.
 
-### M4 — GA (v1.0) *(future — no committed epics yet)*
+### M4 — v0.5.0 *(tentative — sequenced after the v0.4.0 epics ship)*
 
-GA/v1.0 is a later milestone; its epics are not yet committed and will be defined once the v0.4.0 bucket ships.
+Maps to PRD extended G6 (runtime portability) and the acs Could-have **Multi-runtime
+support — OpenAI Codex CLI** feature ([`prd.md`](prd.md#features-moscow)). Reverses the
+prior acs "non-Claude-Code runtimes" Won't-have (Reversal note MAR-2).
+
+**Priority & sequencing — tentative, behind the committed roadmap.** This is a
+low-priority **Could-have**, scheduled **after the v0.4.0 epics ship**, with a tentative
+version home at **v0.5.0**. Nothing in the v0.3.0 or v0.4.0 line depends on it, and it
+does not compete with the v0.4.0 epics (Verify & Operate, Standards & Principles, Org
+enforcement) for capacity — it is not started, designed, or ticketed until v0.4.0 is
+out. A first prior attempt (PR #134, MAR-5) was rejected for not matching the official
+Codex platform; the eventual epic must be re-scoped from scratch against the documented
+Codex primitives (see the Correction note in
+[`runtime-coupling-inventory.md`](../architecture/lld/runtime-coupling-inventory.md)).
+
+Make the acs gated pipeline runnable on **OpenAI Codex CLI** in addition to Claude Code:
+
+- **Runtime abstraction.** Identify which pipeline mechanisms are Claude-Code-specific
+  (PreToolUse/SessionEnd hook gating, the planner/executor/verifier reflection-subagent
+  protocol, skill/agent dispatch, per-role model/effort config, self-reported
+  cost/tokens) vs runtime-agnostic (the stdlib-only deterministic layer: gating, state,
+  ids, metrics, convention checks).
+- **Codex CLI runtime adapter.** Map each Claude-Code-specific mechanism onto Codex
+  CLI's primitives where they exist, and account for the gaps where they do not — Codex
+  exposes **no skill-invocation hook matcher and no `SessionEnd` event**, its
+  `PreToolUse` is a **guardrail rather than a complete enforcement boundary**, and its
+  subagent model (explicit-spawn, custom-agent TOML format) differs from the
+  coordinator-driven reflection cycle. Preserve the **full audit trail** on the second
+  runtime; gate integrity is **best-effort by default, non-bypassable only via
+  org-managed (`requirements.toml`) hooks**.
+- **Validation (extended G6).** Publish an end-to-end run of the acs pipeline on Codex
+  CLI with **0 lost audit-trail artifacts**, and **0 gate escapes under managed-hook
+  enforcement**, within 1 release of the capability shipping (the G6 runtime-portability
+  metric).
+
+**Deferral:** the MECHANISM (the hook-gating / subagent-protocol / dispatch mapping and
+which gates are native vs shimmed on Codex CLI) is deferred to this epic's dedicated
+design phase / an ADR; this epic requires its own `/acs:create-design` run before
+implementation. Mirrors the Notion/remote-docs and tabp-upgrade deferrals.
+
+**Implementation note:** this is a future epic pending design — this entry defines what
+to deliver and its scope boundary; the design and implementation tickets carry the build.
+
+### M5 — v0.6.0 *(tentative — sequenced after v0.5.0)*
+
+Maps to PRD extended G6 and the acs Could-have pluggable-remote-docs-backend feature.
+
+Deliver a pluggable docs backend for acs, mirroring the `tracker.provider` precedent:
+
+- **`local` backend (filesystem, default)** — current behavior, unchanged; supports
+  external/absolute paths (delivered in v0.4.0 above).
+- **`notion` backend (first remote provider)** — Notion as the system of record or
+  sync target; two configurable modes per backend:
+  - **Publish/mirror** — repo stays source of truth, the docs-only PR is preserved,
+    content synced to Notion for reading.
+  - **Authoritative-remote** — Notion is the system of record, no repo copy,
+    review/audit happens in Notion.
+- Auth via external CLI/integration; **no secrets in settings** (consistent with the
+  `tracker.provider` precedent and the Safety NFR).
+
+**Deferral:** the MECHANISM — Notion API/auth, markdown→Notion-blocks mapping, PR-less
+vs sync delivery, per-mode review/audit implementation — is deferred to this epic's
+dedicated design phase. This epic requires its own `/acs:create-design` run before
+implementation begins. Non-Notion remote providers (Confluence, Google Docs, SharePoint)
+are Won't-have now; they may be considered as future extensions after this epic ships.
+
+**Implementation note:** this is a future epic pending design — this milestone entry
+defines what to deliver and its scope boundary; the design and implementation tickets
+carry the build work.
+
+### M6 — v0.7.0 *(tentative — sequenced after v0.6.0)*
+
+Three epics, each tracing an existing goal and deferring its mechanism to its own
+design phase, mirroring the M3 epic deferrals:
+
+- **Epic: Non-GitHub (GitLab/Bitbucket) forges.** Extends the tracker import/sync +
+  PR flow to GitLab/Bitbucket in addition to GitHub — tracker import, two-way sync, and
+  the PR/MR flow target the additional forges. Maps to the PRD acs Could-have
+  "Non-GitHub forges (GitLab/Bitbucket) support" and the MAR-71 Reversal note (Out of
+  scope). Traces the Two-way tracker sync Should-have goals (`prd.md`) + extended **G6**.
+  **Deferral:** the MECHANISM (forge API/auth mapping, MR-vs-PR semantics) is deferred
+  to this epic's design phase, mirroring the Notion/multi-runtime deferrals.
+- **Epic: Scheduled background tracker-sync routines.** Promoted from the icebox —
+  periodic, unattended tracker sync (vs today's on-demand sync) for a team on a shared
+  repo. Maps to the existing PRD Could-have (`prd.md`, "Scheduled background tracker
+  sync"). Traces the "team on a shared repo" persona / Epic E2.
+- **Epic: Cross-machine handoff via shared workspace.** Promoted from the icebox —
+  resuming a ticket from a different machine using the shared/external workspace
+  location. Maps to the existing PRD Could-have (`prd.md`, "cross-machine handoff
+  (shared workspace)"). Traces **G2** (resumability) / the shared-repo persona.
+
+**Implementation note:** this is a future milestone pending design — this entry defines
+what to deliver and its scope boundary for all three epics; the design and
+implementation tickets carry the build work for each.
+
+### M7 — GA (v1.0) *(future — no committed epics yet)*
+
+GA/v1.0 is a later milestone; its epics are not yet committed and will be defined once
+the pre-GA bucket (v0.4.0–v0.7.0) ships.
 
 ## tabp plugin track
 
@@ -347,73 +445,14 @@ hooks, artifacts, self-reported cost/tokens) are deferred to this epic's design 
 this milestone defines what to deliver; the design and implementation tickets carry
 the build work.
 
-### acs M-future — Notion/remote-docs backend *(future — pending Notion/remote-docs epic)*
+### acs M-future — Notion/remote-docs backend
 
-Maps to PRD extended G6 and the acs Could-have pluggable-remote-docs-backend feature.
+→ Scheduled as **M5 — v0.6.0** (see above); content relocated there, not duplicated.
 
-Deliver a pluggable docs backend for acs, mirroring the `tracker.provider` precedent:
+### acs M-future — Multi-runtime support (OpenAI Codex CLI)
 
-- **`local` backend (filesystem, default)** — current behavior, unchanged; supports
-  external/absolute paths (delivered in v0.4.0 above).
-- **`notion` backend (first remote provider)** — Notion as the system of record or
-  sync target; two configurable modes per backend:
-  - **Publish/mirror** — repo stays source of truth, the docs-only PR is preserved,
-    content synced to Notion for reading.
-  - **Authoritative-remote** — Notion is the system of record, no repo copy,
-    review/audit happens in Notion.
-- Auth via external CLI/integration; **no secrets in settings** (consistent with the
-  `tracker.provider` precedent and the Safety NFR).
-
-**Deferral:** the MECHANISM — Notion API/auth, markdown→Notion-blocks mapping, PR-less
-vs sync delivery, per-mode review/audit implementation — is deferred to this epic's
-dedicated design phase. This epic requires its own `/acs:create-design` run before
-implementation begins. Non-Notion remote providers (Confluence, Google Docs, SharePoint)
-are Won't-have now; they may be considered as future extensions after this epic ships.
-
-**Implementation note:** this is a future epic pending design — this milestone entry
-defines what to deliver and its scope boundary; the design and implementation tickets
-carry the build work.
-
-### acs M-future — Multi-runtime support (OpenAI Codex CLI) *(future — pending multi-runtime epic)*
-
-Maps to PRD extended G6 (runtime portability) and the acs Could-have **Multi-runtime
-support — OpenAI Codex CLI** feature ([`prd.md`](prd.md#features-moscow)). Reverses the
-prior acs "non-Claude-Code runtimes" Won't-have (Reversal note MAR-2).
-
-**Priority & sequencing — explicitly behind the committed roadmap.** This is a low-priority **Could-have**, scheduled **after the v0.4.0 epics ship**. Nothing in the v0.3.0 or v0.4.0 line depends on it, and it does not compete with the v0.4.0 epics (Verify & Operate, Standards & Principles, Org enforcement) for capacity — it is not started, designed, or ticketed until v0.4.0 is out. A first prior attempt (PR #134, MAR-5) was rejected for not matching the
-official Codex platform; the eventual epic must be re-scoped from scratch against the
-documented Codex primitives (see the Correction note in
-[`runtime-coupling-inventory.md`](../architecture/lld/runtime-coupling-inventory.md)).
-
-Make the acs gated pipeline runnable on **OpenAI Codex CLI** in addition to Claude Code:
-
-- **Runtime abstraction.** Identify which pipeline mechanisms are Claude-Code-specific
-  (PreToolUse/SessionEnd hook gating, the planner/executor/verifier reflection-subagent
-  protocol, skill/agent dispatch, per-role model/effort config, self-reported
-  cost/tokens) vs runtime-agnostic (the stdlib-only deterministic layer: gating, state,
-  ids, metrics, convention checks).
-- **Codex CLI runtime adapter.** Map each Claude-Code-specific mechanism onto Codex
-  CLI's primitives where they exist, and account for the gaps where they do not — Codex
-  exposes **no skill-invocation hook matcher and no `SessionEnd` event**, its
-  `PreToolUse` is a **guardrail rather than a complete enforcement boundary**, and its
-  subagent model (explicit-spawn, custom-agent TOML format) differs from the
-  coordinator-driven reflection cycle. Preserve the **full audit trail** on the second
-  runtime; gate integrity is **best-effort by default, non-bypassable only via
-  org-managed (`requirements.toml`) hooks**.
-- **Validation (extended G6).** Publish an end-to-end run of the acs pipeline on Codex
-  CLI with **0 lost audit-trail artifacts**, and **0 gate escapes under managed-hook
-  enforcement**, within 1 release of the capability shipping (the G6 runtime-portability
-  metric).
-
-**Deferral:** the MECHANISM (the hook-gating / subagent-protocol / dispatch mapping and
-which gates are native vs shimmed on Codex CLI) is deferred to this epic's dedicated
-design phase / an ADR; this epic requires its own `/acs:create-design` run before
-implementation. Mirrors the Notion/remote-docs and tabp-upgrade deferrals.
-
-**Implementation note:** this is a future epic pending design — this entry defines what
-to deliver and its scope boundary; the design and implementation tickets carry the build.
+→ Scheduled as **M4 — v0.5.0** (see above); content relocated there, not duplicated.
 
 ## Later / icebox
 
-Scheduled background sync routines; cross-machine handoff via shared
-workspace; GitLab/Bitbucket forges; additional marketplace plugins.
+Additional marketplace plugins.

@@ -192,13 +192,13 @@ feature sections here.
 - Behavioral eval harness for skills: free contract/gate smoke (pre-commit + CI) + paid agentic evals as a pre-release gate. *(Delivered in M2, Epic E1. Traces G8.)*
 
 **Could have**
-- Scheduled background tracker sync; cross-machine handoff (shared workspace); additional description templates.
+- Scheduled background tracker sync; cross-machine handoff (shared workspace) — both sequenced into v0.7.0 (see roadmap M6); additional description templates.
 - acs maintains the `quality/` and `operations/` doc sets for consumers (test strategy + release/ops runbooks) via `/acs:create-quality` and `/acs:create-operations`, plus `/acs:test` — a schedulable regression runner that triages failures and opens a ticket per regression (closed loop). *(Proposed — see [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md).)*
 - **acs maintains the `principles/` and `standards/` doc sets for consumers** — engineering principles (e.g. `/acs:create-principles` → `principles/`) and coding standards/conventions (e.g. `/acs:create-standards` → `standards/`), each a product-level producer skill with its own planner/executor/verifier triad and acs-shipped templates, following the one-skill-per-set pattern of `/acs:create-architecture` and the proposed `/acs:create-quality` / `/acs:create-operations` (see [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md)). These sets sit between architecture and design in the conformance chain: **PRD → architecture → standards → design → specs → code**, each level verified against the one above it. Design and code MUST conform to the standards docs; the `/code` `code-verifier`'s technical-standards dimension and the design verifiers check conformance and block violations (no silent waivers). Traces G10 (+ the Tech-lead persona). *(Proposed — extends the chain at workflow.md and docs/README; see Constraints.)*
 - **Architecture doc set gains an explicit project-structure target** — the `/acs:create-architecture` output set adds a project-structure document (the intended repo layout, derived from the C4 container/component views) as the canonical target a repo is expected to match. It is the layout `/acs:standardize-project` audits an existing repo against. Traces G10.
 - **`/acs:standardize-project` — brownfield standardization (separate from `/acs:create-project`, which stays greenfield-only)** — audits an EXISTING repo against its principles + standards doc sets, the architecture project-structure target, and acs-readiness tooling (coverage/CI/pre-commit/e2e harness — scaffolding a repo-side e2e CI workflow + runner and, opt-in, wiring it as a required e2e merge-gate status check for an EXISTING repo that lacks one, the brownfield counterpart to greenfield-only `/acs:create-project`), then **additively** sets up the missing docs/config/tooling as **one reviewed PR**. It NEVER moves or renames existing source; structural gaps versus the target layout become **recommended follow-up tickets**, not in-place moves. Traces G10, G13 (+ the Tech-lead persona). *(Proposed; additive-only — see the C-2 guardrail in Constraints & assumptions.)*
 - **Configurable doc-set storage location (external/local paths)** — each acs doc set's path is independently configurable and may point to an absolute/external path outside the consumer repo (not only repo-relative); generalizes the `prd_path`, `architecture_path`, `requirements_path`, `adr_path`, and future `standards_path`/`principles_path`/`quality_path`/`operations_path` keys under one doc-set storage-location config surface; producer skills resolve the configured location and preserve a reviewable diff there. This is the committed near-term deliverable. Traces extended G6.
-- **Pluggable remote docs backend (Notion)** — mirrors the existing `tracker.provider` precedent (`local` filesystem default + `notion` as the first remote provider); supports BOTH modes per backend: (1) **publish/mirror** — repo stays source of truth, the docs-only PR is preserved, content synced to Notion for reading; (2) **authoritative-remote** — Notion is the system of record, no repo copy, review/audit happens in Notion. The **MECHANISM** — Notion API/auth, markdown→Notion-blocks mapping, PR-less vs sync delivery, per-mode review/audit — is **deferred to a dedicated future Notion/remote-docs epic's design phase**, mirroring how this PRD defers tabp's mechanism. Auth via external CLI/integration; no secrets in settings (mirrors the `tracker.provider` precedent and the Safety NFR). Traces extended G6.
+- **Pluggable remote docs backend (Notion)** — mirrors the existing `tracker.provider` precedent (`local` filesystem default + `notion` as the first remote provider); supports BOTH modes per backend: (1) **publish/mirror** — repo stays source of truth, the docs-only PR is preserved, content synced to Notion for reading; (2) **authoritative-remote** — Notion is the system of record, no repo copy, review/audit happens in Notion. The **MECHANISM** — Notion API/auth, markdown→Notion-blocks mapping, PR-less vs sync delivery, per-mode review/audit — is **deferred to a dedicated future Notion/remote-docs epic's design phase**, mirroring how this PRD defers tabp's mechanism. Auth via external CLI/integration; no secrets in settings (mirrors the `tracker.provider` precedent and the Safety NFR). Traces extended G6. **Tentative version home: v0.6.0** (see roadmap M5 — v0.6.0), sequenced after v0.4.0; the MECHANISM deferral above is unchanged.
 - **Opt-in reverse-bootstrap from tracker + codebase** — an **opt-in** growth path
   that seeds a baseline `prd.md`/architecture by reverse-engineering from imported
   tracker issues plus the existing codebase, giving a tracker-only team a starting
@@ -243,12 +243,25 @@ feature sections here.
   format — so the reflection cycle is a genuine runtime divergence, not a thin shim. The
   deterministic layer is already stdlib-only Python (Portability NFR), which is the
   portable substrate this builds on. Traces **extended G6** (runtime portability).
-  **Lowest-priority Could-have — scheduled behind v0.4.0:** not started, designed, or ticketed until the v0.4.0 epics ship; it does not compete with the v0.4.0 epics for capacity. *(Proposed — the MECHANISM is deferred to the multi-runtime epic's design
-  phase / an ADR, per Constraints. Reverses the prior acs Won't-have — see Reversal note
-  (MAR-2) in Out of scope.)*
+  **Lowest-priority Could-have — sequenced after the v0.4.0 epics ship, with a
+  tentative version home at v0.5.0** (see roadmap M4 — v0.5.0): not started, designed,
+  or ticketed until the v0.4.0 epics ship; it does not compete with the v0.4.0 epics for
+  capacity. *(Proposed — the MECHANISM is deferred to the multi-runtime epic's design
+  phase / an ADR, per Constraints. Reverses the prior acs "non-Claude-Code runtimes"
+  Won't-have — see Reversal note (MAR-2) in Out of scope; the separate GitLab/Bitbucket
+  non-GitHub-forge Won't-have is reversed independently — see the acs Could-have
+  "Non-GitHub forges (GitLab/Bitbucket) support" below and the Reversal note (MAR-71) in
+  Out of scope.)*
+- **Non-GitHub forges (GitLab/Bitbucket) support** — the delivery pipeline (tracker
+  import/sync, PR flow) targets GitLab/Bitbucket in addition to GitHub, extending the
+  Two-way tracker sync Should-have (above) to the additional forges. The **MECHANISM**
+  (forge API/auth mapping, MR-vs-PR semantics) is **deferred to the forge epic's design
+  phase**, mirroring the Notion/multi-runtime deferrals. **Tentative version home:
+  v0.7.0** (see roadmap M6 — v0.7.0). Traces the Two-way tracker sync Should-have goals
+  (above) + extended **G6** (portability). *(Reverses the prior acs "non-GitHub forges"
+  Won't-have — see Reversal note (MAR-71) in Out of scope.)*
 
 **Won't have (now)** *(acs feature scope)*
-- Non-GitHub forges (GitLab/Bitbucket). *(The former "non-Claude-Code runtimes for the acs pipeline" Won't-have is **reversed by MAR-2** — OpenAI Codex CLI is now a supported pipeline runtime; see the acs Could-have **Multi-runtime support (OpenAI Codex CLI)** feature and the Reversal note (MAR-2) in Out of scope.)*
 - Non-Notion remote docs providers (Confluence, Google Docs, SharePoint) — Notion is the only named remote provider; general CMS / doc-graph re-architecture is out of scope; bidirectional Notion→repo editing is out of scope now (authoritative-remote means Notion is the system of record with no repo copy, not a two-way file sync).
 - Automatic downgrade of a ticket's complexity/supervision tier without explicit user confirmation — tiers are always user-confirmed; the system never silently reduces rigor.
 
@@ -416,9 +429,13 @@ a two-way file sync.
 **Auto-authoring product docs from a tracker is out of scope.** Tracker-first mode
 never generates a `prd.md`/roadmap/architecture automatically; reverse-bootstrap
 (seeding those from imported tickets + codebase) is an **opt-in Could-have** the user
-must invoke. Tracker-first applies to the supported trackers only (GitHub Projects /
-Jira via `gh` / `acli`); **non-GitHub/Jira forges remain out of scope** (GitLab /
-Bitbucket, per the acs Won't-have).
+must invoke. Tracker-first / auto-authoring applies to the supported trackers only
+(GitHub Projects / Jira via `gh` / `acli`); **this tracker-first / auto-authoring scope
+stays limited to those trackers** (GitLab / Bitbucket are not additional tracker-first
+sources here). This is distinct from GitLab/Bitbucket as a **general delivery-forge
+target** (tracker import/sync, PR flow), which is now a **Could-have** (MAR-71) with a
+tentative v0.7.0 home — see the acs Could-have "Non-GitHub forges (GitLab/Bitbucket)
+support" and the Reversal note (MAR-71) above.
 
 **Reversal note (MAR-35):** this amendment reverses the prior "tabp is skills-only"
 product decision that was previously stated in this PRD and in MAR-26 design C-arch-5
@@ -452,8 +469,19 @@ primary/today-shipping runtime; Codex CLI is a Could-have whose **MECHANISM** (m
 the PreToolUse/SessionEnd hook gating, the planner/executor/verifier reflection-subagent
 protocol, and skill/agent dispatch onto Codex CLI) is **deferred to a dedicated future
 multi-runtime epic's design phase / an ADR** — exactly as this PRD defers tabp's and
-the Notion/remote-docs mechanisms. The GitLab/Bitbucket non-GitHub-forge Won't-have is
-**unaffected** — only the runtime clause is reversed.
+the Notion/remote-docs mechanisms. MAR-2 reversed **only the runtime clause**; the
+GitLab/Bitbucket non-GitHub-forge Won't-have is **separately reversed by MAR-71** —
+see the Reversal note (MAR-71) below.
+
+**Reversal note (MAR-71):** this amendment reverses the prior "non-GitHub forges
+(GitLab/Bitbucket)" acs Won't-have. Per MAR-71, **GitLab/Bitbucket become a Could-have**
+— the delivery pipeline's tracker import/sync and PR flow extend to the additional
+forges, with a **tentative version home at v0.7.0** (see roadmap M6 — v0.7.0; see the
+acs Could-have "Non-GitHub forges (GitLab/Bitbucket) support" above). The **MECHANISM**
+(forge API/auth mapping, MR-vs-PR semantics) is **deferred to the forge epic's design
+phase**, mirroring the Notion/multi-runtime deferrals. This reversal does **not** reopen
+any other Won't-have: Notion-only remote providers, ATS integrations, and the
+wholesale-restructure guardrail all remain out of scope, unchanged.
 
 Non-GitHub org-policy backends are out of scope — org enforcement targets the GitHub
 org-controlled surface first (org rulesets / org-required workflows); other forges remain
