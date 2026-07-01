@@ -716,18 +716,54 @@ def render_managed_block(template_text, ticket_prefix, exempt_label):
             .replace("{exempt_label}", exempt_label or ""))
 
 
+def _managed_body(text):
+    """Reduce *text* to the guidance body that belongs INSIDE a managed block.
+
+    The writer (upsert_managed_block) owns the markers, so a body must never
+    carry its own — otherwise wrapping doubles them. This reducer makes that
+    impossible regardless of what the caller/template supplies:
+      * if a full BEGIN..END pair is present, take the slice strictly between the
+        FIRST begin and the LAST end (dropping any maintainer header above BEGIN
+        and the markers themselves);
+      * then remove any stray marker strings that survived (unpaired or nested);
+      * finally trim surrounding blank lines so wrapping is deterministic.
+    Pure function; no I/O."""
+    begin = text.find(ACS_BLOCK_BEGIN)
+    end = text.rfind(ACS_BLOCK_END)
+    if begin != -1 and end != -1 and end > begin:
+        text = text[begin + len(ACS_BLOCK_BEGIN):end]
+    text = text.replace(ACS_BLOCK_BEGIN, "").replace(ACS_BLOCK_END, "")
+    return text.strip("\n")
+
+
+def managed_body_from_template(template_text, ticket_prefix, exempt_label):
+    """Render CLAUDE.acs.md down to the guidance BODY only, ready to wrap.
+
+    Substitutes the two placeholders (render_managed_block) and then extracts the
+    text strictly between the template's own ACS_BLOCK_BEGIN/END markers — the
+    maintainer header and the markers themselves are dropped, so upsert_managed_block
+    injects exactly one clean marker pair around just the guidance. A template with
+    no markers degrades gracefully to the whole (substituted) text. Pure function."""
+    return _managed_body(render_managed_block(template_text, ticket_prefix, exempt_label))
+
+
 def upsert_managed_block(existing_text, block_body):
     """Return existing_text with the acs-managed block inserted or replaced.
 
-    The block is ACS_BLOCK_BEGIN + newline + block_body + newline + ACS_BLOCK_END.
-    When both markers are already present (in order), replace ONLY the inclusive
-    BEGIN..END span, preserving everything before and after byte for byte. When
-    absent, append the block to the end separated by exactly one blank line; an
+    The block is ACS_BLOCK_BEGIN + newline + block_body + newline + ACS_BLOCK_END,
+    where block_body is first reduced via _managed_body so it can never re-introduce
+    a marker (no caller — however buggy — can cause doubling).
+
+    When markers are already present, replace the inclusive span from the FIRST
+    BEGIN to the LAST END (rfind), preserving everything before and after byte for
+    byte. Using rfind self-heals a legacy DOUBLED block: the whole nested mess
+    collapses to one clean pair rather than leaving an orphaned outer END. When no
+    markers are present, append the block separated by exactly one blank line; an
     empty existing_text yields just the block. Idempotent: a second call with the
     same block_body yields output byte-identical to the first."""
-    block = "%s\n%s\n%s" % (ACS_BLOCK_BEGIN, block_body, ACS_BLOCK_END)
+    block = "%s\n%s\n%s" % (ACS_BLOCK_BEGIN, _managed_body(block_body), ACS_BLOCK_END)
     begin = existing_text.find(ACS_BLOCK_BEGIN)
-    end = existing_text.find(ACS_BLOCK_END)
+    end = existing_text.rfind(ACS_BLOCK_END)
     if begin != -1 and end != -1 and end > begin:
         before = existing_text[:begin]
         after = existing_text[end + len(ACS_BLOCK_END):]

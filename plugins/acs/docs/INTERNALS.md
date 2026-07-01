@@ -422,10 +422,13 @@ sanctioned way to keep children shippable when a slice alone would break.
   partition/state, and skips tracker sync and archiving — `skill-start.py --pr`
   validates the PR carries the `exempt_label` (or an `exempt_branches` head) and
   refuses + redirects to `/acs:merge-pr <ticket-id>` when the PR looks
-  ticket-backed. `/acs:init` Step 7e renders the `templates/CLAUDE.acs.md`
-  managed block into the repo's `CLAUDE.md` (idempotent, marker-delimited) to
-  steer everyday changes onto `/acs:ship` so the pipeline is the default, not
-  just the available, path.
+  ticket-backed. `/acs:init` Step 7e injects the guidance **body** from
+  `templates/CLAUDE.acs.md` (the template's maintainer header and its own markers
+  are dropped) into the repo's `CLAUDE.md`, wrapped by `upsert_managed_block` in
+  exactly one acs-managed marker pair — idempotent (byte-identical re-runs) and
+  self-healing (a legacy doubled block collapses to one clean pair) — to steer
+  everyday changes onto `/acs:ship` so the pipeline is the default, not just the
+  available, path.
   The same checker runs three modes off one config: `--mode pr` (CI: branch,
   commit, pr_title, acs_label, pr_description), `--mode pre-push` (local hook:
   branch + commit subjects of the push range), `--mode commit-msg` (local hook:

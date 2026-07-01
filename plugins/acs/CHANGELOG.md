@@ -15,6 +15,27 @@ the notes.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-01
+
+### Fixed
+
+- **`/acs:init` no longer writes a doubled, non-idempotent acs-managed block into
+  the consumer `CLAUDE.md`.** Step 7e used to read the whole `CLAUDE.acs.md`
+  template — which already ships a complete block (maintainer header + its own
+  `BEGIN`/`END` markers) — and wrap it in a *second* marker pair, producing two
+  `<!-- BEGIN acs-managed … -->` and two `<!-- END acs-managed -->` with the
+  header sandwiched between them. Re-running degraded the file further because the
+  writer located the closing marker with `find` (the inner `END`), orphaning the
+  outer one. The writer now injects only the guidance **body** (new
+  `acs_lib.managed_body_from_template`, which drops the header and the template's
+  own markers) wrapped in exactly one pair, and `upsert_managed_block` locates the
+  span with `rfind` and defensively strips any stray markers from the body. Result:
+  a fresh write yields a single clean pair, re-runs are byte-identical, and a
+  pre-existing doubled/legacy block self-heals to one clean pair — all while
+  preserving the surrounding user-owned content byte-for-byte. Step 7e also gains a
+  post-write self-check asserting a single marker pair. Re-run `/acs:init` to
+  collapse an already-doubled block in an existing repo.
+
 ## [0.3.1] - 2026-06-29
 
 ### Changed

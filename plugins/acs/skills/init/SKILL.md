@@ -686,24 +686,35 @@ settings, _ = acs_lib.load_settings(cwd)
 prefix = settings.get("ticket_prefix", "")
 exempt = ((settings.get("enforcement") or {}).get("exempt_label")) or "acs-exempt"
 with open(sys.argv[2], encoding="utf-8") as fh:
-    block = acs_lib.render_managed_block(fh.read(), prefix, exempt)
+    body = acs_lib.managed_body_from_template(fh.read(), prefix, exempt)
 path = os.path.join(root, "CLAUDE.md")
 existing = ""
 if os.path.exists(path):
     with open(path, encoding="utf-8") as fh:
         existing = fh.read()
+result = acs_lib.upsert_managed_block(existing, body)
 with open(path, "w", encoding="utf-8") as fh:
-    fh.write(acs_lib.upsert_managed_block(existing, block))
-print("wrote acs-managed block to", path)
+    fh.write(result)
+# Self-check: exactly one BEGIN/END marker pair must exist after the write.
+n_begin = result.count(acs_lib.ACS_BLOCK_BEGIN)
+n_end = result.count(acs_lib.ACS_BLOCK_END)
+assert n_begin == 1 and n_end == 1, "acs-managed block malformed: %d BEGIN / %d END" % (n_begin, n_end)
+print("wrote acs-managed block to", path, "(1 BEGIN / 1 END verified)")
 PY
 ```
 
-`render_managed_block` only substitutes the two placeholders (no other content
-changes); `upsert_managed_block` replaces an existing acs-managed span in place
-or appends one separated by a blank line, leaving the rest byte-for-byte — so a
-re-run is safe and a hand-written `CLAUDE.md` is never clobbered. Tell the user
-to **commit** `CLAUDE.md` so teammates inherit the guidance. Record the outcome
-(written / refreshed / declined) for Step 8 and the completion report.
+`managed_body_from_template` substitutes the two placeholders and extracts only
+the guidance **body** between the template's own markers (the maintainer header
+comment and the markers themselves are dropped); `upsert_managed_block` then
+wraps that body in exactly one `<!-- BEGIN acs-managed … -->` /
+`<!-- END acs-managed -->` pair — replacing any existing (or legacy doubled) span
+in place, or appending one separated by a blank line, and leaving the surrounding
+content byte-for-byte. A re-run is therefore idempotent (byte-identical output)
+and self-healing (a pre-existing doubled block collapses to one clean pair), and
+a hand-written `CLAUDE.md` is never clobbered; the self-check above asserts a
+single marker pair landed. Tell the user to **commit** `CLAUDE.md` so teammates
+inherit the guidance. Record the outcome (written / refreshed / declined) for
+Step 8 and the completion report.
 
 ## Step 8 — Summary and next steps
 

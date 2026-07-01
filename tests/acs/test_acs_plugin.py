@@ -1254,6 +1254,100 @@ class TestManagedBlock(unittest.TestCase):
         self.assertIn("/acs:ship", text)
         self.assertIn("/acs:merge-pr --pr", text)
 
+    # -- MAR-70 regression: doubling / non-idempotency of the /acs:init writer ----
+    # The template ships a COMPLETE block (maintainer header + its own BEGIN/END);
+    # the writer must inject only the inner body wrapped in exactly ONE marker pair.
+
+    HEADER_MARKER = "CLAUDE.acs.md — acs managed block"
+
+    def _template_text(self):
+        with open(os.path.join(TEMPLATE_DIR, "CLAUDE.acs.md"), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_managed_body_from_template_drops_header_and_markers(self):
+        # The rendered body carries the guidance but NEITHER the maintainer header
+        # NOR the template's own markers (the writer owns the markers).
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        self.assertIn("/acs:ship", body)
+        self.assertIn("SHOP", body)
+        self.assertIn("acs-exempt", body)
+        self.assertNotIn(self.HEADER_MARKER, body)
+        self.assertNotIn(lib.ACS_BLOCK_BEGIN, body)
+        self.assertNotIn(lib.ACS_BLOCK_END, body)
+
+    def test_ac1_fresh_write_single_pair_no_header(self):
+        # AC-1: a fresh write from the real template yields EXACTLY one BEGIN/END
+        # pair around the body only; the maintainer header is never injected.
+        existing = "# My project\n\nSome user notes.\n"
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        out = lib.upsert_managed_block(existing, body)
+        self.assertEqual(out.count(lib.ACS_BLOCK_BEGIN), 1)
+        self.assertEqual(out.count(lib.ACS_BLOCK_END), 1)
+        self.assertNotIn(self.HEADER_MARKER, out)
+        self.assertIn("/acs:ship", out)
+        self.assertTrue(out.startswith(existing))  # AC-4: prior content preserved
+
+    def test_ac2_idempotent_double_run_from_template(self):
+        # AC-2: running the writer twice is byte-identical (whole real-template path).
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        existing = "# My project\n\nSome user notes.\n"
+        first = lib.upsert_managed_block(existing, body)
+        second = lib.upsert_managed_block(first, body)
+        self.assertEqual(first, second)
+        self.assertEqual(second.count(lib.ACS_BLOCK_BEGIN), 1)
+        self.assertEqual(second.count(lib.ACS_BLOCK_END), 1)
+
+    def _legacy_doubled_file(self, prefix_user, suffix_user):
+        """Reconstruct the pre-fix (buggy) artifact: the OLD writer wrapped the
+        WHOLE substituted template (header + inner BEGIN/END) in a second marker
+        pair, producing two BEGIN + two END with the header sandwiched between the
+        outer and inner BEGIN."""
+        whole_template = lib.render_managed_block(self._template_text(), "SHOP", "acs-exempt")
+        doubled = "%s\n%s\n%s" % (lib.ACS_BLOCK_BEGIN, whole_template, lib.ACS_BLOCK_END)
+        return prefix_user + doubled + suffix_user
+
+    def test_ac3_self_heals_legacy_doubled_block(self):
+        # AC-3 + AC-4: running the writer against an already-doubled/legacy block
+        # collapses it to a single clean pair with no orphaned markers, and the
+        # surrounding user content is preserved byte-for-byte.
+        prefix_user = "# My project\n\nSome user notes.\n\n"
+        suffix_user = "\n\n## More\n\ntrailing user text\n"
+        legacy = self._legacy_doubled_file(prefix_user, suffix_user)
+        # precondition: the fixture really is doubled
+        self.assertEqual(legacy.count(lib.ACS_BLOCK_BEGIN), 2)
+        self.assertEqual(legacy.count(lib.ACS_BLOCK_END), 2)
+
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        healed = lib.upsert_managed_block(legacy, body)
+        self.assertEqual(healed.count(lib.ACS_BLOCK_BEGIN), 1)
+        self.assertEqual(healed.count(lib.ACS_BLOCK_END), 1)
+        self.assertNotIn(self.HEADER_MARKER, healed)          # header no longer leaked
+        self.assertTrue(healed.startswith(prefix_user))       # AC-4 surrounding bytes
+        self.assertTrue(healed.endswith(suffix_user))         # AC-4 surrounding bytes
+        # and the heal is itself idempotent thereafter
+        self.assertEqual(lib.upsert_managed_block(healed, body), healed)
+
+    def test_ac3_self_heal_no_orphaned_marker_via_old_find_bug(self):
+        # Pin the specific non-idempotency root cause: a naive find(END) would match
+        # the INNER end and leave the OUTER end orphaned after the block. rfind(END)
+        # must consume the whole doubled span so the healed file is a single clean
+        # block immediately followed by the untouched user suffix.
+        legacy = self._legacy_doubled_file("intro\n\n", "\n\noutro\n")
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        healed = lib.upsert_managed_block(legacy, body)
+        self.assertEqual(healed.count(lib.ACS_BLOCK_END), 1)
+        # exactly one END, and the text after it is the user suffix — no orphan.
+        self.assertEqual(healed.split(lib.ACS_BLOCK_END, 1)[1], "\n\noutro\n")
+
+    def test_upsert_defensively_strips_body_that_carries_markers(self):
+        # Even a buggy caller that passes a body already wrapped in markers (the
+        # original defect) cannot cause doubling: the reducer strips them.
+        body_with_markers = "%s\nguidance\n%s" % (lib.ACS_BLOCK_BEGIN, lib.ACS_BLOCK_END)
+        out = lib.upsert_managed_block("", body_with_markers)
+        self.assertEqual(out.count(lib.ACS_BLOCK_BEGIN), 1)
+        self.assertEqual(out.count(lib.ACS_BLOCK_END), 1)
+        self.assertIn("guidance", out)
+
 
 class TestExemptPrMerge(AcsWorkspaceCase):
     """Spec 02 + 03 — exempt non-ticket merge-pr --pr path: the classifier, the
