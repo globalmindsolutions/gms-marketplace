@@ -1,5 +1,13 @@
 {
   "ticket_prefix": "MAR",
+  "prd_path": "docs/product",
+  "architecture_path": "docs/architecture",
+  "requirements_path": "docs/requirements",
+  "adr_path": "docs/adr",
+  "e2e": {
+    "command": "python3 evals/run_evals.py --plugin acs --paid",
+    "per_iteration": false
+  },
   "tracker": {
     "provider": "github",
     "github": {
