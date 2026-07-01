@@ -426,7 +426,12 @@ sanctioned way to keep children shippable when a slice alone would break.
   `templates/CLAUDE.acs.md` (the template's maintainer header and its own markers
   are dropped) into the repo's `CLAUDE.md`, wrapped by `upsert_managed_block` in
   exactly one acs-managed marker pair — idempotent (byte-identical re-runs) and
-  self-healing (a legacy doubled block collapses to one clean pair) — to steer
+  self-healing (it reads the file first and, when `managed_block_is_malformed`
+  flags a block an earlier buggy run doubled or orphaned — marker counts other
+  than 1/1 — the upsert collapses the whole span from the FIRST BEGIN to the LAST
+  END to one clean pair, scrubs any stray surrounding marker, reports `repaired
+  malformed acs-managed block …`, and surfaces the repair in the completion
+  report, all while preserving user-owned content byte-for-byte) — to steer
   everyday changes onto `/acs:ship` so the pipeline is the default, not just the
   available, path.
   The same checker runs three modes off one config: `--mode pr` (CI: branch,

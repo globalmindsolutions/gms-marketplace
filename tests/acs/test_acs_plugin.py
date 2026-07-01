@@ -1348,6 +1348,97 @@ class TestManagedBlock(unittest.TestCase):
         self.assertEqual(out.count(lib.ACS_BLOCK_END), 1)
         self.assertIn("guidance", out)
 
+    # -- MAR-74 (Deliverable 2): detect & self-heal a CLAUDE.md an earlier buggy
+    # run corrupted (doubled markers, accumulated orphan END markers) and report
+    # the repair. managed_block_is_malformed is the detector; upsert_managed_block
+    # (rfind span + _strip_stray_markers) is the repair; both are idempotent. ----
+
+    def _real_corrupted_file(self, prefix_user, suffix_user, n_orphan_end=1):
+        """Reconstruct the artifact a buggy /acs:init actually produced and then
+        degraded: the WHOLE substituted template (maintainer header + its own
+        inner BEGIN/END) wrapped in an OUTER marker pair, followed by N orphaned
+        trailing END markers that accumulated on subsequent re-runs (the old
+        find(END) matched the inner END, leaving each outer END orphaned)."""
+        whole_template = lib.render_managed_block(self._template_text(), "SHOP", "acs-exempt")
+        doubled = "%s\n%s\n%s" % (lib.ACS_BLOCK_BEGIN, whole_template, lib.ACS_BLOCK_END)
+        orphans = ("\n" + lib.ACS_BLOCK_END) * n_orphan_end
+        return prefix_user + doubled + orphans + suffix_user
+
+    def test_managed_block_is_malformed_detector(self):
+        # The detector: exactly one BEGIN and one END -> well-formed; anything else
+        # (doubled, orphaned, or absent) -> malformed. True/false cases.
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        clean = lib.upsert_managed_block("# Repo\n\nnotes\n", body)
+        self.assertFalse(lib.managed_block_is_malformed(clean))                          # 1/1 clean
+        self.assertTrue(lib.managed_block_is_malformed(self._legacy_doubled_file("", ""))) # 2/2 doubled
+        self.assertTrue(lib.managed_block_is_malformed(clean + "\n" + lib.ACS_BLOCK_END))  # 1/2 orphan END
+        self.assertTrue(lib.managed_block_is_malformed(lib.ACS_BLOCK_BEGIN + "\nx\n"))     # lone BEGIN
+        self.assertTrue(lib.managed_block_is_malformed("# Repo\n\njust user prose\n"))     # absent (0/0)
+
+    def test_ac5_self_heal_doubled_plus_orphan_end_markers(self):
+        # AC-5 (+ AC-6, AC-7): a doubled block PLUS several accumulated orphan END
+        # markers collapses to exactly one clean pair with no orphan left behind,
+        # surrounding user content is preserved byte-for-byte, and the heal is a
+        # byte-identical no-op on the next run.
+        prefix_user = "# My project\n\nintro\n\n"
+        suffix_user = "\n\n## Footer\n\ntrailing\n"
+        corrupt = self._real_corrupted_file(prefix_user, suffix_user, n_orphan_end=3)
+        # precondition: genuinely corrupted (2 BEGIN; inner+outer+3 orphan = 5 END)
+        self.assertTrue(lib.managed_block_is_malformed(corrupt))
+        self.assertEqual(corrupt.count(lib.ACS_BLOCK_BEGIN), 2)
+        self.assertEqual(corrupt.count(lib.ACS_BLOCK_END), 5)
+
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        healed = lib.upsert_managed_block(corrupt, body)
+        self.assertEqual(healed.count(lib.ACS_BLOCK_BEGIN), 1)
+        self.assertEqual(healed.count(lib.ACS_BLOCK_END), 1)
+        self.assertFalse(lib.managed_block_is_malformed(healed))
+        self.assertNotIn(self.HEADER_MARKER, healed)                 # header no longer leaked
+        self.assertTrue(healed.startswith(prefix_user))              # AC-6 user bytes before
+        self.assertTrue(healed.endswith(suffix_user))                # AC-6 user bytes after
+        self.assertEqual(lib.upsert_managed_block(healed, body), healed)  # AC-7 idempotent
+
+    def test_heal_scrubs_orphan_marker_outside_the_span(self):
+        # Belt-and-suspenders: a lone orphan END *before* the block and a lone
+        # BEGIN *after* it fall outside [firstBEGIN..lastEND], so the rfind span
+        # replacement alone would leave them. _strip_stray_markers scrubs them too,
+        # so no orphan survives, while the user's actual text is preserved.
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        clean_block = "%s\n%s\n%s" % (lib.ACS_BLOCK_BEGIN, "old body", lib.ACS_BLOCK_END)
+        existing = (lib.ACS_BLOCK_END + "\n\nuser-before\n\n"
+                    + clean_block + "\n\nuser-after\n\n" + lib.ACS_BLOCK_BEGIN)
+        self.assertTrue(lib.managed_block_is_malformed(existing))
+        healed = lib.upsert_managed_block(existing, body)
+        self.assertEqual(healed.count(lib.ACS_BLOCK_BEGIN), 1)
+        self.assertEqual(healed.count(lib.ACS_BLOCK_END), 1)
+        self.assertFalse(lib.managed_block_is_malformed(healed))
+        self.assertIn("user-before", healed)
+        self.assertIn("user-after", healed)
+        self.assertEqual(lib.upsert_managed_block(healed, body), healed)  # idempotent
+
+    def test_deliverable2_full_matrix(self):
+        # One parametrized sweep over the whole fresh-write/heal matrix: every input
+        # (absent, user-prose, already-clean, doubled, doubled+orphans) converges to
+        # a single clean well-formed pair, never leaks the header, keeps the
+        # guidance, and is a byte-identical no-op on the immediate re-run.
+        body = lib.managed_body_from_template(self._template_text(), "SHOP", "acs-exempt")
+        cases = [
+            ("fresh_no_file", ""),
+            ("fresh_user_prose", "# Repo\n\nuser notes\n"),
+            ("already_clean", lib.upsert_managed_block("# Repo\n\nn\n", body)),
+            ("doubled", self._legacy_doubled_file("# Repo\n\nA\n\n", "\n\nB\n")),
+            ("doubled_plus_orphans", self._real_corrupted_file("# Repo\n\nA\n\n", "\n\nB\n", 2)),
+        ]
+        for name, existing in cases:
+            with self.subTest(case=name):
+                out = lib.upsert_managed_block(existing, body)
+                self.assertEqual(out.count(lib.ACS_BLOCK_BEGIN), 1, name)
+                self.assertEqual(out.count(lib.ACS_BLOCK_END), 1, name)
+                self.assertFalse(lib.managed_block_is_malformed(out), name)
+                self.assertNotIn(self.HEADER_MARKER, out)
+                self.assertIn("/acs:ship", out)
+                self.assertEqual(lib.upsert_managed_block(out, body), out, name)
+
 
 class TestExemptPrMerge(AcsWorkspaceCase):
     """Spec 02 + 03 — exempt non-ticket merge-pr --pr path: the classifier, the

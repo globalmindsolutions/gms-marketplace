@@ -692,6 +692,12 @@ existing = ""
 if os.path.exists(path):
     with open(path, encoding="utf-8") as fh:
         existing = fh.read()
+# Detect a pre-existing CORRUPTED block BEFORE writing so we can report a REPAIR
+# (an earlier buggy run may have left doubled or orphaned markers). A file with no
+# markers at all is a first-time insert, not a repair.
+n0 = existing.count(acs_lib.ACS_BLOCK_BEGIN)
+m0 = existing.count(acs_lib.ACS_BLOCK_END)
+repaired = (n0 or m0) and acs_lib.managed_block_is_malformed(existing)
 result = acs_lib.upsert_managed_block(existing, body)
 with open(path, "w", encoding="utf-8") as fh:
     fh.write(result)
@@ -699,6 +705,8 @@ with open(path, "w", encoding="utf-8") as fh:
 n_begin = result.count(acs_lib.ACS_BLOCK_BEGIN)
 n_end = result.count(acs_lib.ACS_BLOCK_END)
 assert n_begin == 1 and n_end == 1, "acs-managed block malformed: %d BEGIN / %d END" % (n_begin, n_end)
+if repaired:
+    print("repaired malformed acs-managed block in CLAUDE.md (was %d BEGIN / %d END -> 1/1)" % (n0, m0))
 print("wrote acs-managed block to", path, "(1 BEGIN / 1 END verified)")
 PY
 ```
@@ -707,14 +715,24 @@ PY
 the guidance **body** between the template's own markers (the maintainer header
 comment and the markers themselves are dropped); `upsert_managed_block` then
 wraps that body in exactly one `<!-- BEGIN acs-managed … -->` /
-`<!-- END acs-managed -->` pair — replacing any existing (or legacy doubled) span
-in place, or appending one separated by a blank line, and leaving the surrounding
-content byte-for-byte. A re-run is therefore idempotent (byte-identical output)
-and self-healing (a pre-existing doubled block collapses to one clean pair), and
-a hand-written `CLAUDE.md` is never clobbered; the self-check above asserts a
-single marker pair landed. Tell the user to **commit** `CLAUDE.md` so teammates
-inherit the guidance. Record the outcome (written / refreshed / declined) for
-Step 8 and the completion report.
+`<!-- END acs-managed -->` pair — replacing the whole span from the FIRST BEGIN
+to the LAST END in place (and scrubbing any stray orphan marker left in the
+surrounding text), or appending one separated by a blank line, and leaving the
+user-owned content byte-for-byte. A re-run is therefore idempotent
+(byte-identical output) and a hand-written `CLAUDE.md` is never clobbered.
+
+The step also **self-heals a CLAUDE.md an earlier buggy run corrupted**: it reads
+the existing file *before* writing and, when
+`acs_lib.managed_block_is_malformed(existing)` reports a pre-existing block with
+doubled or orphaned markers (counts other than 1 BEGIN / 1 END), the same upsert
+collapses the entire nested/orphaned mess to one clean pair and the snippet
+prints `repaired malformed acs-managed block in CLAUDE.md (was N BEGIN / M END ->
+1/1)`. The post-write self-check then asserts a single marker pair landed and
+fails loudly otherwise. Tell the user to **commit** `CLAUDE.md` so teammates
+inherit the guidance. Record the outcome (written / refreshed / **repaired** /
+declined) for Step 8; when a repair happened, surface it in the completion
+report's Results/Findings (e.g. "repaired a doubled acs-managed block a prior
+run left in CLAUDE.md") so the user knows it was more than a routine refresh.
 
 ## Step 8 — Summary and next steps
 

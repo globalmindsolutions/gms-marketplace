@@ -15,7 +15,27 @@ the notes.
 
 ## [Unreleased]
 
-## [0.3.2] - 2026-07-01
+## [0.3.3] - 2026-07-01
+
+### Fixed
+
+- **`/acs:init` now detects and auto-repairs a consumer `CLAUDE.md` that an
+  earlier buggy run corrupted, and reports the repair.** v0.3.2 stopped the writer
+  from *producing* a doubled block, but a repo already carrying a doubled or
+  orphaned block (e.g. `2 BEGIN / 3 END` from the old `find`-based non-idempotency)
+  still needed a human to hand-edit it. Step 7e now reads `CLAUDE.md` before
+  writing, and when the new pure detector `acs_lib.managed_block_is_malformed`
+  reports marker counts other than one `<!-- BEGIN acs-managed … -->` / one
+  `<!-- END acs-managed -->`, the same `upsert_managed_block` collapses the entire
+  span (first `BEGIN` → last `END`, `rfind`) to a single clean pair and
+  `_strip_stray_markers` scrubs any orphan marker left in the surrounding text, so
+  no doubled block or orphan `END` survives the next run. The step prints
+  `repaired malformed acs-managed block in CLAUDE.md (was N BEGIN / M END -> 1/1)`
+  and surfaces the repair in the completion report's Results/Findings, so a repair
+  is never mistaken for a routine refresh. A first-time insert into a block-less
+  `CLAUDE.md` is correctly reported as a normal write, not a repair. The heal
+  preserves the user-owned content before and after the block byte-for-byte and is
+  itself idempotent. Re-run `/acs:init` once to collapse any lingering corruption.
 
 ### Fixed
 

@@ -747,6 +747,24 @@ def managed_body_from_template(template_text, ticket_prefix, exempt_label):
     return _managed_body(render_managed_block(template_text, ticket_prefix, exempt_label))
 
 
+def _strip_stray_markers(text):
+    """Remove any lone acs marker LINES from *text* (belt-and-suspenders for the
+    content SURROUNDING the managed span in upsert_managed_block).
+
+    The acs markers are acs-owned — user-authored CLAUDE.md content is never
+    expected to contain them — so this only ever deletes stray markers a prior
+    buggy write left OUTSIDE the span (an orphaned END before the block, a lone
+    BEGIN after it). Returns *text* unchanged byte-for-byte when it holds no
+    marker, so well-formed surrounding content is never perturbed. Pure."""
+    if ACS_BLOCK_BEGIN not in text and ACS_BLOCK_END not in text:
+        return text
+    kept = [ln for ln in text.split("\n")
+            if ln.strip() != ACS_BLOCK_BEGIN and ln.strip() != ACS_BLOCK_END]
+    text = "\n".join(kept)
+    # scrub any inline residue (a marker not alone on its line) as well
+    return text.replace(ACS_BLOCK_BEGIN, "").replace(ACS_BLOCK_END, "")
+
+
 def upsert_managed_block(existing_text, block_body):
     """Return existing_text with the acs-managed block inserted or replaced.
 
@@ -757,21 +775,39 @@ def upsert_managed_block(existing_text, block_body):
     When markers are already present, replace the inclusive span from the FIRST
     BEGIN to the LAST END (rfind), preserving everything before and after byte for
     byte. Using rfind self-heals a legacy DOUBLED block: the whole nested mess
-    collapses to one clean pair rather than leaving an orphaned outer END. When no
-    markers are present, append the block separated by exactly one blank line; an
-    empty existing_text yields just the block. Idempotent: a second call with the
-    same block_body yields output byte-identical to the first."""
+    collapses to one clean pair rather than leaving an orphaned outer END, and any
+    stray marker left in the surrounding text (an orphan END before the span or a
+    lone BEGIN after it) is scrubbed via _strip_stray_markers so no orphan can
+    survive a heal. When no markers are present, append the block separated by
+    exactly one blank line; an empty (or marker-only) existing_text yields just the
+    block. Idempotent: a second call with the same block_body yields output
+    byte-identical to the first (and self-healing is itself idempotent)."""
     block = "%s\n%s\n%s" % (ACS_BLOCK_BEGIN, _managed_body(block_body), ACS_BLOCK_END)
     begin = existing_text.find(ACS_BLOCK_BEGIN)
     end = existing_text.rfind(ACS_BLOCK_END)
     if begin != -1 and end != -1 and end > begin:
-        before = existing_text[:begin]
-        after = existing_text[end + len(ACS_BLOCK_END):]
+        before = _strip_stray_markers(existing_text[:begin])
+        after = _strip_stray_markers(existing_text[end + len(ACS_BLOCK_END):])
         return before + block + after
-    if not existing_text:
+    # No full pair: drop any lone orphan marker, then append after existing content.
+    stripped = _strip_stray_markers(existing_text)
+    if not stripped.strip():
         return block
     # Append, separated from preceding content by exactly one blank line.
-    return existing_text.rstrip("\n") + "\n\n" + block
+    return stripped.rstrip("\n") + "\n\n" + block
+
+
+def managed_block_is_malformed(text):
+    """True when *text* does NOT contain exactly one acs-managed marker pair.
+
+    Pure detector used by /acs:init Step 7e to decide whether the consumer
+    CLAUDE.md needs REPAIR before the refresh: a doubled block (2+ BEGIN and/or
+    END) or an orphaned marker (unequal counts, a lone BEGIN or END) all read as
+    malformed. Note a file with NO markers is likewise "not exactly one pair" and
+    so reports True — callers distinguish an ABSENT block (a normal first write)
+    from a CORRUPTED one by additionally checking that at least one marker is
+    present (Step 7e only reports a repair when a marker was already there)."""
+    return text.count(ACS_BLOCK_BEGIN) != 1 or text.count(ACS_BLOCK_END) != 1
 
 
 # ---------------------------------------------------------------------------
