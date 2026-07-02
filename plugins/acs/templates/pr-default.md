@@ -12,6 +12,7 @@
 
 - **{ticket_id}** — {title} ({type}){external_key_line}
 - Acceptance criteria, specs, design, and the full audit trail live in the ticket's workspace partition.
+- Closes #{external_key}
 
 ## Changes
 

@@ -238,6 +238,16 @@ description, commit messages) — offered in Step 7c. If the user asks during
 init to "enforce conventions" or "stop the pipeline being bypassed", that is
 Step 7c.
 
+**Reconciliation convention (acs ticket id ↔ GitHub issue/PR).** No enforced format string (`pr_title`, `branch_name`, `commit_message`) changes as part of
+this convention — it is independent of, and consistent with, the formats table
+above. The acs ticket id is additionally recorded on the synced GitHub issue
+body (`acs-ticket: {ticket_id}`, via the description templates' `## Notes`/
+`## Goal` section), and `/acs:create-pr` adds a native
+`Closes #<external_key>` reference in the PR body (`## Ticket` section) when
+the ticket is synced to `github`. This is how ids show up in issues/PRs day
+to day — see `create-ticket`, `create-pr`, and `merge-pr` for the full
+mechanism.
+
 ### models — choose per-role models
 
 **On a fresh init, ALWAYS ask this** (not only on request) — model choice is a

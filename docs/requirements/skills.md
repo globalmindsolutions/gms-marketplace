@@ -426,6 +426,14 @@ Purpose: turn a raw user prompt into a well-formed ticket.
   **keeping its id**, description, and PRD trace; children are minted at the
   recorded seams; downstream work already present requires user confirmation
   first.
+- **GitHub-native reconciliation (standing behavior, MAR-75):** on GitHub
+  tracker sync (Step 5) the synced issue carries the acs ticket id on its body
+  (`acs-ticket: {ticket_id}`, rendered by the type description templates) and
+  is filled with every field the target Project schema supports — the `ACS`
+  and type labels, the assignee when known, the milestone when the repo uses
+  one, and applicable Project fields (Status, Type); a field the schema does
+  not define is surfaced, not silently skipped. `local` (unsynced) tickets are
+  unaffected.
 
 ## 2. `/create-design` *(conditional)*
 
@@ -651,6 +659,13 @@ Purpose: ship the implementation as a pull request.
   label.
 - **[ASSUMPTION]** PRs are created ready-for-review (not draft); reviewers
   are left to repo conventions.
+- **GitHub-native issue linking (standing behavior, MAR-75):** for a ticket
+  synced to GitHub the PR body carries a `Closes #<external.key>` reference (a
+  distinct bullet in the `## Ticket` section) so GitHub auto-links and
+  auto-closes the issue on merge, in addition to the existing `[{ticket_id}]`
+  title and tracker line. The PR also carries the required `ACS` label and the
+  milestone when one is used. The link bullet is omitted entirely for
+  `local`/unsynced tickets; the enforced `pr_title` format is unchanged.
 
 ## 6. `/merge-pr`
 
@@ -698,3 +713,9 @@ Purpose: land the change.
   `--pr` path (C-10). All other clauses above (agent-invocable, m6
   require-APPROVED, report-only for other failures, post-merge cleanup, merge
   strategy) remain intact and unchanged.
+- **Reconciliation close-comment (standing behavior, MAR-75):** when the
+  merged ticket is synced to GitHub, the `gh issue close` comment records the
+  acs ticket id and a back-reference to the merged PR (`Merged {ticket_id} via
+  PR #{pr.number} — {pr.url}`), so the closed issue's timeline still reaches
+  both the acs ticket id and the PR. The `gh issue close` call and the
+  Status→Done edit are otherwise unchanged.

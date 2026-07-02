@@ -21,3 +21,9 @@ Each child runs its own pipeline; the epic carries the design and tracks status
 ## Success criteria
 
 <!-- Measurable criteria for calling the epic done, derived from the PRD success metrics where applicable. -->
+
+## Notes
+
+<!-- Constraints, PRD trace, affected docs, gotchas discovered during analysis. -->
+
+acs-ticket: {ticket_id}

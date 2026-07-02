@@ -199,6 +199,15 @@ to `${CLAUDE_PLUGIN_ROOT}/templates/<name>.md`; otherwise
 `<repo>/.acs/templates/<name>.md`; otherwise an absolute path. Fill every section,
 drop the HTML comments.
 
+Every description template carries an `acs-ticket: {ticket_id}` line in its
+`## Notes` section (epic-default's own `## Notes`, mirroring task/story) — the
+rendered text is byte-identical across all three built-in templates, so the
+acs ticket id is visibly recorded in the ticket's own body regardless of type
+(AC-1). This line renders unconditionally as part of every description fill —
+it is NOT itself conditional on tracker sync; what IS conditional is whether
+that description ever reaches GitHub (Step 5 below, where the `local` provider
+skips sync entirely — no regression for unsynced tickets, AC-4).
+
 ### Step 4 — Epic fan-out via new-ticket.py
 
 For epics: for each user-confirmed child, run:
@@ -222,7 +231,11 @@ the parent epic's `design.md`. Capture each printed `ticket_id`.
 
 Only when `settings.tracker.provider` is `github` or `jira` (skip entirely for
 `local`). Sync is on-demand — this creation run pushes the new ticket(s) out; no
-background sync.
+background sync. For `local` (unsynced) tickets, none of this step's github
+field-fill behavior fires — no issue is created, so the `acs-ticket:` body line
+in the local `ticket.json` description is harmless, already-existing template
+content, not new GitHub-facing behavior; this is expected and not a regression
+(AC-4).
 
 - Imported tickets: keep `external` as pulled, do NOT create a remote duplicate.
   If local analysis changed title/description AND the remote also changed since the
@@ -237,6 +250,38 @@ background sync.
   `gh project item-edit --project-id <pid> --id <item-id> --field-id <fid>
   --single-select-option-id <oid>`. Store `external = {"provider": "github",
   "key": "<issue number>"}`.
+
+  After `gh issue create` and `gh project item-add` succeed, complete this
+  ordered field-fill checklist (AC-6 — fill every field the target repo's
+  Project schema actually supports for the synced issue, not just add it to
+  the project):
+
+  a. **Labels.** Ensure and apply the `ACS` label (mirrors the label
+     `/acs:create-pr` already applies) and the type label (`epic` / `story` /
+     `task` matching `ticket.type`), creating either label first if
+     `gh label list` does not show it
+     (`gh label create <name> --description "..." 2>/dev/null || true`, the
+     same idempotent pattern `/acs:create-pr` already uses), then
+     `gh issue edit <number> --add-label ACS,<type-label>`.
+  b. **Assignee.** When `ticket.assignee` is a non-null value, run
+     `gh issue edit <number> --add-assignee <assignee>`; when null, skip —
+     this is not a gap to surface (a null assignee is expected data, not
+     missing data).
+  c. **Milestone.** When the repo defines at least one milestone
+     (`gh api repos/<owner>/<repo>/milestones --jq length` > 0, or the
+     ticket/settings names one explicitly), set it via
+     `gh issue edit <number> --milestone <name>`; when the repo defines none,
+     skip silently — this is the "when the repo uses one" condition AC-6
+     itself names, not an omission to surface.
+  d. **Project fields.** Reuse the `gh project field-list` call above (it
+     already sets `Type` and `Status`) and extend its result-handling: for
+     every field the JSON lists that this ticket has a natural value for, call
+     `gh project item-edit` to set it. For every field the JSON does NOT list
+     that AC-6 expects (e.g. no `Type` field on this repo's Project), add an
+     `info`-severity finding to the run's findings list stating exactly which
+     field was skipped and why ("Project schema has no `<Field>` field;
+     skipped — add it via `gh project field-create` if wanted") — a
+     schema-undefined field is explicitly surfaced, never silently ignored.
 - `jira` (`tracker.jira.base_url`, `tracker.jira.project_key`):
   `acli jira workitem create --project <project_key> --type "Epic" --summary
   "<rendered title>" --description "<description>"` (types map epic→Epic,

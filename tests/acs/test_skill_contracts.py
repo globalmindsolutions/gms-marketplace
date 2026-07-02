@@ -1963,5 +1963,123 @@ class TestSimplicityScopeRestraintLayer(unittest.TestCase):
             "of '[Unreleased]' (MAR-2 AC-7)")
 
 
+class TestReconcileTicketIssueLinkage(unittest.TestCase):
+    """MAR-75 spec 02: pin the reconciliation prose contract (acs ticket id <->
+    GitHub issue/PR) that spec 01 introduces across create-ticket, create-pr,
+    merge-pr, and init, plus the three description templates and pr-default.md.
+    Written TDD-first (RED before spec 01's SKILL.md/template edits land);
+    turns GREEN once spec 01 is implemented. Additive only — no existing
+    assertion in this file is modified."""
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def template_path(self, name):
+        return os.path.join(PLUGIN, "templates", "%s.md" % name)
+
+    def test_create_ticket_step5_embeds_acs_id_on_issue(self):
+        """AC-1, AC-6 (prose proof): create-ticket/SKILL.md Step 5's github
+        branch carries the acs-ticket-id-on-issue-body instruction co-occurring
+        with `gh issue create`, and the three type description templates each
+        contain the acs-id line rendered identically (`acs-ticket: {ticket_id}`)."""
+        body = read(self.skill_path("create-ticket"))
+        self.assertIsNotNone(
+            re.search(r"(?s)gh issue create.{0,1200}acs-ticket:|acs-ticket:.{0,1200}gh issue create", body),
+            "create-ticket/SKILL.md Step 5 must co-locate 'acs-ticket:' with "
+            "'gh issue create' within a bounded window (MAR-75 AC-1)")
+        for name in ("task-default", "story-default", "epic-default"):
+            tmpl = read(self.template_path(name))
+            self.assertIn("acs-ticket: {ticket_id}", tmpl,
+                          "%s must carry the byte-identical 'acs-ticket: {ticket_id}' "
+                          "line (MAR-75 AC-1, AC-6, R-3)" % name)
+
+    def test_create_ticket_step5_fills_labels_assignee_milestone_fields(self):
+        """AC-6 (prose proof): Step 5's github branch enumerates label
+        (ACS + type, create-if-absent), assignee-when-known, milestone-when-
+        defined, and Project field-fill, plus surfacing a schema-undefined
+        field rather than silently skipping it."""
+        body = read(self.skill_path("create-ticket"))
+        self.assertIn("ACS", body,
+                      "create-ticket/SKILL.md must reference the ACS label (MAR-75 AC-6)")
+        self.assertIsNotNone(
+            re.search(r"(?i)type.label", body),
+            "create-ticket/SKILL.md must reference the type label (MAR-75 AC-6)")
+        self.assertIsNotNone(
+            re.search(r"(?i)assignee", body),
+            "create-ticket/SKILL.md must reference assignee fill (MAR-75 AC-6)")
+        self.assertIsNotNone(
+            re.search(r"(?i)milestone", body),
+            "create-ticket/SKILL.md must reference milestone fill (MAR-75 AC-6)")
+        self.assertIsNotNone(
+            re.search(r"(?i)(surfaced|surfac\w*).{0,200}(not silently|never silently)|"
+                      r"(not silently|never silently).{0,200}(surfaced|surfac\w*)", body),
+            "create-ticket/SKILL.md must state a schema-undefined Project field is "
+            "surfaced, not silently skipped (MAR-75 AC-6)")
+
+    def test_create_pr_body_carries_closes_reference(self):
+        """AC-2, AC-7 (prose proof): create-pr/SKILL.md Step 2 references a
+        GitHub-native `Closes #` linking instruction co-occurring with
+        pr-default.md/the Ticket section, conditional on a synced github
+        ticket; pr-default.md itself carries the new conditional bullet."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIsNotNone(
+            re.search(r"(?s)Closes #.{0,400}(pr-default|Ticket)|(pr-default|Ticket).{0,400}Closes #", body),
+            "create-pr/SKILL.md Step 2 must co-locate 'Closes #' with "
+            "'pr-default'/'Ticket' within a bounded window (MAR-75 AC-2, AC-7)")
+        self.assertIsNotNone(
+            re.search(r"(?i)provider.{0,60}github|github.{0,60}provider", body),
+            "create-pr/SKILL.md must state the Closes # link is conditional on "
+            "provider == github (MAR-75 AC-4)")
+        pr_default = read(self.template_path("pr-default"))
+        self.assertIn("Closes #{external_key}", pr_default,
+                      "pr-default.md must carry the new conditional "
+                      "'Closes #{external_key}' bullet (MAR-75 AC-2, R-2)")
+
+    def test_merge_pr_close_comment_carries_acs_id_and_pr_ref(self):
+        """AC-3, AC-5 (prose proof): merge-pr/SKILL.md Step 2's gh issue close
+        comment instruction co-occurs with both an acs-ticket-id token and a
+        PR back-reference within a bounded window."""
+        body = read(self.skill_path("merge-pr"))
+        self.assertIsNotNone(
+            re.search(
+                r"(?s)gh issue close.{0,300}\{ticket_id\}.{0,300}(PR #|\{pr\.url\}|\{pr\.number\})|"
+                r"gh issue close.{0,300}(PR #|\{pr\.url\}|\{pr\.number\}).{0,300}\{ticket_id\}",
+                body),
+            "merge-pr/SKILL.md Step 2 gh issue close comment must co-occur with "
+            "both {ticket_id} and a PR back-reference (MAR-75 AC-3, AC-5)")
+
+    def test_unsynced_nonregression_clause_present(self):
+        """AC-4 (prose proof): create-ticket/SKILL.md and create-pr/SKILL.md
+        each state the local/unsynced non-regression clause — no Closes #
+        line is emitted when the ticket is unsynced."""
+        create_ticket_body = read(self.skill_path("create-ticket"))
+        create_pr_body = read(self.skill_path("create-pr"))
+        self.assertIsNotNone(
+            re.search(r"(?i)local.{0,200}(unsynced|skip)|unsynced.{0,200}local", create_ticket_body),
+            "create-ticket/SKILL.md must state the local/unsynced non-regression "
+            "clause (MAR-75 AC-4)")
+        self.assertIsNotNone(
+            re.search(r"(?i)(local|unsynced).{0,300}(omit|bullet is omitted)|"
+                      r"(omit|bullet is omitted).{0,300}(local|unsynced)", create_pr_body),
+            "create-pr/SKILL.md must state the local/unsynced non-regression "
+            "clause — the Closes # bullet is omitted for unsynced tickets "
+            "(MAR-75 AC-4)")
+
+    def test_init_documents_reconciliation_convention(self):
+        """AC-5 (prose proof + R-1 guard): init/SKILL.md's formats section
+        notes the reconciliation convention and explicitly states no enforced
+        format string changed as part of it."""
+        body = read(self.skill_path("init"))
+        self.assertIsNotNone(
+            re.search(r"(?s)acs-ticket:.{0,800}Closes #|Closes #.{0,800}acs-ticket:", body),
+            "init/SKILL.md must document both the acs-ticket: issue-body "
+            "convention and the Closes # PR-body convention within a bounded "
+            "window (MAR-75 AC-5)")
+        self.assertIsNotNone(
+            re.search(r"(?i)no.{0,20}(enforced )?format.{0,120}chang", body),
+            "init/SKILL.md must explicitly state no enforced format string "
+            "changed as part of the reconciliation convention (MAR-75 AC-5, R-1)")
+
+
 if __name__ == "__main__":
     unittest.main()

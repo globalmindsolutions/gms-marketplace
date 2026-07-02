@@ -145,7 +145,20 @@ exact error — no silent fallback.
    plans), Checklist (tick exactly what code-state evidences — e.g. `[x]`
    only when `review.findings_open == 0`).
 
+   **GitHub-native issue link (AC-2, AC-7).** When
+   `ticket.external.provider == "github"` AND `ticket.external.key` is set,
+   `pr-default.md`'s `## Ticket` section renders a `Closes #{external_key}`
+   bullet — a distinct bullet from the existing `{external_key_line}`
+   (` — tracker: <provider> <key>`) — so GitHub's issue-closing keyword parser
+   recognizes it as its own line/bullet. When `ticket.external` is null/local
+   or the provider is not `github` (the unsynced case), the bullet is omitted
+   entirely, not rendered blank — the rest of the body renders byte-identical
+   to today (AC-4, no regression for `local`/unsynced tickets).
+
 3. **Label.** `gh label create ACS --description "Created by the acs pipeline" 2>/dev/null || true`
+   — this label plus the `Closes #{external_key}` linking line together make
+   the PR independently identifiable and traceable without depending on the
+   local acs ticket id being unique across contributors (AC-7).
 
 4. **Pre-open self-check.** Before either branch of step 5 runs `gh pr
    create`/`gh pr edit`, self-check the rendered title and filled body
@@ -197,6 +210,12 @@ exact error — no silent fallback.
    plus `gh pr edit <number> --base <default-branch>` when its base is wrong
    and `gh pr ready <number>` when it is a draft.
 
+   When a milestone is known (mirrors create-ticket's conditional milestone
+   fill — the repo defines at least one, or the ticket/settings names one
+   explicitly), both `gh pr create` and `gh pr edit` above additionally pass
+   `--milestone <name>`; omit the flag entirely when none is configured (this
+   repo defines none today) — never an unconditional call that would error.
+
 6. **Record.** `gh pr view <branch> --json number,url,baseRefName,headRefName,isDraft,labels`
    → capture `{number, url, branch, base}` for `states.pr`.
 
@@ -207,6 +226,10 @@ exact error — no silent fallback.
    - `jira`: `acli jira workitem comment --key <external.key> --body "ACS: PR opened for <ticket-id> — <url>"`
    Skip for `local`; report an info finding when the provider is configured but
    the ticket was never synced.
+
+   This comment plus the `Closes #<key>` body line together are what make the
+   PR discoverable from the issue and vice versa — the bidirectional
+   cross-reference (AC-3) holds from both directions.
 
 Write a phase artifact `<partition>/phases/create-pr/iter-1-execute.json`
 (commands run with outcomes, pushed SHA, PR number/url/base, sync result,

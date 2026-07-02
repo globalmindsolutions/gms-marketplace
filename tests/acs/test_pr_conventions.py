@@ -347,5 +347,81 @@ class TestMain(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+def conforming_body_with_closes_link(key="156"):
+    body = conforming_body()
+    return body.replace(
+        "## Ticket\n\n- **MAR-72** — Fix thing (task)\n\n",
+        "## Ticket\n\n- **MAR-72** — Fix thing (task)\n- Closes #%s\n\n" % key,
+    )
+
+
+class TestIssueLinkNonRegression(unittest.TestCase):
+    """MAR-75 spec 02: convention non-regression proof for the reconciliation
+    mechanism (acs-ticket-id <-> GitHub issue/PR) spec 01 implements. No
+    product code changes — reuses conforming_body()/pc.run_check/pc.build_title
+    exactly as the rest of this module does, with new input data only."""
+
+    def test_check_passes_with_closes_link_in_ticket_section(self):
+        # AC-2/AC-3: a Closes #<key> bullet inside the existing Ticket section
+        # does not trip pr_description's heading check, pr_title's regex, or
+        # the hygiene scans.
+        result = pc.run_check(
+            title="[MAR-75] Fix thing",
+            body=conforming_body_with_closes_link("156"),
+            require_label="ACS",
+            pr_title_format="[{ticket_id}] {title}",
+            sections=DEFAULT_SECTIONS,
+            ticket_prefix="MAR",
+        )
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["errors"], [])
+
+    def test_pr_title_render_unchanged_by_mechanism(self):
+        # AC-4 (R-1 guard): external_key being non-empty (a synced ticket)
+        # never leaks into the rendered title — the acs id stays in the
+        # title, the issue link stays in the body.
+        result = pc.build_title(
+            template="[{ticket_id}] {title}",
+            ticket_id="MAR-75",
+            type_="task",
+            title="Fix thing",
+            summary="",
+            external_key="156",
+        )
+        self.assertEqual(result, "[MAR-75] Fix thing")
+
+    def test_unsynced_external_key_empty_renders_no_closes_line_and_passes_check(self):
+        # AC-4 (dedicated, explicit): the unsynced fixture (external_key="",
+        # no Closes # bullet) still passes check, and the fixture itself
+        # carries no Closes # substring.
+        body = conforming_body()
+        self.assertNotIn("Closes #", body)
+        result = pc.run_check(
+            title="[MAR-72] Fix thing",
+            body=body,
+            require_label="ACS",
+            pr_title_format="[{ticket_id}] {title}",
+            sections=DEFAULT_SECTIONS,
+            ticket_prefix="MAR",
+        )
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["errors"], [])
+
+    def test_closes_link_absent_is_still_conforming_baseline(self):
+        # AC-4 (regression baseline): byte-for-byte match of the pre-existing
+        # TestCheckPasses.test_check_passes_conforming_title_and_body call,
+        # pinning that conforming_body()'s shared meaning is unchanged.
+        result = pc.run_check(
+            title="[MAR-72] Fix thing",
+            body=conforming_body(),
+            require_label="ACS",
+            pr_title_format="[{ticket_id}] {title}",
+            sections=DEFAULT_SECTIONS,
+            ticket_prefix="MAR",
+        )
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["errors"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

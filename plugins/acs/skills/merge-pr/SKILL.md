@@ -311,8 +311,12 @@ removed):
    `git checkout <pr.base> && git pull`).
 3. Sync the remote tracker to Done when configured
    (`settings.tracker.provider` != `local` and `ticket.external` is set):
-   - `github`: `gh issue close <external.key> --comment "Merged: <pr.url>"`;
-     when `tracker.github.project_number` is configured, also set the
+   - `github`: `gh issue close <external.key> --comment "Merged {ticket_id} via
+     PR #{pr.number} — {pr.url}"` — the comment carries both the acs ticket id
+     and a PR back-reference so the closed issue's timeline still resolves
+     both ways post-merge (AC-3's bidirectionality holds after merge too, not
+     only while the PR is open); when `tracker.github.project_number` is
+     configured, also set the
      project's Status field to Done — locate the item with
      `gh project item-list <project_number> --owner <tracker.github.owner>
      --format json`, then `gh project item-edit --id <item-id> --project-id

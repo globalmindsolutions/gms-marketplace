@@ -33,6 +33,22 @@ the notes.
   shared requirements docs (skills.md, reflection.md). Generalizes the v0.3.1
   minimal-comment policy from comments-only to a full authoring-discipline
   contract.
+- **`/acs:code`, `/acs:create-ticket`, `/acs:create-pr`, `/acs:merge-pr`
+  reconcile the acs ticket id with the GitHub issue/PR (MAR-75).** Tracker
+  sync now cross-references the acs ticket id and its GitHub records
+  bidirectionally and GitHub-natively. `/acs:create-ticket` Step 5 stamps the
+  acs ticket id on the synced issue body (`acs-ticket: {ticket_id}`, via the
+  task/story/epic description templates) and fills the issue's GitHub fields —
+  `ACS` + type labels, assignee when known, milestone when the repo uses one,
+  and applicable Project fields (Status, Type) — surfacing, never silently
+  skipping, a field the Project schema does not define. `/acs:create-pr` adds a
+  native `Closes #<external.key>` bullet to the PR body's `## Ticket` section
+  (so GitHub auto-links and auto-closes the issue on merge) and passes
+  `--milestone` when one is used. `/acs:merge-pr`'s issue-close comment now
+  carries the acs ticket id and a PR back-reference
+  (`Merged {ticket_id} via PR #{pr.number} — {pr.url}`). `local`/unsynced
+  tickets are unaffected; no enforced `pr_title`/`branch_name`/`commit_message`
+  format string and no placeholder vocabulary changed.
 
 ## [0.3.3] - 2026-07-01
 
