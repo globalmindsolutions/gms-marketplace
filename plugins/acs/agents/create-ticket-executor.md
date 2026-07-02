@@ -63,22 +63,40 @@ input file before writing anything.
    the epic's `children`. Re-read `ticket.json` after fan-out.
 5. **Tracker sync** — only when `settings.tracker.provider` is `github` or
    `jira`; skip entirely for `local`.
+   - **The "tickets to sync" set:** `[root ticket, unless it is an import] +
+     [every child minted in step 4]`, EXCLUDING any ticket whose title is a
+     product-flow delivery title (`PRODUCT_TICKET_TITLES`: "Product definition
+     (PRD)", "Product architecture doc set") — those are never synced by this
+     skill's fan-out (AC-4).
    - Imported tickets: keep `external` as pulled; NEVER create a remote
      duplicate. If your local title/description changed AND the remote also
      changed since the pull, do not pick a side: return `status="needs_input"`
      with a `<question>` stating both versions — the coordinator asks the user.
-   - `github`: `gh issue create --title "<rendered title>" --body-file
-     <body.md>`, then `gh project item-add <project_number> --owner <owner>
-     --url <issue-url> --format json`, then set the `Type` and `Status`
-     single-select fields via `gh project field-list` + `gh project item-edit`.
-     Store `external = {"provider": "github", "key": "<issue number>"}`.
-   - `jira`: `acli jira workitem create --project <project_key> --type "Epic"
-     --summary "<rendered title>" --description "<description>"` (epic→Epic,
-     story→Story, task→Task; children pass the epic's remote key as the parent
-     link). Store `external = {"provider": "jira", "key": "<KEY-n>"}`.
-   - Write `external` into the root `ticket.json` and each synced child's
-     `ticket.json`. A failed CLI call is an `<error>` plus `status="failed"` —
-     never fake a key.
+   - **For each ticket to sync in the set above**, run the sequence below,
+     once per ticket:
+     - `github`: `gh issue create --title "<rendered title>" --body-file
+       <body.md>`, then `gh project item-add <project_number> --owner <owner>
+       --url <issue-url> --format json`, then set the `Type` and `Status`
+       single-select fields via `gh project field-list` + `gh project
+       item-edit`. Store `external = {"provider": "github", "key": "<issue
+       number>"}`.
+     - `jira`: `acli jira workitem create --project <project_key> --type
+       "Epic" --summary "<rendered title>" --description "<description>"`
+       (epic→Epic, story→Story, task→Task; children pass the epic's remote key
+       as the parent link). Store `external = {"provider": "jira", "key":
+       "<KEY-n>"}`.
+   - Write `external` into each synced ticket's own `ticket.json` — root and
+     every child — via `python3
+     "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/record-external.py" --ticket
+     <ticket-id> --provider <provider> --key <key>` once per successfully
+     synced ticket. A failed CLI call for any one ticket in the set produces a
+     finding naming that ticket's id and the error, surfaced in the result /
+     `<handoff>` — never silently swallowed — and does NOT abort the batch:
+     continue to the next ticket in the set; the failed ticket's `external`
+     stays null (never fake a key). When any required ticket in the set
+     failed, the run's overall `status="failed"` (or `completed` with a
+     blocking finding); list which tickets synced (with their key) and which
+     failed (with the error) so the failed ones can be retried individually.
 6. **Write the execute report** to
    `<partition>/phases/create-ticket/iter-<n>-execute.json`: artifacts
    produced, files changed, commands run with outcomes, problems hit, and the

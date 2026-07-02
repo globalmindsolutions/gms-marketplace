@@ -241,6 +241,17 @@ content, not new GitHub-facing behavior; this is expected and not a regression
   If local analysis changed title/description AND the remote also changed since the
   pull, report the conflict in the result — ask the user which side wins, then
   re-dispatch.
+- **Tickets to sync** = `[root ticket, unless it is an import] + [every child
+  minted in Step 4]`, EXCLUDING any product-flow delivery title
+  (`PRODUCT_TICKET_TITLES`: "Product definition (PRD)", "Product architecture
+  doc set") — never sync a product-flow ticket (AC-4). **For each ticket to
+  sync**, run the `gh issue create` sequence below once per ticket — a failed
+  `gh`/`acli` call for any one ticket is never silently swallowed: it produces
+  a finding naming that ticket's id + error, surfaced in `findings` and the
+  `<handoff>`, and does not abort the batch (the loop continues to other
+  tickets; that ticket's `external` stays null). The Finish report lists which
+  tickets synced (with their key) and which failed (with the error) so the
+  failed ones can be retried individually.
 - `github` (`tracker.github.owner`, `tracker.github.project_number`):
   `gh issue create --title "<rendered title>" --body-file <body.md>` → issue
   number + URL; `gh project item-add <project_number> --owner <owner> --url
@@ -282,13 +293,19 @@ content, not new GitHub-facing behavior; this is expected and not a regression
      field was skipped and why ("Project schema has no `<Field>` field;
      skipped — add it via `gh project field-create` if wanted") — a
      schema-undefined field is explicitly surfaced, never silently ignored.
-- `jira` (`tracker.jira.base_url`, `tracker.jira.project_key`):
-  `acli jira workitem create --project <project_key> --type "Epic" --summary
-  "<rendered title>" --description "<description>"` (types map epic→Epic,
-  story→Story, task→Task; children pass the epic's remote key as parent link).
-  Store `external = {"provider": "jira", "key": "<KEY-n>"}`.
-- Write `external` into the root `ticket.json` and each synced child's
-  `ticket.json`.
+- `jira` (`tracker.jira.base_url`, `tracker.jira.project_key`): for each
+  `ticket_to_sync` in the set defined above, run the sequence below, once per
+  ticket. `acli jira workitem create --project <project_key> --type "Epic"
+  --summary "<rendered title>" --description "<description>"` (types map
+  epic→Epic, story→Story, task→Task; children pass the epic's remote key as
+  parent link). Store `external = {"provider": "jira", "key": "<KEY-n>"}`. A
+  failed `acli` call for any one ticket follows the same per-ticket
+  failure-handling rule stated above (surfaced, never silent, does not abort
+  the batch, that ticket's `external` stays null).
+- Write `external` into each synced ticket's own `ticket.json` — root and
+  every child — via `python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/record-external.py"
+  --ticket <ticket-id> --provider <provider> --key <key>` once per successfully
+  synced ticket.
 
 ## User interaction
 
