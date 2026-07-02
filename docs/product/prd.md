@@ -268,6 +268,7 @@ feature sections here.
 **Won't have (now)** *(acs feature scope)*
 - Non-Notion remote docs providers (Confluence, Google Docs, SharePoint) — Notion is the only named remote provider; general CMS / doc-graph re-architecture is out of scope; bidirectional Notion→repo editing is out of scope now (authoritative-remote means Notion is the system of record with no repo copy, not a two-way file sync).
 - Automatic downgrade of a ticket's complexity/supervision tier without explicit user confirmation — tiers are always user-confirmed; the system never silently reduces rigor.
+- Claude Code plugin LSP servers (`.lsp.json`), background monitors (`monitors.json`), and `bin/` PATH executables — evaluated (MAR-82) and not adopted as acs features. **LSP** is an anti-fit: it breaks the G6 zero-install/language-agnostic portability guarantee (Portability NFR) and is redundant with Claude Code's official LSP plugins. **Background monitors** are session-scoped and overlap already-planned work — the `/acs:test` closed-loop (v0.4.0) and Scheduled background tracker sync (v0.7.0) Could-haves — so they are at most a deferred mechanism of those items, not a new feature. **`bin/` PATH executables** sit below PRD altitude: an internal helper-invocation mechanism with no user-facing change that would not serve the deliberately install-free CI path (Portability NFR). Revisit only if a concrete acs need appears.
 
 ### Feature: tabp (recruiting/talent toolkit for the TABP team)
 
