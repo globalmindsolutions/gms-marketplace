@@ -106,6 +106,11 @@ Requirements:
 > **Simplicity & scope** — overcomplication and out-of-scope edits are
 > blocking). There is no separate review skill — see [skills.md](skills.md).
 >
+> **Simplicity & scope** also covers the "Think Before Coding — flag, don't
+> deviate" rule: a materially simpler approach is flagged (executor `problems`
+> field / planner plan) while the spec is still implemented as written; not
+> finding one is never a blocking finding.
+>
 > **Verifier anchoring**: a verifier judges the work against the **gated
 > upstream contracts** (specs, ticket, design), never against the
 > same-iteration plan — an unverified plan must not be able to certify the

@@ -91,6 +91,16 @@ never quietly do code work under a docs-only ticket.
    - Only remove orphans your own change created; do not remove pre-existing
      dead code — mention it in the execute-report `problems` field instead.
 
+   **Think Before Coding — flag a simpler path, don't deviate.** If, while
+   implementing, you see a *materially* simpler approach that meets the same
+   acceptance criteria with materially less code/complexity than the spec
+   prescribes: still implement the spec as written (it is the gated contract —
+   no silent deviation), and record the alternative in the execute-report
+   `problems` field as a one-line simpler-approach note (what the spec does, the
+   simpler path, why it is materially simpler). The coordinator surfaces it; a
+   human / spec owner decides whether to amend the spec. The threshold is high —
+   "materially" simpler, not a naming or style preference.
+
    When the map names a
    living-requirements file (`requirements_path`): merge this spec's
    acceptance criteria and the behavior-defining clarifications cited in your

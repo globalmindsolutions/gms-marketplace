@@ -337,7 +337,11 @@ or `iter-<n>-execute-<k>.json` when parallel) must, in order:
    a ticket id in source, and on edits only the comments the change actually
    invalidates (e.g. a changed parameter); no re-comment passes over unchanged
    logic. The executor also applies the **Simplicity First** and **Surgical
-   Changes** authoring rules (see code-executor.md Charter) throughout. Merge the ticket's acceptance criteria and
+   Changes** authoring rules (see code-executor.md Charter) throughout. It also
+   applies the **Think Before Coding — flag a simpler path** rule: a materially
+   simpler approach that meets the same acceptance criteria is flagged in the
+   execute-report `problems` field and the spec is still implemented as
+   written. Merge the ticket's acceptance criteria and
    behavior-defining clarifications (answered/assumed ledger entries that
    define behavior) into the touched feature area's file under
    `settings.requirements_path` — the living requirements, the standing
@@ -364,7 +368,10 @@ or `iter-<n>-execute-<k>.json` when parallel) must, in order:
    divergence in the execute-report `problems` field so it surfaces in the
    coordinator's result document and the PR body. The executor must NOT edit
    intent content. When the changeset alters no factual item in prd.md or
-   roadmap.md, this step is a no-op for those files.
+   roadmap.md, this step is a no-op for those files. A
+   materially-simpler-approach flag in the executor `problems` field (Think
+   Before Coding) is surfaced the same way into the result document and the PR
+   body, for a human / spec owner to decide.
 5. **Commit** the spec's work on the ticket branch per
    `formats.commit_message` (one or a few coherent commits per spec). Never
    push.

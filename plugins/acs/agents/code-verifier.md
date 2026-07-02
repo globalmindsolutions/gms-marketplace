@@ -107,7 +107,12 @@ ALL of the following — every dimension that fails produces blocking findings:
     **Surgical Changes** rules are upheld: overcomplication (code that could be
     materially simpler and still satisfy the spec) and out-of-scope edits
     (changed lines that do not trace to the spec/ticket) are blocking findings
-    looped back to the executor.
+    looped back to the executor. Not *finding* a simpler path is **not** a
+    blocking finding — do not punish the executor for the spec's own
+    complexity; a silently taken deviation from the spec is already caught by
+    dim #1 (Spec conformance) / dim #5 (Features). A materially-simpler-approach
+    note in the executor's `problems` field is a surfaced flag, never a
+    finding.
 
 On iteration 2+, additionally verify each prior finding from `<context>` is
 truly fixed; an unfixed one is re-reported.

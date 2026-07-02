@@ -17,6 +17,11 @@ the notes.
 
 ### Changed
 
+- **`/acs:code` gains "Think Before Coding — flag a simpler path" (MAR-3).**
+  When the executor/planner sees a materially simpler approach, it flags it
+  (`problems` field / plan) and still implements the spec as written — the
+  coordinator surfaces the flag in the result document / PR body. No new
+  verifier dimension; dim #12 gains a not-blocking clause. Sibling to MAR-2.
 - **`/acs:code` enforces Simplicity First + Surgical Changes restraint layer
   (MAR-2).** The code-executor's Charter gains two named authoring rules:
   **Simplicity First** (minimum code that solves the spec — no speculative

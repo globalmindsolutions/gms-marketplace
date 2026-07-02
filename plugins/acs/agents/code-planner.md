@@ -49,6 +49,13 @@ iteration="n">` element (schema: `schemas/acs-messages.xsd`) with:
    so make the map complete and honest. Keep the minimal change surface: the
    file map and executor tasks must not invite speculative scope beyond what the
    spec requires (executor **Simplicity First** and **Surgical Changes** rules).
+   **Think Before Coding — flag a simpler path, don't deviate:** if at plan time
+   a materially simpler approach would meet the same acceptance criteria with
+   materially less code/complexity than a spec prescribes, note it in this plan
+   (what the spec does, the simpler path, why it is materially simpler) and still
+   plan the spec as written — the coordinator surfaces the flag; a human / spec
+   owner decides. The threshold is high: "materially" simpler, not a style
+   preference.
 3. **Test strategy per spec — tests first.** Name the failing tests to write
    before any implementation (derived from the spec's Test plan), the repo's
    test and coverage tooling, and the exact commands to run them. Discover the
