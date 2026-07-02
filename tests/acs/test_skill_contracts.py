@@ -1963,6 +1963,226 @@ class TestSimplicityScopeRestraintLayer(unittest.TestCase):
             "of '[Unreleased]' (MAR-2 AC-7)")
 
 
+class TestThinkBeforeCodingFlag(unittest.TestCase):
+    """Pin the "Think Before Coding — flag a simpler path" restraint clause
+    across the code agents, SKILL.md, the shared docs, and the CHANGELOG
+    (MAR-3, sibling to the MAR-2 restraint layer)."""
+
+    def agent_path(self, skill, role):
+        return os.path.join(PLUGIN, "agents", "%s-%s.md" % (skill, role))
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def _executor(self):
+        return read(self.agent_path("code", "executor"))
+
+    def _planner(self):
+        return read(self.agent_path("code", "planner"))
+
+    def _verifier(self):
+        return read(self.agent_path("code", "verifier"))
+
+    def _skill(self):
+        return read(self.skill_path("code"))
+
+    def _skills_req(self):
+        return read(os.path.join(REPO_ROOT, "docs", "requirements", "skills.md"))
+
+    def _reflection_req(self):
+        return read(os.path.join(REPO_ROOT, "docs", "requirements", "reflection.md"))
+
+    def _changelog(self):
+        return read(os.path.join(PLUGIN, "CHANGELOG.md"))
+
+    # --- AC-1: executor carries the flag rule, naming problems + still-implement ---
+
+    def test_executor_flag_rule_present(self):
+        """AC-1: code-executor.md must contain 'Think Before Coding'."""
+        self.assertIn("Think Before Coding", self._executor(),
+                      "code-executor.md must contain 'Think Before Coding' (MAR-3 AC-1)")
+
+    def test_executor_flag_materially_near_rule(self):
+        """AC-1: 'materially' must appear within 400 chars of 'Think Before
+        Coding' in code-executor.md."""
+        body = self._executor()
+        self.assertIsNotNone(
+            re.search(r"(?i)Think Before Coding.{0,400}materially|"
+                      r"materially.{0,400}Think Before Coding",
+                      body, re.DOTALL),
+            "code-executor.md must co-locate 'materially' within 400 chars "
+            "of 'Think Before Coding' (MAR-3 AC-1)")
+
+    def test_executor_flag_problems_field(self):
+        """AC-1: 'problems' must appear within 400 chars of 'Think Before
+        Coding' in code-executor.md (the execute-report problems field)."""
+        body = self._executor()
+        self.assertIsNotNone(
+            re.search(r"(?i)Think Before Coding.{0,400}problems|"
+                      r"problems.{0,400}Think Before Coding",
+                      body, re.DOTALL),
+            "code-executor.md must co-locate 'problems' within 400 chars "
+            "of 'Think Before Coding' (MAR-3 AC-1)")
+
+    def test_executor_flag_still_implement(self):
+        """AC-1: 'still implement' must appear within 400 chars of 'Think
+        Before Coding' in code-executor.md (flag, don't deviate)."""
+        body = self._executor()
+        self.assertIsNotNone(
+            re.search(r"(?i)Think Before Coding.{0,400}still implement|"
+                      r"still implement.{0,400}Think Before Coding",
+                      body, re.DOTALL),
+            "code-executor.md must co-locate 'still implement' within 400 chars "
+            "of 'Think Before Coding' (MAR-3 AC-1)")
+
+    # --- AC-2: planner carries the plan-time flag-don't-deviate rule ---
+
+    def test_planner_flag_rule_present(self):
+        """AC-2: code-planner.md must contain 'Think Before Coding'."""
+        self.assertIn("Think Before Coding", self._planner(),
+                      "code-planner.md must contain 'Think Before Coding' (MAR-3 AC-2)")
+
+    def test_planner_flag_materially_near_rule(self):
+        """AC-2: 'materially' must appear within 400 chars of 'Think Before
+        Coding' in code-planner.md."""
+        body = self._planner()
+        self.assertIsNotNone(
+            re.search(r"(?i)Think Before Coding.{0,400}materially|"
+                      r"materially.{0,400}Think Before Coding",
+                      body, re.DOTALL),
+            "code-planner.md must co-locate 'materially' within 400 chars "
+            "of 'Think Before Coding' (MAR-3 AC-2)")
+
+    def test_planner_flag_still_plan_or_implement(self):
+        """AC-2: 'still plan' or 'still implement' must appear within 400
+        chars of 'Think Before Coding' in code-planner.md (flag, don't
+        deviate)."""
+        body = self._planner()
+        self.assertIsNotNone(
+            re.search(r"(?i)Think Before Coding.{0,400}still\s+(plan|implement)|"
+                      r"still\s+(plan|implement).{0,400}Think Before Coding",
+                      body, re.DOTALL),
+            "code-planner.md must co-locate 'still plan'/'still implement' within "
+            "400 chars of 'Think Before Coding' (MAR-3 AC-2)")
+
+    # --- AC-3: verifier dim #12 gains a not-blocking clause; count stays 12 ---
+
+    def test_verifier_simpler_path_near_simplicity(self):
+        """AC-3: 'simpler path' must appear within 400 chars of 'Simplicity'
+        in code-verifier.md (dim #12's new clause)."""
+        body = self._verifier()
+        self.assertIsNotNone(
+            re.search(r"(?i)Simplicity.{0,400}simpler path|"
+                      r"simpler path.{0,400}Simplicity",
+                      body, re.DOTALL),
+            "code-verifier.md must co-locate 'simpler path' within 400 chars "
+            "of 'Simplicity' (MAR-3 AC-3)")
+
+    def test_verifier_not_finding_simpler_path_not_blocking(self):
+        """AC-3: a negated-blocking phrase ('not ... blocking finding') must
+        appear within 200 chars of 'simpler path' in code-verifier.md."""
+        body = self._verifier()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)simpler path.{0,200}not.{0,30}blocking|"
+                r"not.{0,30}blocking.{0,200}simpler path",
+                body, re.DOTALL),
+            "code-verifier.md must co-locate a negated-blocking phrase within "
+            "200 chars of 'simpler path' (MAR-3 AC-3)")
+
+    def test_verifier_dimension_count_is_twelve(self):
+        """AC-3: the numbered verifier-dimension count MUST remain exactly 12
+        — the new clause is appended to dim #12, never a 13th dimension."""
+        body = self._verifier()
+        dims = re.findall(r"(?m)^(\d{1,2})\.\s+\*\*", body)
+        self.assertEqual(len(dims), 12,
+                          "code-verifier.md numbered-dimension count must stay "
+                          "exactly 12, found %d (MAR-3 AC-3)" % len(dims))
+
+    # --- AC-4: SKILL.md states the executor rule + coordinator surfacing ---
+
+    def test_skill_executor_flag_rule(self):
+        """AC-4: skills/code/SKILL.md must contain 'Think Before Coding'."""
+        self.assertIn("Think Before Coding", self._skill(),
+                      "skills/code/SKILL.md must contain 'Think Before Coding' "
+                      "(MAR-3 AC-4)")
+
+    def test_skill_flag_materially_near_rule(self):
+        """AC-4: 'materially' must appear within 400 chars of 'Think Before
+        Coding' in skills/code/SKILL.md."""
+        body = self._skill()
+        self.assertIsNotNone(
+            re.search(r"(?i)Think Before Coding.{0,400}materially|"
+                      r"materially.{0,400}Think Before Coding",
+                      body, re.DOTALL),
+            "skills/code/SKILL.md must co-locate 'materially' within 400 chars "
+            "of 'Think Before Coding' (MAR-3 AC-4)")
+
+    def test_skill_coordinator_surfaces_flag(self):
+        """AC-4: 'problems' co-occurs with 'result' and 'PR body' within 500
+        chars — the coordinator surfacing of the simpler-approach flag."""
+        body = self._skill()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)problems.{0,500}result.{0,100}PR body|"
+                r"problems.{0,500}PR body.{0,100}result|"
+                r"result.{0,100}PR body.{0,500}problems|"
+                r"PR body.{0,100}result.{0,500}problems",
+                body, re.DOTALL),
+            "skills/code/SKILL.md must co-locate 'problems', 'result', and "
+            "'PR body' (coordinator surfacing) (MAR-3 AC-4)")
+
+    # --- AC-5: shared requirements docs carry the flag ---
+
+    def test_skills_md_flag_present(self):
+        """AC-5: docs/requirements/skills.md must co-locate 'materially' with
+        'simpler'/'Think Before Coding' within 300 chars."""
+        body = self._skills_req()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)materially.{0,300}(simpler|Think Before Coding)|"
+                r"(simpler|Think Before Coding).{0,300}materially",
+                body, re.DOTALL),
+            "docs/requirements/skills.md must co-locate 'materially' and "
+            "'simpler'/'Think Before Coding' within 300 chars (MAR-3 AC-5)")
+
+    def test_reflection_md_flag_present(self):
+        """AC-5: docs/requirements/reflection.md must co-locate 'materially'
+        with 'simpler'/'Think Before Coding' within 300 chars."""
+        body = self._reflection_req()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)materially.{0,300}(simpler|Think Before Coding)|"
+                r"(simpler|Think Before Coding).{0,300}materially",
+                body, re.DOTALL),
+            "docs/requirements/reflection.md must co-locate 'materially' and "
+            "'simpler'/'Think Before Coding' within 300 chars (MAR-3 AC-5)")
+
+    # --- AC-7: CHANGELOG [Unreleased] entry ---
+
+    def test_changelog_unreleased_mar3_entry(self):
+        """AC-7: '(MAR-3)' must appear within 500 chars of '[Unreleased]' in
+        CHANGELOG.md."""
+        body = self._changelog()
+        self.assertIsNotNone(
+            re.search(r"(?i)\[Unreleased\].{0,500}\(MAR-3\)|\(MAR-3\).{0,500}\[Unreleased\]",
+                      body, re.DOTALL),
+            "CHANGELOG.md must contain '(MAR-3)' within 500 chars of '[Unreleased]' "
+            "(MAR-3 AC-7)")
+
+    def test_changelog_unreleased_flag_token(self):
+        """AC-7: 'Think Before Coding' or 'simpler' must appear within 500
+        chars of '[Unreleased]' in CHANGELOG.md."""
+        body = self._changelog()
+        self.assertIsNotNone(
+            re.search(
+                r"(?i)\[Unreleased\].{0,500}(Think Before Coding|simpler)|"
+                r"(Think Before Coding|simpler).{0,500}\[Unreleased\]",
+                body, re.DOTALL),
+            "CHANGELOG.md must contain 'Think Before Coding'/'simpler' within 500 "
+            "chars of '[Unreleased]' (MAR-3 AC-7)")
+
+
 class TestReconcileTicketIssueLinkage(unittest.TestCase):
     """MAR-75 spec 02: pin the reconciliation prose contract (acs ticket id <->
     GitHub issue/PR) that spec 01 introduces across create-ticket, create-pr,

@@ -527,9 +527,14 @@ Purpose: implement the specs in the consumer repo using TDD.
   standards**, **architecture**, **system design**, **security**,
   **documentation** (affected docs updated and consistent with the code), and
   **Simplicity & scope** (overcomplication and out-of-scope edits are blocking)
-  — in addition to spec conformance, tests, and coverage. The architecture /
-  system-design review judges the changeset against the approved `design.md`
-  when one exists (the ticket's own or its parent epic's). Blocking findings
+  — in addition to spec conformance, tests, and coverage. Under
+  **Simplicity & scope**, the code-executor/code-planner MUST flag a materially
+  simpler approach (in the execute-report `problems` field / the plan) and
+  still implement the spec as written ("Think Before Coding — flag, don't
+  deviate"); failing to *find* a simpler path is never a blocking finding.
+  The architecture / system-design review judges the changeset against the
+  approved `design.md` when one exists (the ticket's own or its parent
+  epic's). Blocking findings
   trigger automatic remediation iterations (max 3); findings and stop
   reasons land in `code-state.json`
   ([workflow.md](workflow.md#review-feedback-loop)).
