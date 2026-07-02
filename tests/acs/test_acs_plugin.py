@@ -121,6 +121,26 @@ class TestGates(AcsWorkspaceCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("placeholder", result.stderr)
 
+    def test_pr_title_ticket_ref_placeholder_accepted(self):
+        """MAR-80: {ticket_ref} is a valid pr_title-scoped placeholder (renders
+        the tracker's native reference when synced, the local ticket id when
+        not) -- validate_formats/FORMAT_PLACEHOLDERS must accept it in
+        formats.pr_title."""
+        self.write_settings({"ticket_prefix": "SHOP",
+                             "formats": {"pr_title": "[{ticket_ref}] {title}"}})
+        result = self.pre("create-ticket")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_ticket_ref_rejected_in_branch_name(self):
+        """Scope fence (AC-4): {ticket_ref} is pr_title-scoped only -- it must
+        stay rejected in branch_name (and, by the same vocabulary table,
+        commit_message)."""
+        self.write_settings({"ticket_prefix": "SHOP",
+                             "formats": {"branch_name": "{type}/{ticket_ref}-{slug}"}})
+        result = self.pre("create-ticket")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("placeholder", result.stderr)
+
     def test_branch_name_must_embed_ticket_id(self):
         self.write_settings({"ticket_prefix": "SHOP",
                              "formats": {"branch_name": "{type}/{slug}"}})

@@ -107,6 +107,78 @@ class TestRenderTitle(unittest.TestCase):
             )
         spy.assert_called_once()
 
+    def test_build_title_github_provider_ticket_ref(self):
+        # AC-1: github-synced ticket renders "[#<key>] <title>" via
+        # {ticket_ref}, end-to-end through render_format.
+        result = pc.build_title(
+            template="[{ticket_ref}] {title}",
+            ticket_id="MAR-80",
+            type_="task",
+            title="Render PR title",
+            summary="",
+            external_key="161",
+            provider="github",
+        )
+        self.assertEqual(result, "[#161] Render PR title")
+
+    def test_build_title_jira_provider_ticket_ref(self):
+        # AC-2: jira-synced ticket renders "[<JIRA-KEY>] <title>" via
+        # {ticket_ref}, end-to-end through render_format.
+        result = pc.build_title(
+            template="[{ticket_ref}] {title}",
+            ticket_id="MAR-80",
+            type_="task",
+            title="Render PR title",
+            summary="",
+            external_key="ACME-9",
+            provider="jira",
+        )
+        self.assertEqual(result, "[ACME-9] Render PR title")
+
+    def test_build_title_unsynced_ticket_ref_falls_back_to_ticket_id(self):
+        # AC-3: local/unsynced ticket renders "[<ticket_id>] <title>" via
+        # {ticket_ref} — same shape as the id-based default.
+        result = pc.build_title(
+            template="[{ticket_ref}] {title}",
+            ticket_id="MAR-80",
+            type_="task",
+            title="Render PR title",
+            summary="",
+            external_key="",
+            provider="",
+        )
+        self.assertEqual(result, "[MAR-80] Render PR title")
+
+    def test_build_title_default_provider_argument_is_backward_compatible(self):
+        # design.md R5: omitting `provider` entirely (today's pre-change call
+        # shape, no `provider` kwarg at all) must be byte-identical to the
+        # pre-change behavior — proof the signature change is additive.
+        result = pc.build_title(
+            "[{ticket_id}] {title}", "MAR-72", "task", "Fix thing", "", "",
+        )
+        self.assertEqual(result, "[MAR-72] Fix thing")
+
+
+class TestComputeTicketRef(unittest.TestCase):
+    """New pure helper: tracker-native reference when synced, else local id."""
+
+    def test_github_with_key_returns_hash_prefixed_key(self):
+        self.assertEqual(pc.compute_ticket_ref("github", "MAR-80", "161"), "#161")
+
+    def test_jira_with_key_returns_key_verbatim(self):
+        self.assertEqual(pc.compute_ticket_ref("jira", "MAR-80", "ACME-9"), "ACME-9")
+
+    def test_unsynced_returns_ticket_id(self):
+        self.assertEqual(pc.compute_ticket_ref("", "MAR-80", ""), "MAR-80")
+
+    def test_provider_set_but_key_empty_falls_back_to_ticket_id(self):
+        # Defensive edge case: provider set but external_key falsy must not
+        # return "#" or crash — falls back to ticket_id.
+        self.assertEqual(pc.compute_ticket_ref("github", "MAR-80", ""), "MAR-80")
+
+    def test_both_empty_returns_empty_string(self):
+        self.assertEqual(pc.compute_ticket_ref("", "", ""), "")
+
 
 class TestCheckPasses(unittest.TestCase):
     """Case 3: check passes a conforming title + body."""
@@ -298,6 +370,20 @@ class TestMain(unittest.TestCase):
         ])
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "[MAR-72] Fix thing")
+
+    def test_main_render_title_with_provider_flag(self):
+        # Proves args.provider reaches build_title through the real argparse
+        # path (not just the internal function call).
+        code, out = self._run_main([
+            "render-title",
+            "--template", "[{ticket_ref}] {title}",
+            "--ticket-id", "MAR-80",
+            "--title", "Render PR title",
+            "--external-key", "161",
+            "--provider", "github",
+        ])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "[#161] Render PR title")
 
     def test_main_check_pass(self):
         import tempfile

@@ -41,7 +41,7 @@ import sys
 FORMAT_DEFAULTS = {
     "branch_name": "{type}/{ticket_id}-{slug}",
     "commit_message": "{ticket_id} {summary}",
-    "pr_title": "[{ticket_id}] {title}",
+    "pr_title": "[{ticket_ref}] {title}",
 }
 
 CHECK_DEFAULTS = {
@@ -127,6 +127,8 @@ def format_to_regex(template, ticket_prefix):
             parts.append(r"(?:%s)" % "|".join(TICKET_TYPES))
         elif token == "slug":
             parts.append(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+        elif token == "ticket_ref":
+            parts.append(r"(?:%s-\d+|#\d+|[A-Z][A-Z0-9]*-\d+)" % re.escape(ticket_prefix))
         else:  # free text (and any unknown token, which settings validation rejects upstream)
             parts.append(r".+")
         idx = m.end()
@@ -285,6 +287,7 @@ def _has_heading(body, section):
 def _example(template, prefix):
     return (template
             .replace("{ticket_id}", "%s-12" % prefix)
+            .replace("{ticket_ref}", "%s-12" % prefix)
             .replace("{type}", "task")
             .replace("{slug}", "short-description")
             .replace("{title}", "Short description")

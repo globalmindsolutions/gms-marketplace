@@ -213,7 +213,8 @@ The delivery-ticket pattern (same as /acs:create-prd — you do this yourself;
 gh label create ACS --description "Created by the acs pipeline" 2>/dev/null || true
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pr-conventions.py" render-title \
   --template "<settings.formats.pr_title>" --ticket-id <ticket_id> --type <ticket.type> \
-  --title "<delivery ticket's title>" --summary "<summary>" --external-key "<ticket.external.key or empty>"
+  --title "<delivery ticket's title>" --summary "<summary>" --external-key "<ticket.external.key or empty>" \
+  --provider "<ticket.external.provider or empty>"
 ```
 
    The title renders `settings.formats.pr_title` (default
