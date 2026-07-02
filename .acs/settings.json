@@ -16,10 +16,10 @@
     }
   },
   "models": {
-    "planner": "claude-opus-4-8",
-    "executor": "claude-sonnet-5",
-    "verifier": "claude-opus-4-8",
-    "coordinator": "claude-opus-4-8"
+    "planner": {"model": "claude-opus-4-8", "effort": "high"},
+    "executor": {"model": "claude-sonnet-5", "effort": "high"},
+    "verifier": {"model": "claude-opus-4-8", "effort": "high"},
+    "coordinator": {"model": "claude-opus-4-8", "effort": "medium"}
   },
   "enforcement": {
     "checks": {

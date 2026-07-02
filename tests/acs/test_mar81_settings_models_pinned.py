@@ -1,9 +1,11 @@
-"""MAR-81 — Pin acs subagent models to explicit ids.
+"""MAR-81 — Pin acs subagent models to explicit ids and effort levels.
 
 Asserts the repo-committed .acs/settings.json `models` block holds explicit,
-version-stable model ids (claude-opus-4-8 / claude-sonnet-5) instead of the
-generic runtime aliases ("opus" / "sonnet"), and that the file remains valid
-against plugins/acs/schemas/settings.schema.json.
+version-stable model ids (claude-opus-4-8 / claude-sonnet-5) plus an explicit
+reasoning-effort level per role (object form, mirroring the sibling `hirex`
+repo's configuration), instead of the generic runtime aliases ("opus" /
+"sonnet") with no effort, and that the file remains valid against
+plugins/acs/schemas/settings.schema.json.
 
 Uses the same stdlib-only approach as TestHighStakesPathsSettings /
 TestDueDateSchema in test_acs_plugin.py (no jsonschema import) -- the CI
@@ -22,6 +24,13 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 SETTINGS_PATH = os.path.join(REPO_ROOT, ".acs", "settings.json")
 SCHEMA_PATH = os.path.join(REPO_ROOT, "plugins", "acs", "schemas", "settings.schema.json")
 
+EXPECTED = {
+    "planner": {"model": "claude-opus-4-8", "effort": "high"},
+    "executor": {"model": "claude-sonnet-5", "effort": "high"},
+    "verifier": {"model": "claude-opus-4-8", "effort": "high"},
+    "coordinator": {"model": "claude-opus-4-8", "effort": "medium"},
+}
+
 
 class SettingsModelsPinnedCase(unittest.TestCase):
     """Fixture: load the committed settings.json + schema once."""
@@ -34,44 +43,48 @@ class SettingsModelsPinnedCase(unittest.TestCase):
             cls.schema = json.load(f)
 
     def test_planner_pinned(self):
-        self.assertEqual(self.settings["models"]["planner"], "claude-opus-4-8")
+        self.assertEqual(self.settings["models"]["planner"], EXPECTED["planner"])
 
     def test_verifier_pinned(self):
-        self.assertEqual(self.settings["models"]["verifier"], "claude-opus-4-8")
+        self.assertEqual(self.settings["models"]["verifier"], EXPECTED["verifier"])
 
     def test_coordinator_pinned(self):
-        self.assertEqual(self.settings["models"]["coordinator"], "claude-opus-4-8")
+        self.assertEqual(self.settings["models"]["coordinator"], EXPECTED["coordinator"])
 
     def test_executor_pinned(self):
-        self.assertEqual(self.settings["models"]["executor"], "claude-sonnet-5")
+        self.assertEqual(self.settings["models"]["executor"], EXPECTED["executor"])
 
     def test_settings_schema_valid(self):
         """Stdlib-only structural check (no jsonschema dependency): the schema's
-        $defs.roleModel accepts a plain non-empty string for each models.* role
-        (settings.schema.json's roleModel oneOf first branch), and the four
-        committed values satisfy that shape."""
+        $defs.roleModel accepts an object {model, effort} for each models.*
+        role (settings.schema.json's roleModel oneOf second branch), effort is
+        one of the enumerated levels, and the four committed values satisfy
+        that shape."""
         role_model_def = self.schema["$defs"]["roleModel"]
-        string_branch = next(
+        object_branch = next(
             branch for branch in role_model_def["oneOf"]
-            if branch.get("type") == "string"
+            if branch.get("type") == "object"
         )
-        self.assertEqual(string_branch.get("minLength"), 1)
+        effort_enum = object_branch["properties"]["effort"]["enum"]
 
         models = self.settings["models"]
         self.assertIsInstance(models, dict)
         for role in ("planner", "executor", "verifier", "coordinator"):
             self.assertIn(role, self.schema["properties"]["models"]["properties"])
             value = models[role]
-            self.assertIsInstance(value, str)
-            self.assertGreaterEqual(len(value), 1)
+            self.assertIsInstance(value, dict)
+            self.assertEqual(set(value.keys()), {"model", "effort"})
+            self.assertIsInstance(value["model"], str)
+            self.assertGreaterEqual(len(value["model"]), 1)
+            self.assertIn(value["effort"], effort_enum)
 
     def test_no_alias_literals_remain(self):
         models = self.settings["models"]
         for role in ("planner", "executor", "verifier", "coordinator"):
             self.assertNotIn(
-                models[role],
+                models[role]["model"],
                 ("opus", "sonnet"),
-                msg=f"models.{role} still holds a generic alias literal: {models[role]!r}",
+                msg=f"models.{role}.model still holds a generic alias literal: {models[role]['model']!r}",
             )
 
 
