@@ -17,7 +17,8 @@ Epic-level scope (retrofit; built before dogfooding began):
 
 - Marketplace + plugin skeleton (manifests, CI, release automation).
 - Deterministic layer: hooks, gates, workspace/state, locks, metrics, helper CLIs.
-- 14 skills + 27 agent files on disk; the reflection (plan→execute→verify) protocol is
+- 16 skills + 27 agent files on disk (verified `ls plugins/acs/skills` = 16,
+  `ls plugins/acs/agents` = 27); the reflection (plan→execute→verify) protocol is
   active on the six triad-keeping skills, while the three apply-work skills
   (`/acs:create-ticket`, `/acs:create-pr`, `/acs:merge-pr`) run inline (coordinator +
   at most one executor) after the v0.3.0 apply-tier inlining. XML/XSD messaging, phase artifacts.
@@ -66,7 +67,8 @@ cleanup. Validated green against installed v0.1.2.
   seed scenarios `install_gate_smoke` (free, G1) and `create_ticket_artifacts`
   (paid, G1).
 - **E1.2 (done)** — `skill_triggers` (paid): one un-named request per skill
-  routes to the right skill; all 12 green.
+  routes to the right skill; all 16 green (matches `s04_skill_triggers.py`'s
+  16-skill routing coverage, up from the original 12).
 - **E1.3 (done)** — `resume_and_verify` (paid) covers G2 (resume-from-state),
   G3 (verifier-clean within the cap), and G4 (PR ≤ ~400 lines, as the seed
   diff); `session_end_safety_net` (free) covers the SessionEnd cleanup.
@@ -177,7 +179,11 @@ safety net.
 #### Epic E4 — `acs:metrics` dashboard *(gates on E1)*
 
 Traces G5, G7. Starts once E1 (eval harness) is green — behavioral evals for
-the `acs:metrics` skill land in E1 before the skill ships.
+the `acs:metrics` skill land in E1 before the skill ships. **Note (delivered):**
+`acs:metrics` (delivery KPIs — throughput, funnel, coverage, review iterations)
+shipped alongside a separate `acs:usage` skill (AI spend/tokens/time), splitting
+delivery-metrics from AI-spend tracking; both verified on disk
+(`plugins/acs/skills/metrics/SKILL.md`, `plugins/acs/skills/usage/SKILL.md`).
 
 - **E4.1** — Skill skeleton + data-source wiring (`metrics.json`, `tickets-index.json`, `pipeline-state.json`, `code-state.json`, `create-pr-state.json`).
 - **E4.2** — Six dashboard panels implemented and rendered via `show_widget` inline in the Claude Code session.
@@ -206,10 +212,14 @@ dogfood), PRD metrics G1–G5 and G7 are measured on real runs, and the
 
 ### M3 — v0.4.0
 
-Epics: full-SDLC verify & operate (G8); principles & standards + brownfield standardize-project (G10); enforceable e2e integrity (G13); org-level enforcement policy (G12); onboarding polish; documentation site; configurable doc-set storage; semver stability promise; first-class release versions + one-command release cut (G17); guided architecture selection (G18).
+Epics: full-SDLC verify & operate (G8); principles & standards + brownfield standardize-project (G10); enforceable e2e integrity (G13); org-level enforcement policy (G12); onboarding polish + discoverability (G7-adjacent); documentation site; configurable doc-set storage; semver stability promise; first-class release versions + one-command release cut (G17); guided architecture selection (G18); failure-mode/pipeline-health observability (G19); behavioral eval coverage for dashboard skills + orphaned-agent cleanup (G8); marketplace catalog growth & quality bar (G20).
 
 - **Epic: onboarding polish** — `/acs:init` guided flows, repo-detection
-  heuristics, template gallery for descriptions.
+  heuristics, template gallery for descriptions. **Includes discoverability:** a
+  read-only skill index / next-step advisor (e.g. `/acs:help`) listing available
+  skills and the current ticket's next pipeline step from workspace state —
+  distinct from the `/acs:init` flow work above but sequenced in the same epic.
+  Maps to the acs Could-have "Discoverability" feature (`prd.md`).
 - **Epic: documentation site** — rendered architecture doc set + usage
   walkthroughs.
 - **Epic: full-SDLC verify & operate** — acs maintains the `quality/` and
@@ -218,7 +228,7 @@ Epics: full-SDLC verify & operate (G8); principles & standards + brownfield stan
   templates), and adds **`/acs:test`** — a standing, schedulable skill that runs
   the product's suites, triages regressions, and opens a ticket per failure
   (closed loop). `settings.schema.json` gains `quality_path`/`operations_path`
-  and a `suites` map; `/acs:init` defaults them. Skill count 14 → 17. Traces
+  and a `suites` map; `/acs:init` defaults them. Skill count 16 → 19. Traces
   **G8**. Design: [ADR 0011](../adr/0011-sdlc-doc-sets-quality-and-operations.md).
   All design skills also gain a shared **design-time consistency step** — detect
   doc gaps/staleness across the graph and recommend adjustments in-session, no
@@ -273,6 +283,34 @@ Epics: full-SDLC verify & operate (G8); principles & standards + brownfield stan
 - **Epic: per-role model + effort configuration polish (init examples + up-front validation + docs)** — matures the already-shipped per-role model/effort capability (all four roles — `planner`, `executor`, `verifier`, `coordinator` — plus `models.overrides.<skill>.<role>` in `.acs/settings.json`). (i) Ship documented defaults + version-pinning examples in the existing `/acs:init` model prompt (`init/SKILL.md`) — pin `claude-sonnet-5` / `claude-opus-4-8`, set effort per role, including the coordinator-scope caveat — strengthening the existing prompt, not introducing a new one. (ii) Add up-front, fail-closed validation of supported model ids + effort values with a helpful error, replacing today's late spawn-time failure (the supported-effort enum currently lives only in the advisory `settings.schema.json`, unenforced by the runtime gate, with no model-id validation at all). (iii) Documentation: the settings reference + init walkthrough cover per-role model+effort and version pinning. Maps to PRD acs Should-have (per-role model + effort configuration bullet). Traces **G7** (config surface / observability). The MECHANISM (the supported-model/effort source-of-truth and the exact init UX) is settled in the implementing ticket's design/spec phase, mirroring this milestone's other epics.
 - **Epic: first-class release versions + one-command release cut** — acs models release **versions as first-class planning units** distinct from milestones, with an explicit version → milestone/epic mapping, AND gains a capability to **cut a release**: aggregate the merged tickets belonging to a version into changelog/release notes, bump the version, tag the commit, and create the GitHub release — filling today's manual "release: cut vX.Y.Z" gap. Likely a new producer/apply-work skill (e.g. `/acs:release`) — name/shape is MECHANISM. Reuses `gh` and the existing `marketplace.json`/`plugin.json` version-bump + Release-workflow precedent (README "Releasing & updating"). Maps to PRD **G17** and the acs Should-have "First-class release versions + one-command release cut" feature. **Traces G17 (+ the Tech-lead persona).** The MECHANISM (skill name/shape, version-object schema, changelog-aggregation source, tag/GitHub-release implementation) is settled in this epic's design phase / an ADR, consistent with how this milestone's other epics defer mechanism.
 - **Epic: guided architecture selection (curated catalog, select-not-author)** — a curated acs-shipped catalog of tech stacks, NFR templates, and architecture/design patterns — all FOUR categories — **pre-filtered/ranked** by the PRD + codebase, so `/acs:create-architecture` lets the user **select/refine** rather than author from scratch. Enhances the existing skill; **adds no new doc set**. Maps to PRD **G18** and the acs Should-have "Guided architecture selection" feature. **Traces G18 (+ the Tech-lead persona).** The MECHANISM (catalog source-of-truth, ranking heuristics, selection UX) is settled in this epic's design phase, mirroring this milestone's other deferrals.
+- **Epic: failure-mode / pipeline-health observability** — extends the
+  `acs:metrics`/`acs:usage` dashboard surfaces, which today are strictly
+  success/throughput oriented, with a failure-signal view: verifier cap-hits,
+  gate-block counts, coverage hard-fail incidents, stale locks, and
+  abandoned/handed-off tickets — read-only from existing workspace artifacts (same
+  discipline as G7). Alongside the verify-&-operate epic above. Maps to PRD **G19**
+  and the acs Should-have "Failure-mode / pipeline-health observability" feature.
+  **Traces G19 (extends G7).** The MECHANISM (standalone panel vs a new
+  `acs:metrics` section) is settled in this epic's design/spec phase.
+- **Epic: skill-quality coverage closeout (behavioral evals for dashboards +
+  orphaned-agent cleanup)** — closes two gaps in G8's "100% skill quality
+  coverage" claim: (i) extends the eval harness (E1) with **behavioral
+  (artifact-level)** evals for the dashboard skills — `metrics`, `usage`, and
+  `handoff` — which today have only trigger-level coverage (`s04_skill_triggers.py`
+  / E1.2), asserting rendered panels/totals from a seeded workspace; (ii) retires
+  the 6 orphaned apply-work planner/verifier agent files (`create-pr-planner.md`,
+  `create-pr-verifier.md`, `create-ticket-planner.md`, `create-ticket-verifier.md`,
+  `merge-pr-planner.md`, `merge-pr-verifier.md` — MAR-62) so agent-file count on
+  disk equals reachable-agent count (today 27 vs 21 reachable). Maps to PRD **G8**
+  (both metric clauses). **Traces G8.**
+- **Epic: marketplace catalog growth & quality bar** — promotes "additional
+  marketplace plugins" from the icebox into a committed, documented onboarding
+  path: a new plugin is added to the catalog through a gated checklist (manifest
+  entry, `marketplace.json` registration, namespace-isolation check, trigger-eval
+  baseline, README), and every catalog plugin (today: acs, tabp) is checked
+  against the shared quality bar. Maps to PRD **G20** and the marketplace-level
+  Vision framing. **Traces G20.** The MECHANISM (exact checklist tooling, whether
+  scripted or documentation-only) is settled in this epic's design/spec phase.
 
 ### M4 — v0.5.0 *(tentative — sequenced after the v0.4.0 epics ship)*
 
@@ -415,37 +453,55 @@ Deliver the screen-cvs capability in Claude Cowork or Claude Code:
 ticket** — this roadmap entry defines what to deliver and how to measure success;
 the implementation ticket carries the build work.
 
-### T-M2 — tabp upgrade *(future — pending tabp-upgrade epic)*
+### T-M2 — tabp upgrade *(core capabilities shipped; follow-on epic remains for the rest)*
 
 Maps to PRD: [`prd.md`](prd.md#features-moscow)
-tabp re-scoped Must-have capabilities and the engineering-rigor NFR (MAR-35 amendment).
+tabp re-scoped Must-have capabilities and the engineering-rigor NFR (MAR-35 amendment,
+updated MAR-85).
 
-Deliver the fuller tabp plugin capabilities in tabp's own namespace:
+**Delivered** (verified on disk: `plugins/tabp/README.md`,
+`plugins/tabp/agents/*`, `plugins/tabp/helpers/tabp_helper.py`,
+`plugins/tabp/schemas/*`, `plugins/tabp/skills/usage/SKILL.md`):
 
 - **tabp settings.json** — configurable models and default CV/JD folder paths; stored
-  in the project folder.
+  in the project folder; schema-validated (`settings.schema.json`), no secrets.
 - **.tabp/ workspace state** — run history and a per-screening archive (the `.xlsx`
-  scorecard and a JSON record per run); persisted in the project folder.
-- **/tabp:usage skill** — per-run usage metrics: cost, time, and tokens.
+  scorecard and a JSON record per run); persisted in the project folder; atomic
+  writes, spin-lock, schema validation via `tabp_helper.py`.
+- **/tabp:usage skill** — per-run usage metrics: cost, time, and tokens; read-only.
 - **Resumable runs** — all intermediate states persisted as a human-reviewable audit
   trail; the run can be resumed from the persisted state.
+- **Reflection/self-verification (verifier-as-gate)** — an always-on independent
+  verifier subagent (`screen-verifier-subagent.md`) gates result delivery; on
+  blocking findings the coordinator remediates and re-verifies, capped at N=3; no
+  results presented on an unresolved cap-hit.
+
+**Remaining (follow-on epic — genuinely unbuilt):**
+
 - **Rich Claude artifact** — results rendered as a rich Claude artifact for recruiter
-  review.
-- **Recruiter review** — completed result presented for recruiter sign-off.
+  review (today: inline summary + Excel scorecard only).
+- **Recruiter sign-off UX** — completed result presented as an explicit recruiter
+  sign-off step (today: presented after clean verifier pass, no explicit sign-off
+  UX).
+- **Claude Cowork-runtime verification** — confirm the shipped shape above (config
+  resolution, `.tabp/` writes, always-on verifier, resumability) behaves
+  identically under Claude Cowork specifically, not only Claude Code.
 
-**Engineering-rigor NFR:** the tabp upgrade adopts proven quality patterns in tabp's
-own namespace: coordinator-plus-subagents (the Sonnet-per-CV + Opus-synthesis shape),
-reflection/self-verification before presenting results, structured JSON state,
-source-grounded evidence (anti-hallucination), and decision recording for human review.
-No `acs` naming or `acs:` prefixes in tabp's surface.
+**Engineering-rigor NFR** *(shipped)*: the tabp upgrade adopts proven quality
+patterns in tabp's own namespace: coordinator-plus-subagents (the Sonnet-per-CV +
+Opus-synthesis shape), reflection/self-verification before presenting results,
+structured JSON state, source-grounded evidence (anti-hallucination), and decision
+recording for human review. No `acs` naming or `acs:` prefixes in tabp's surface.
+Adds tabp metrics **T6** (verifier-as-gate) and **T7** (resumability) — see
+`prd.md` tabp success metrics.
 
-**Deferral:** the MECHANISM (instruction-driven vs hook-gated) and verification of
-what both runtimes (Claude Cowork and Claude Code) actually support (config resolution,
-hooks, artifacts, self-reported cost/tokens) are deferred to this epic's design phase.
+**Delivery mechanism (realized):** instruction-driven coordinator+subagent protocol
+(not hook-gated) — confirmed on Claude Code; Claude Cowork-specific verification is
+the one remaining item above.
 
-**Implementation note:** the tabp-upgrade design and build are a separate future epic —
-this milestone defines what to deliver; the design and implementation tickets carry
-the build work.
+**Implementation note:** the core tabp-upgrade capabilities shipped directly (no
+separate design/build epic was needed beyond the initial build); only the three
+remaining items above carry forward as a follow-on epic.
 
 ### acs M-future — Notion/remote-docs backend
 
@@ -457,4 +513,9 @@ the build work.
 
 ## Later / icebox
 
-Additional marketplace plugins.
+Additional marketplace plugins beyond acs and tabp (candidate future plugin
+capabilities, not yet scoped). **Note:** the marketplace-level *growth-path and
+quality-bar* goal itself is no longer in the icebox — it is scheduled as the
+"Epic: marketplace catalog growth & quality bar" in **M3 — v0.4.0** (see above,
+traces PRD **G20**); what remains in the icebox is only the open-ended "what
+additional plugins might exist" question.
