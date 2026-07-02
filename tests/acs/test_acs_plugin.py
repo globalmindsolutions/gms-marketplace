@@ -3397,3 +3397,74 @@ class TestNegativeGuarantee(AcsWorkspaceCase):
                                    ticket.get("type", "story"))
         self.assertEqual(new_lane, expected,
                          "escalate_lane must route via derive_lane (AC-4 single authority)")
+
+
+class TestRecordExternal(AcsWorkspaceCase):
+    """MAR-84 spec 01: record-external.py — the deterministic write seam that
+    stamps external={provider,key} into one ticket's ticket.json. Drives the
+    real script as a subprocess via run_script, so os.getcwd()/build_context
+    resolve against this fixture's throwaway repo (self.repo)."""
+
+    def record(self, ticket_id, provider, key):
+        return self.run_script("record-external.py", "--ticket", ticket_id,
+                               "--provider", provider, "--key", key)
+
+    def test_ac1_non_epic_task_gets_external_written(self):
+        """AC-1 regression guard: a standard non-epic ticket ends up with
+        external={provider,key} recorded via record-external.py."""
+        t = self.new_ticket("Add health endpoint", "task")
+        out = self.record(t, "github", "123")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        payload = json.loads(out.stdout)
+        self.assertEqual(payload["ticket_id"], t)
+        self.assertEqual(payload["external"], {"provider": "github", "key": "123"})
+        ticket = lib.load_ticket(self.tdir(t))
+        self.assertEqual(ticket["external"], {"provider": "github", "key": "123"})
+
+    def test_ac6_fanout_children_all_written_parent_untouched(self):
+        """AC-6: an epic + 2-3 children via --parent; invoke the helper once
+        per child with distinct keys; every child ends non-null and matching,
+        the parent epic's own ticket.json is untouched by those writes."""
+        epic = self.new_ticket("Wishlist", "epic")
+        children = [
+            self.new_ticket("Wishlist API", "story", "--parent", epic,
+                            "--needs-design", "false"),
+            self.new_ticket("Wishlist UI", "story", "--parent", epic,
+                            "--needs-design", "false"),
+            self.new_ticket("Wishlist notifications", "task", "--parent", epic,
+                            "--needs-design", "false"),
+        ]
+        epic_before = lib.load_ticket(self.tdir(epic))
+
+        for i, child in enumerate(children):
+            key = str(200 + i)
+            out = self.record(child, "github", key)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            ticket = lib.load_ticket(self.tdir(child))
+            self.assertEqual(ticket["external"], {"provider": "github", "key": key})
+
+        epic_after = lib.load_ticket(self.tdir(epic))
+        self.assertIsNone(epic_after.get("external"),
+                          "the parent epic's own external must stay untouched by "
+                          "child-scoped writes (AC-6)")
+        self.assertEqual(epic_after.get("updated_at"), epic_before.get("updated_at"),
+                         "writing a child's external must not touch the parent "
+                         "epic's ticket.json at all (AC-6)")
+
+    def test_ac4_product_flow_title_refused(self):
+        """AC-4 defense-in-depth: a ticket titled exactly a PRODUCT_TICKET_TITLES
+        value is refused by the helper itself — non-zero exit, external stays null."""
+        t = self.new_ticket("Product definition (PRD)", "task")
+        out = self.record(t, "github", "999")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertTrue(out.stderr.strip(), "must print a clear stderr refusal")
+        ticket = lib.load_ticket(self.tdir(t))
+        self.assertIsNone(ticket.get("external"))
+
+    def test_not_found_ticket_refused_with_clear_stderr(self):
+        """Invoking against a nonexistent ticket id: non-zero exit + clear stderr,
+        mirroring the new-ticket.py:78-82 not-found/archived idiom."""
+        out = self.record("SHOP-9999", "github", "1")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertTrue(out.stderr.strip())
+        self.assertIn("SHOP-9999", out.stderr)
