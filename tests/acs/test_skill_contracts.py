@@ -2109,8 +2109,11 @@ class TestReconcileTicketIssueLinkage(unittest.TestCase):
 
     def test_init_documents_reconciliation_convention(self):
         """AC-5 (prose proof + R-1 guard): init/SKILL.md's formats section
-        notes the reconciliation convention and explicitly states no enforced
-        format string changed as part of it."""
+        notes the reconciliation convention. Since MAR-80 (which makes
+        pr_title provider-aware), the block must instead state that pr_title
+        renders the tracker's native reference when synced and the local id
+        when unsynced, while branch_name/commit_message stay id-based and
+        unconditional."""
         body = read(self.skill_path("init"))
         self.assertIsNotNone(
             re.search(r"(?s)acs-ticket:.{0,800}Closes #|Closes #.{0,800}acs-ticket:", body),
@@ -2118,9 +2121,19 @@ class TestReconcileTicketIssueLinkage(unittest.TestCase):
             "convention and the Closes # PR-body convention within a bounded "
             "window (MAR-75 AC-5)")
         self.assertIsNotNone(
-            re.search(r"(?i)no.{0,20}(enforced )?format.{0,120}chang", body),
-            "init/SKILL.md must explicitly state no enforced format string "
-            "changed as part of the reconciliation convention (MAR-75 AC-5, R-1)")
+            re.search(r"(?is)pr_title.{0,200}(tracker|synced)|"
+                      r"(tracker|synced).{0,200}pr_title", body),
+            "init/SKILL.md must explicitly state that pr_title renders the "
+            "tracker's native reference when synced (MAR-80 AC-1/AC-2/AC-3, "
+            "AC-6)")
+        self.assertIsNotNone(
+            re.search(r"(?is)branch_name.{0,200}commit_message.{0,120}"
+                      r"(id-based|unconditional)|"
+                      r"(id-based|unconditional).{0,200}branch_name.{0,120}"
+                      r"commit_message", body),
+            "init/SKILL.md must explicitly state that branch_name and "
+            "commit_message remain id-based and unconditional in every case "
+            "(MAR-80 AC-4 scope-fence)")
 
 
 if __name__ == "__main__":

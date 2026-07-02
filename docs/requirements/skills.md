@@ -665,7 +665,9 @@ Purpose: ship the implementation as a pull request.
   auto-closes the issue on merge, in addition to the existing `[{ticket_id}]`
   title and tracker line. The PR also carries the required `ACS` label and the
   milestone when one is used. The link bullet is omitted entirely for
-  `local`/unsynced tickets; the enforced `pr_title` format is unchanged.
+  `local`/unsynced tickets. Independently, the enforced `pr_title` format now
+  renders the tracker's native reference when the ticket is synced (MAR-80) —
+  see the `/create-pr` section above for the title-rendering mechanics.
 
 ## 6. `/merge-pr`
 

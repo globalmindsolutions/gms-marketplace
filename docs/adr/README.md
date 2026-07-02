@@ -38,6 +38,8 @@ context and consequences.
 | [0027](0027-tabp-dual-runtime-detection.md) | tabp dual-runtime detection: explicit `--runtime` flag with auto-detect fallback (cwd-as-project-dir on Claude Code) | Accepted |
 | [0028](0028-merge-pr-agent-invocable.md) | merge-pr is agent/model-invocable; readiness gate + m6 require-APPROVED-for-all | Accepted |
 | [0029](0029-merge-pr-auto-update-behind-branch.md) | merge-pr auto-updates a BEHIND branch then merges in the same run | Accepted |
+| [0035](0035-pr-title-ticket-ref-token.md) | Introduce a `pr_title`-only `{ticket_ref}` alternation token instead of overloading `{ticket_id}` | Accepted |
+| [0036](0036-compute-ticket-ref-in-build-title.md) | Compute `ticket_ref` inside `build_title` via a `provider` parameter and a `--provider` CLI flag, one uniform template for every caller | Accepted |
 
 Format: status, date, context, decision, consequences (MADR-flavored, kept
 short). New ADRs are appended by the pipeline with the next sequence number.

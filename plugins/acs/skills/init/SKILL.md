@@ -218,7 +218,7 @@ Show the defaults and ask if the user wants changes:
 |-------|---------|----------------------|
 | `branch_name` | `{type}/{ticket_id}-{slug}` | `{ticket_id}` (REQUIRED), `{type}`, `{slug}`, `{external_key}` |
 | `commit_message` | `{ticket_id} {summary}` | `{ticket_id}`, `{type}`, `{summary}`, `{external_key}` |
-| `pr_title` | `[{ticket_id}] {title}` | `{ticket_id}`, `{type}`, `{title}`, `{summary}`, `{external_key}` |
+| `pr_title` | `[{ticket_ref}] {title}` | `{ticket_id}`, `{type}`, `{title}`, `{summary}`, `{external_key}`, `{ticket_ref}` |
 | `pr_description_template` | `pr-default` | template name/path, no placeholders |
 | `tickets.epic.title` | `[EPIC] {title}` | `{ticket_id}`, `{type}`, `{title}`, `{external_key}` |
 | `tickets.story.title` | `{title}` | same as epic title |
@@ -238,15 +238,19 @@ description, commit messages) — offered in Step 7c. If the user asks during
 init to "enforce conventions" or "stop the pipeline being bypassed", that is
 Step 7c.
 
-**Reconciliation convention (acs ticket id ↔ GitHub issue/PR).** No enforced format string (`pr_title`, `branch_name`, `commit_message`) changes as part of
-this convention — it is independent of, and consistent with, the formats table
-above. The acs ticket id is additionally recorded on the synced GitHub issue
-body (`acs-ticket: {ticket_id}`, via the description templates' `## Notes`/
-`## Goal` section), and `/acs:create-pr` adds a native
-`Closes #<external_key>` reference in the PR body (`## Ticket` section) when
-the ticket is synced to `github`. This is how ids show up in issues/PRs day
-to day — see `create-ticket`, `create-pr`, and `merge-pr` for the full
-mechanism.
+**Reconciliation convention (acs ticket id ↔ GitHub issue/PR).** `pr_title`
+renders the tracker's native reference when the ticket is synced —
+`[#<issue-number>]` for a GitHub-synced ticket, `[<JIRA-KEY>]` for a
+Jira-synced ticket — via the provider-aware `compute_ticket_ref` helper, and
+falls back to the local acs ticket id (`[<ticket_id>]`) when the ticket is
+unsynced. `branch_name` and `commit_message` remain id-based and
+unconditional in every case, regardless of sync state. The acs ticket id is
+additionally recorded on the synced GitHub issue body (`acs-ticket:
+{ticket_id}`, via the description templates' `## Notes`/`## Goal` section),
+and `/acs:create-pr` adds a native `Closes #<external_key>` reference in the
+PR body (`## Ticket` section) when the ticket is synced to `github`. This is
+how ids show up in issues/PRs day to day — see `create-ticket`, `create-pr`,
+and `merge-pr` for the full mechanism.
 
 ### models — choose per-role models
 

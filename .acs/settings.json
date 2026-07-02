@@ -46,7 +46,7 @@
   "formats": {
     "branch_name": "{type}/{ticket_id}-{slug}",
     "commit_message": "{ticket_id} {summary}",
-    "pr_title": "[{ticket_id}] {title}",
+    "pr_title": "[{ticket_ref}] {title}",
     "pr_description_template": "pr-default",
     "tickets": {
       "epic": {
