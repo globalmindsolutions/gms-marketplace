@@ -434,6 +434,16 @@ Purpose: turn a raw user prompt into a well-formed ticket.
   one, and applicable Project fields (Status, Type); a field the schema does
   not define is surfaced, not silently skipped. `local` (unsynced) tickets are
   unaffected.
+- **Fan-out tracker sync (standing behavior, MAR-84):** the tracker-sync set
+  Step 5 syncs is the root ticket (unless it is an import) plus **every child
+  minted during epic fan-out** (Step 4) — no fanned-out child is left
+  unsynced. Product-flow delivery tickets ("Product definition (PRD)",
+  "Product architecture doc set") are excluded from this set and always stay
+  unsynced. A sync failure for any one ticket in the set is surfaced (never
+  silently swallowed) and does not abort the rest of the batch; that ticket's
+  `external` stays `null` for a later retry. `external` is written into each
+  synced ticket's own `ticket.json` by the deterministic write seam
+  `record-external.py`.
 
 ## 2. `/create-design` *(conditional)*
 

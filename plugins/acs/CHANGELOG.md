@@ -50,6 +50,26 @@ the notes.
   tickets are unaffected; no enforced `pr_title`/`branch_name`/`commit_message`
   format string and no placeholder vocabulary changed.
 
+### Fixed
+
+- **`/acs:create-ticket` now syncs every fanned-out epic child to the tracker,
+  not just the root ticket (MAR-84).** Epic children minted during Step 4 fan-out
+  were never pushed to GitHub/Jira — Step 5's sync sequence only ever ran once,
+  for the root, leaving every child's `external` `null`. Step 5 (both
+  `create-ticket/SKILL.md` and `create-ticket-executor.md`) now defines a
+  "tickets to sync" set (`root, unless imported` + `every child minted in Step
+  4`, excluding product-flow delivery titles) and wraps the existing
+  `gh`/`acli` sequence in a per-ticket loop, reusing the field-fill checklist
+  verbatim for each ticket. A new stdlib-only helper,
+  `plugins/acs/hooks/scripts/record-external.py`, is the deterministic write
+  seam that stamps `external = {provider, key}` into one ticket's own
+  `ticket.json` (and refuses, as defense in depth, to write onto a
+  product-flow ticket). A per-ticket `gh`/`acli` failure is surfaced as a
+  finding naming the ticket id and error and no longer aborts the rest of the
+  batch — the loop continues, and the failed ticket's `external` stays `null`
+  for a later retry. Product-flow delivery tickets ("Product definition
+  (PRD)", "Product architecture doc set") remain unsynced by design.
+
 ## [0.3.3] - 2026-07-01
 
 ### Fixed

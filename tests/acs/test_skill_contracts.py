@@ -2081,5 +2081,95 @@ class TestReconcileTicketIssueLinkage(unittest.TestCase):
             "changed as part of the reconciliation convention (MAR-75 AC-5, R-1)")
 
 
+class TestFanoutTrackerSyncLoop(unittest.TestCase):
+    """MAR-84 spec 01: pin the fan-out tracker-sync loop prose contract across
+    create-ticket/SKILL.md and create-ticket-executor.md. Written TDD-first
+    (RED before the Step 5 loop/record-external.py edits land); turns GREEN
+    once spec 01 is implemented. Additive only — no existing assertion in
+    this file (incl. TestReconcileTicketIssueLinkage's MAR-75 tests) is
+    modified, per AC-5's regression gate."""
+
+    def skill_path(self, name):
+        return os.path.join(PLUGIN, "skills", name, "SKILL.md")
+
+    def agent_path(self, skill, role):
+        return os.path.join(PLUGIN, "agents", "%s-%s.md" % (skill, role))
+
+    def _bodies(self):
+        return {
+            "create-ticket/SKILL.md": read(self.skill_path("create-ticket")),
+            "create-ticket-executor.md": read(self.agent_path("create-ticket", "executor")),
+        }
+
+    def test_loop_token_co_occurs_with_gh_issue_create(self):
+        """AC-2/AC-6: both files contain a per-ticket iteration token
+        ('tickets to sync' / 'for each ticket to sync') co-occurring, within a
+        bounded window, with the existing gh-sync sequence token
+        ('gh issue create') — proving the loop actually wraps the sync
+        sequence rather than sitting disconnected from it."""
+        for name, body in self._bodies().items():
+            self.assertIsNotNone(
+                re.search(r"(?is)(tickets to sync|for each ticket to sync)"
+                          r".{0,1500}gh issue create|"
+                          r"gh issue create.{0,1500}(tickets to sync|for each ticket to sync)",
+                          body),
+                "%s must co-locate a per-ticket iteration token with "
+                "'gh issue create' within a bounded window (MAR-84 AC-2/AC-6)" % name)
+
+    def test_record_external_co_occurs_with_external(self):
+        """AC-2/AC-6: both files reference record-external.py co-occurring
+        with 'external' — proving the write step names the new helper, not
+        just generic 'write external' prose."""
+        for name, body in self._bodies().items():
+            self.assertIsNotNone(
+                re.search(r"(?is)record-external\.py.{0,200}external|"
+                          r"external.{0,200}record-external\.py", body),
+                "%s must reference record-external.py co-occurring with "
+                "'external' (MAR-84 AC-2/AC-6)" % name)
+
+    def test_per_child_failure_surfaced_never_aborts_batch(self):
+        """AC-3: both files state a per-ticket sync failure is
+        surfaced/reported and does not abort the batch — a
+        'never...silently'/'surfaced' token co-occurring with a
+        'continue'/'other children'/'does not abort' token."""
+        for name, body in self._bodies().items():
+            self.assertIsNotNone(
+                re.search(r"(?is)(never.{0,40}silently|surfaced|reported)"
+                          r".{0,400}(continue|other (ticket|child)|does not abort|"
+                          r"never.{0,20}abort)|"
+                          r"(continue|other (ticket|child)|does not abort|"
+                          r"never.{0,20}abort).{0,400}"
+                          r"(never.{0,40}silently|surfaced|reported)", body),
+                "%s must state a per-ticket sync failure is surfaced and does "
+                "not abort the batch (MAR-84 AC-3)" % name)
+
+    def test_product_flow_exclusion_stated(self):
+        """AC-4: both files explicitly state the sync set excludes
+        product-flow delivery tickets."""
+        for name, body in self._bodies().items():
+            self.assertIsNotNone(
+                re.search(r"(?is)product.flow.{0,300}(exclud|never sync|unsynced|"
+                          r"not sync)|"
+                          r"(exclud|never sync|unsynced|not sync).{0,300}product.flow",
+                          body),
+                "%s must state the sync set excludes product-flow delivery "
+                "tickets (MAR-84 AC-4)" % name)
+
+    def test_mar75_tokens_survive_the_loop_edit(self):
+        """AC-5: the existing MAR-75 prose contract this spec's edits sit
+        beside stays intact — re-run the exact assertions
+        TestReconcileTicketIssueLinkage pins for create-ticket/SKILL.md, as a
+        belt-and-suspenders regression guard co-located with this ticket's
+        own test class."""
+        body = read(self.skill_path("create-ticket"))
+        self.assertIsNotNone(
+            re.search(r"(?s)gh issue create.{0,1200}acs-ticket:|acs-ticket:.{0,1200}gh issue create", body),
+            "create-ticket/SKILL.md Step 5 must still co-locate 'acs-ticket:' "
+            "with 'gh issue create' after the loop edit (MAR-84 AC-5 / MAR-75 AC-1)")
+        self.assertIn("ACS", body)
+        self.assertIsNotNone(re.search(r"(?i)assignee", body))
+        self.assertIsNotNone(re.search(r"(?i)milestone", body))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ from . import s03_resume_and_verify
 from . import s04_skill_triggers
 from . import s05_session_end
 from . import s06_update_migration
+from . import s07_fanout_tracker_sync
 
 SCENARIOS = [
     s01_install_gate_smoke,
@@ -18,4 +19,5 @@ SCENARIOS = [
     s04_skill_triggers,
     s05_session_end,
     s06_update_migration,
+    s07_fanout_tracker_sync,
 ]

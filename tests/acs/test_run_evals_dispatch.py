@@ -22,10 +22,10 @@ RUN_EVALS = os.path.join(REPO_ROOT, "evals", "run_evals.py")
 
 
 class DispatchAcsPluginTest(unittest.TestCase):
-    """--plugin acs routes to evals/acs/run_evals.py which lists 6 scenarios."""
+    """--plugin acs routes to evals/acs/run_evals.py which lists 7 scenarios."""
 
     def test_plugin_acs_list_shows_six_scenarios(self):
-        """--plugin acs --list must list exactly 6 scenarios without import error."""
+        """--plugin acs --list must list exactly 7 scenarios without import error."""
         result = subprocess.run(
             [sys.executable, RUN_EVALS, "--plugin", "acs", "--list"],
             capture_output=True,
@@ -38,12 +38,12 @@ class DispatchAcsPluginTest(unittest.TestCase):
                          + result.stderr)
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
         self.assertEqual(
-            len(lines), 6,
-            "Expected 6 scenario lines, got %d:\n%s" % (len(lines), result.stdout),
+            len(lines), 7,
+            "Expected 7 scenario lines, got %d:\n%s" % (len(lines), result.stdout),
         )
 
     def test_plugin_acs_list_scenario_names(self):
-        """The 6 acs scenario names appear in --list output."""
+        """The 7 acs scenario names appear in --list output."""
         result = subprocess.run(
             [sys.executable, RUN_EVALS, "--plugin", "acs", "--list"],
             capture_output=True,
@@ -59,6 +59,7 @@ class DispatchAcsPluginTest(unittest.TestCase):
             "skill_triggers",
             "session_end",
             "update_migration",
+            "fanout_tracker_sync",
         ):
             self.assertIn(name, result.stdout,
                           "Scenario '%s' missing from --list output" % name)
