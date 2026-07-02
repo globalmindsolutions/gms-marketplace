@@ -21,9 +21,9 @@ Stdlib-only, runtime-agnostic. Shape mirrors clarify.py / new-ticket.py:
 argparse with subparsers, JSON to stdout, sys.exit non-zero on failure.
 
 Usage:
-  pr-conventions.py render-title --template "[{ticket_id}] {title}" \\
+  pr-conventions.py render-title --template "[{ticket_ref}] {title}" \\
       --ticket-id MAR-72 --type task --title "Fix thing" \\
-      --summary "..." --external-key ""
+      --summary "..." --external-key "" --provider ""
 
   pr-conventions.py check --title "[MAR-72] Fix thing" \\
       --body-file pr-body.md --require-label ACS \\
@@ -59,7 +59,16 @@ _PLACEHOLDER_RE = re.compile(r"\{[a-z_]+\}")
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
-def build_title(template, ticket_id, type_, title, summary, external_key):
+def compute_ticket_ref(provider, ticket_id, external_key):
+    """AC-1/AC-2/AC-3: tracker-native reference when synced, else local id."""
+    if provider == "github" and external_key:
+        return "#%s" % external_key
+    if provider == "jira" and external_key:
+        return external_key
+    return ticket_id or ""
+
+
+def build_title(template, ticket_id, type_, title, summary, external_key, provider=""):
     """Render the PR title via acs_lib.render_format — the AC-1 mechanism.
 
     No re-implementation: this is a thin mapping-builder around the existing
@@ -71,6 +80,7 @@ def build_title(template, ticket_id, type_, title, summary, external_key):
         "title": title or "",
         "summary": summary or "",
         "external_key": external_key or "",
+        "ticket_ref": compute_ticket_ref(provider, ticket_id, external_key),
     }
     return lib.render_format(template, mapping)
 
@@ -137,6 +147,7 @@ def _add_render_title_parser(sub):
     p.add_argument("--title", default="")
     p.add_argument("--summary", default="")
     p.add_argument("--external-key", default="")
+    p.add_argument("--provider", default="")
     return p
 
 
@@ -177,6 +188,7 @@ def main(argv=None):
             title=args.title,
             summary=args.summary,
             external_key=args.external_key,
+            provider=args.provider,
         )
         print(title)
         sys.exit(0)

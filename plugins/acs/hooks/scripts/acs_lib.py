@@ -58,7 +58,7 @@ PRODUCT_TICKET_TITLES = {
 FORMAT_PLACEHOLDERS = {
     "branch_name": {"ticket_id", "type", "slug", "external_key"},
     "commit_message": {"ticket_id", "type", "summary", "external_key"},
-    "pr_title": {"ticket_id", "type", "title", "summary", "external_key"},
+    "pr_title": {"ticket_id", "type", "title", "summary", "external_key", "ticket_ref"},
     "ticket_title": {"ticket_id", "type", "title", "external_key"},
 }
 

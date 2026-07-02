@@ -131,7 +131,8 @@ exact error — no silent fallback.
    ```bash
    python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pr-conventions.py" render-title \
      --template "<settings.formats.pr_title>" --ticket-id <ticket_id> --type <ticket.type> \
-     --title "<title-value>" --summary "<summary>" --external-key "<ticket.external.key or empty>"
+     --title "<title-value>" --summary "<summary>" --external-key "<ticket.external.key or empty>" \
+     --provider "<ticket.external.provider or empty>"
    ```
 
    `<title-value>` and `<summary>` are derived exactly as before (from
@@ -174,6 +175,13 @@ exact error — no silent fallback.
      --sections "<settings.enforcement.pr_description_sections, comma-joined>" \
      --ticket-prefix <settings.ticket_prefix>
    ```
+
+   `--pr-title-format` here resolves the SAME committed `settings.formats.pr_title`
+   value that step 2's `--template` used to render the title — one
+   settings-sourced format string, never a hardcoded literal and never
+   re-derived independently for the self-check, identical to the value
+   `check-conventions.py` reads in CI. This is what keeps producer-render,
+   self-check, and CI enforcement from drifting.
 
    - **On pass** (exit 0 / `passed: true`): proceed to step 5 unchanged.
    - **On failure** (exit 1 / `passed: false`): this reports structured

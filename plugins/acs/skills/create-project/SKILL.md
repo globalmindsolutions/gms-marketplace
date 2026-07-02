@@ -241,7 +241,8 @@ git -C <checkout_root> push -u origin task/SHOP-3-project-scaffold
 gh label create ACS --color 5319E7 --description "Created by the acs pipeline" 2>/dev/null || true
 python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pr-conventions.py" render-title \
   --template "<settings.formats.pr_title>" --ticket-id <ticket_id> --type task \
-  --title "Project scaffold" --summary "<summary>" --external-key "<ticket.external.key or empty>"
+  --title "Project scaffold" --summary "<summary>" --external-key "<ticket.external.key or empty>" \
+  --provider "<ticket.external.provider or empty>"
 ```
 
    **Pre-open self-check** — before `gh pr create`, self-check the rendered

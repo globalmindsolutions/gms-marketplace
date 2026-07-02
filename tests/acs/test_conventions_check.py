@@ -71,6 +71,29 @@ class FormatToRegexTests(unittest.TestCase):
         self.assertTrue(rx.match("[A.B-9] hi"))
         self.assertFalse(rx.match("[AxB-9] hi"))  # '.' is literal, not any-char
 
+    def test_ticket_ref_accepts_local_github_and_jira_shapes(self):
+        rx = cc.format_to_regex("[{ticket_ref}] {title}", "MAR")
+        self.assertTrue(rx.match("[MAR-80] Render PR title"))   # AC-3 local/unsynced
+        self.assertTrue(rx.match("[#161] Render PR title"))     # AC-1 GitHub
+        self.assertTrue(rx.match("[ACME-9] Render PR title"))   # AC-2 Jira
+
+    def test_ticket_ref_rejects_malformed_shapes(self):
+        rx = cc.format_to_regex("[{ticket_ref}] {title}", "MAR")
+        self.assertFalse(rx.match("[] Render PR title"))          # empty bracket content
+        self.assertFalse(rx.match("MAR-80 Render PR title"))      # missing brackets
+        self.assertFalse(rx.match("[#abc] Render PR title"))      # '#' followed by non-digits
+        self.assertFalse(rx.match("[161] Render PR title"))       # bare number, no '#' prefix
+
+    def test_ticket_ref_custom_prefix_is_escaped(self):
+        rx = cc.format_to_regex("[{ticket_ref}] {title}", "A.B")
+        self.assertTrue(rx.match("[A.B-9] hi"))
+        self.assertFalse(rx.match("[AxB-9] hi"))  # '.' is literal, not any-char
+
+    def test_example_ticket_ref_has_no_leaked_token(self):
+        example = cc._example("[{ticket_ref}] {title}", "MAR")
+        self.assertIn("MAR-12", example)
+        self.assertNotIn("{ticket_ref}", example)
+
 
 class EvaluatePrTests(unittest.TestCase):
     def assertPasses(self, res):
@@ -114,6 +137,22 @@ class EvaluatePrTests(unittest.TestCase):
         s = settings(enforcement={"checks": {"commit_message": True}})
         commits = ["Merge branch 'main' into x", "MAR-12 real work"]
         self.assertPasses(cc.evaluate(s, ctx(commits=commits), "pr"))
+
+    def test_ticket_ref_pr_title_passes_unsynced_local_id(self):
+        s = settings(formats={"pr_title": "[{ticket_ref}] {title}"})
+        self.assertPasses(cc.evaluate(s, ctx(title="[MAR-80] Render PR title"), "pr"))
+
+    def test_ticket_ref_pr_title_passes_github_synced(self):
+        s = settings(formats={"pr_title": "[{ticket_ref}] {title}"})
+        self.assertPasses(cc.evaluate(s, ctx(title="[#161] Render PR title"), "pr"))
+
+    def test_ticket_ref_pr_title_passes_jira_synced(self):
+        s = settings(formats={"pr_title": "[{ticket_ref}] {title}"})
+        self.assertPasses(cc.evaluate(s, ctx(title="[ACME-9] Render PR title"), "pr"))
+
+    def test_ticket_ref_pr_title_fails_empty_bracket(self):
+        s = settings(formats={"pr_title": "[{ticket_ref}] {title}"})
+        self.assertFails(cc.evaluate(s, ctx(title="[] Render PR title"), "pr"), "pr_title")
 
 
 class ExemptionTests(unittest.TestCase):

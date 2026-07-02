@@ -227,7 +227,8 @@ gh label create ACS 2>/dev/null || true                # create the label if mis
   ```bash
   python3 "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/pr-conventions.py" render-title \
     --template "<settings.formats.pr_title>" --ticket-id <ticket_id> --type <ticket.type> \
-    --title "<delivery ticket's title>" --summary "<summary>" --external-key "<ticket.external.key or empty>"
+    --title "<delivery ticket's title>" --summary "<summary>" --external-key "<ticket.external.key or empty>" \
+    --provider "<ticket.external.provider or empty>"
   ```
 
   Default `[{ticket_id}] {title}`, e.g. `[MAR-51] Amend PRD: add org-level

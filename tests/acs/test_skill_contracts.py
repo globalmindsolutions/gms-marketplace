@@ -652,6 +652,37 @@ class TestCreatePrConventionWiring(unittest.TestCase):
         self.assertIn("acli jira workitem comment", body,
                       "AC-5 [create-pr]: jira tracker-sync invocation must survive")
 
+    def test_render_title_call_includes_provider(self):
+        """MAR-80 spec 03 AC-1/AC-2/AC-3: the render-title call site passes
+        --provider so build_title's compute_ticket_ref (spec 01) can compute
+        the tracker-native reference. Bounded-window co-occurrence pattern,
+        mirroring test_title_rendered_via_helper_not_prose."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIsNotNone(
+            re.search(r"(?s)render-title.{0,400}--provider|--provider.{0,400}render-title", body),
+            "MAR-80 [create-pr]: render-title must co-occur with --provider within a bounded window")
+
+    def test_pre_open_check_and_render_share_same_pr_title_format(self):
+        """MAR-80 spec 03: step 4's --pr-title-format and step 2's --template
+        must be documented as resolving the SAME committed
+        settings.formats.pr_title value -- no per-provider template
+        branching, no independently-hardcoded literal."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIsNotNone(
+            re.search(r"(?s)--pr-title-format.{0,600}(SAME|same).{0,200}settings\.formats\.pr_title", body),
+            "MAR-80 [create-pr]: step 4 narrative must state --pr-title-format "
+            "resolves the SAME settings.formats.pr_title value step 2's --template uses")
+
+    def test_r4_closes_linkage_fence_untouched(self):
+        """MAR-80 R4 fence: the Closes #{external_key} body-fill mechanism
+        (MAR-75) is a separate mechanism from title rendering and must not be
+        touched by spec 03's wiring."""
+        body = read(self.skill_path("create-pr"))
+        self.assertIn("Closes #{external_key}", body,
+                      "R4 fence: Closes #{external_key} bullet must survive untouched")
+        self.assertIn("GitHub-native issue link", body,
+                      "R4 fence: GitHub-native issue link mechanism must survive untouched")
+
 
 class TestProductSkillConventionWiring(unittest.TestCase):
     """MAR-72 spec 03: pin the identical deterministic-render + pre-open
@@ -721,6 +752,17 @@ class TestProductSkillConventionWiring(unittest.TestCase):
         self.assertIn("states.pr", body)
         self.assertIn("gh pr checks", body)
         self.assertIn("--watch", body)
+
+    def test_render_title_call_includes_provider(self):
+        """MAR-80 spec 03 AC-1/AC-2/AC-3: each product skill's render-title
+        call site passes --provider so build_title's compute_ticket_ref
+        (spec 01) can compute the tracker-native reference -- the same
+        uniform mechanism as create-pr, no per-skill carve-out."""
+        for skill in self.SKILLS:
+            body = read(self.skill_path(skill))
+            self.assertIsNotNone(
+                re.search(r"(?s)render-title.{0,400}--provider|--provider.{0,400}render-title", body),
+                "%s: render-title must co-occur with --provider within a bounded window" % skill)
 
 
 class TestCodeSkillEscalation(unittest.TestCase):
@@ -2067,8 +2109,11 @@ class TestReconcileTicketIssueLinkage(unittest.TestCase):
 
     def test_init_documents_reconciliation_convention(self):
         """AC-5 (prose proof + R-1 guard): init/SKILL.md's formats section
-        notes the reconciliation convention and explicitly states no enforced
-        format string changed as part of it."""
+        notes the reconciliation convention. Since MAR-80 (which makes
+        pr_title provider-aware), the block must instead state that pr_title
+        renders the tracker's native reference when synced and the local id
+        when unsynced, while branch_name/commit_message stay id-based and
+        unconditional."""
         body = read(self.skill_path("init"))
         self.assertIsNotNone(
             re.search(r"(?s)acs-ticket:.{0,800}Closes #|Closes #.{0,800}acs-ticket:", body),
@@ -2076,9 +2121,19 @@ class TestReconcileTicketIssueLinkage(unittest.TestCase):
             "convention and the Closes # PR-body convention within a bounded "
             "window (MAR-75 AC-5)")
         self.assertIsNotNone(
-            re.search(r"(?i)no.{0,20}(enforced )?format.{0,120}chang", body),
-            "init/SKILL.md must explicitly state no enforced format string "
-            "changed as part of the reconciliation convention (MAR-75 AC-5, R-1)")
+            re.search(r"(?is)pr_title.{0,200}(tracker|synced)|"
+                      r"(tracker|synced).{0,200}pr_title", body),
+            "init/SKILL.md must explicitly state that pr_title renders the "
+            "tracker's native reference when synced (MAR-80 AC-1/AC-2/AC-3, "
+            "AC-6)")
+        self.assertIsNotNone(
+            re.search(r"(?is)branch_name.{0,200}commit_message.{0,120}"
+                      r"(id-based|unconditional)|"
+                      r"(id-based|unconditional).{0,200}branch_name.{0,120}"
+                      r"commit_message", body),
+            "init/SKILL.md must explicitly state that branch_name and "
+            "commit_message remain id-based and unconditional in every case "
+            "(MAR-80 AC-4 scope-fence)")
 
 
 class TestFanoutTrackerSyncLoop(unittest.TestCase):

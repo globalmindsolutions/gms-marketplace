@@ -125,12 +125,12 @@
       "additionalProperties": true
     },
     "formats": {
-      "description": "Formats for generated artifacts. Inline fields use {placeholder} syntax; an unknown placeholder is a validation error (pre-hooks exit 2). branch_name MUST embed {ticket_id}. Description templates are referenced by built-in name (pr-default, epic-default, story-default, task-default), repo-relative name under .acs/templates/, or absolute path.",
+      "description": "Formats for generated artifacts. Inline fields use {placeholder} syntax; an unknown placeholder is a validation error (pre-hooks exit 2). branch_name MUST embed {ticket_id}. {ticket_ref} is pr_title-scoped only -- it renders the tracker's native reference when the ticket is synced (#<issue-number> for github, <JIRA-KEY> for jira) and the local ticket id when unsynced; it is not valid in branch_name or commit_message. Description templates are referenced by built-in name (pr-default, epic-default, story-default, task-default), repo-relative name under .acs/templates/, or absolute path.",
       "type": "object",
       "properties": {
         "branch_name": {"type": "string", "pattern": ".*\\{ticket_id\\}.*", "default": "{type}/{ticket_id}-{slug}"},
         "commit_message": {"type": "string", "default": "{ticket_id} {summary}"},
-        "pr_title": {"type": "string", "default": "[{ticket_id}] {title}"},
+        "pr_title": {"type": "string", "default": "[{ticket_ref}] {title}"},
         "pr_description_template": {"type": "string", "default": "pr-default"},
         "tickets": {
           "type": "object",
